@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.htht.algorithm.data.mapper.TransformMapper">
+    <!-- 方法1：生成 3857坐标系 的圆形WKT（输入：圆心4326 WKT + 半径（米）） -->
+    <select id="generateCircleWkt3857" resultType="java.lang.String">
+        -- 核心：先在3857生成准确米级缓冲区，再转回4326，最后转为WKT
+        SELECT ST_AsText(
+                       -- 步骤2：在3857坐标系下生成圆形缓冲区
+                       ST_Buffer(
+                           -- 步骤1：将圆心WKT（4326）转换为3857坐标系
+                           ST_Transform(
+                               ST_GeomFromText(#{bo.centerWkt}, 4326),
+                               3857
+                           ),
+                           #{bo.radius} -- 半径（单位：米）
+                       )
+               )  AS circle_wkt_3857;
+    </select>
+
+    <!-- 方法2：生成 4326坐标系 的圆形WKT（输入：圆心4326 WKT + 半径（米）） -->
+    <select id="generateCircleWkt4326" resultType="java.lang.String">
+        -- 核心：先在3857生成准确米级缓冲区，再转回4326，最后转为WKT
+        SELECT ST_AsText(
+                   -- 步骤3：将3857缓冲区转回4326坐标系（经纬度）
+                   ST_Transform(
+                       -- 步骤2：在3857坐标系下生成圆形缓冲区
+                       ST_Buffer(
+                           -- 步骤1：将圆心WKT（4326）转换为3857坐标系
+                           ST_Transform(
+                               ST_GeomFromText(#{bo.centerWkt}, 4326),
+                               3857
+                           ),
+                           #{bo.radius} -- 半径（单位：米）
+                       ),
+                       4326 -- 目标坐标系：4326（经纬度）
+                   )
+               ) AS circle_wkt_4326;
+    </select>
+</mapper>

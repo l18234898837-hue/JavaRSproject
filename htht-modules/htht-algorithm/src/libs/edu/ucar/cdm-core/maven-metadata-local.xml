@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <groupId>edu.ucar</groupId>
+  <artifactId>cdm-core</artifactId>
+  <versioning>
+    <release>5.5.3</release>
+    <versions>
+      <version>5.5.3</version>
+    </versions>
+    <lastUpdated>20260729093843</lastUpdated>
+  </versioning>
+</metadata>

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.htht</groupId>
+    <artifactId>htht-common-bom</artifactId>
+    <version>4.8.0</version>
+    <packaging>pom</packaging>
+
+    <properties>
+        <revision>4.8.0</revision>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- 核心模块 -->
+            <dependency>
+                <groupId>com.htht</groupId>
+                <artifactId>htht-common-core</artifactId>
+                <version>${revision}</version>
+            </dependency>
+
+            <!-- 核心模块 -->
+            <dependency>
+                <groupId>com.htht</groupId>
+                <artifactId>htht-common-framework</artifactId>
+                <version>${revision}</version>
+            </dependency>
+
+            <!-- 核心模块 -->
+            <dependency>
+                <groupId>com.htht</groupId>
+                <artifactId>htht-common-job</artifactId>
+                <version>${revision}</version>
+            </dependency>
+
+            <!-- 核心模块 -->
+            <dependency>
+                <groupId>com.htht</groupId>
+                <artifactId>htht-common-oss</artifactId>
+                <version>${revision}</version>
+            </dependency>
+
+            <!-- 核心模块 -->
+            <dependency>
+                <groupId>com.htht</groupId>
+                <artifactId>htht-common-sms</artifactId>
+                <version>${revision}</version>
+            </dependency>
+
+            <!-- 核心模块 -->
+            <dependency>
+                <groupId>com.htht</groupId>
+                <artifactId>htht-common-websocket</artifactId>
+                <version>${revision}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+
+</project>

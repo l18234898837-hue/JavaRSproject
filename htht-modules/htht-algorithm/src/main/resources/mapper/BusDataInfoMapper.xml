@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.htht.algorithm.data.mapper.BusDataInfoMapper">
+
+    <select id="getDataInfoListByCondition" resultType="com.htht.algorithm.data.domain.BusDataInfo">
+        select D.* from(SELECT
+        A.ID AS ID,
+        A.NAME AS NAME,
+        A.TYPE AS TYPE,
+        A.product_time AS productTime,
+        A.actual_time AS asactualTime,
+        A.description AS description,
+        A.lng_min AS lngMin,
+        A.lng_max AS lngMax,
+        A.lat_min AS latMin,
+        A.lat_max AS latMax,
+        A.keywords AS keyWords,
+        A.remark AS remark,
+        A.data_type AS dataType,
+        A.extent as extent,
+        A.meta_data as metaData,
+        A.min_level as minLevel,
+        A.max_level as maxLevel,
+        C.catalog_id as catalogId
+        FROM
+        bus_catalog_data_info C inner join bus_data_info A on C.data_id=A.id
+        where C.catalog_id IN
+        <foreach collection="bo.datasets" item="datasetId" open="(" close=")" separator=",">
+            #{datasetId}
+        </foreach>
+        <if test="bo.beginTime!=null and bo.endTime!=null">
+            and A.product_time between TO_DATE(#{bo.beginTime},'YYYY-MM-DD') and TO_DATE(#{bo.endTime},'YYYY-MM-DD')
+        </if>) D
+        <choose>
+            <!--地图选择-->
+            <when test="bo.local.type==1 and bo.local.value.type!='no'">
+                <choose>
+                    <!--圆形：需要单独处理-->
+                    <when test="bo.local.value.type=='circle'">
+                        where
+                        ST_Intersects(ST_Transform(D.extent,3857),st_buffer(ST_Transform(ST_GeomFromText(#{bo.local.value.center.wkt},4326),3857),#{bo.local.value.radius}))
+                    </when>
+                    <otherwise>
+                        where ST_Intersects(D.extent,ST_GeomFromText(#{bo.local.value.wkt},4326))
+                    </otherwise>
+                </choose>
+            </when>
+            <!--行政区-->
+            <when test="bo.local.type==2">
+                <if test="bo.local.value.prov!=0">
+                    left join bus_region_info E
+                    on ST_Intersects(D.extent,E.geometry) where
+                    <choose>
+                        <when test="bo.city!=0">
+                            E.code=#{bo.local.value.city}
+                        </when>
+                        <otherwise>
+                            E.code=#{bo.local.value.prov}
+                        </otherwise>
+                    </choose>
+                </if>
+            </when>
+            <!--经纬度-->
+            <when test="bo.local.type==3">
+                where ST_Intersects(D.extent,ST_GeomFromText(#{bo.local.value.wkt},4326))
+            </when>
+        </choose>
+    </select>
+
+
+    <select id="getDataInfoListByConditionAndUser" resultType="com.htht.algorithm.data.domain.BusDataInfo">
+        select D.* from(SELECT
+        A.ID AS ID,
+        A.NAME AS NAME,
+        A.TYPE AS TYPE,
+        A.product_time AS productTime,
+        A.actual_time AS asactualTime,
+        A.description AS description,
+        A.lng_min AS lngMin,
+        A.lng_max AS lngMax,
+        A.lat_min AS latMin,
+        A.lat_max AS latMax,
+        A.keywords AS keyWords,
+        A.remark AS remark,
+        A.data_type AS dataType,
+        A.extent as extent,
+        A.meta_data as metaData,
+        A.min_level as minLevel,
+        A.max_level as maxLevel,
+        C.catalog_id as catalogId
+        FROM
+        st_user_catalog_data_info C inner join bus_data_info A on C.data_id=A.id
+        where C.catalog_id IN
+        <foreach collection="bo.datasets" item="datasetId" open="(" close=")" separator=",">
+            #{datasetId}
+        </foreach>
+        and C.user_id=#{bo.userId}
+        <if test="bo.beginTime!=null and bo.endTime!=null">
+            and A.product_time between TO_DATE(#{bo.beginTime},'YYYY-MM-DD') and TO_DATE(#{bo.endTime},'YYYY-MM-DD')
+        </if>) D
+        <choose>
+            <!--地图选择-->
+            <when test="bo.local.type==1 and bo.local.value.type!='no'">
+                <choose>
+                    <!--圆形：需要单独处理-->
+                    <when test="bo.local.value.type=='circle'">
+                        where
+                        ST_Intersects(ST_Transform(D.extent,3857),st_buffer(ST_Transform(ST_GeomFromText(#{bo.local.value.center.wkt},4326),3857),#{bo.local.value.radius}))
+                    </when>
+                    <otherwise>
+                        where ST_Intersects(D.extent,ST_GeomFromText(#{bo.local.value.wkt},4326))
+                    </otherwise>
+                </choose>
+            </when>
+            <!--行政区-->
+            <when test="bo.local.type==2">
+                <if test="bo.local.value.prov!=0">
+                    left join bus_region_info E
+                    on ST_Intersects(D.extent,E.geometry) where
+                    <choose>
+                        <when test="bo.city!=0">
+                            E.code=#{bo.local.value.city}
+                        </when>
+                        <otherwise>
+                            E.code=#{bo.local.value.prov}
+                        </otherwise>
+                    </choose>
+                </if>
+            </when>
+            <!--经纬度-->
+            <when test="bo.local.type==3">
+                where ST_Intersects(D.extent,ST_GeomFromText(#{bo.local.value.wkt},4326))
+            </when>
+        </choose>
+    </select>
+
+
+
+    <select id="getDataInfoListByConditionAndAll" resultType="com.htht.algorithm.data.domain.BusDataInfo">
+        select D.* from(SELECT
+        A.ID AS ID,
+        A.NAME AS NAME,
+        A.TYPE AS TYPE,
+        A.product_time AS productTime,
+        A.actual_time AS asactualTime,
+        A.description AS description,
+        A.lng_min AS lngMin,
+        A.lng_max AS lngMax,
+        A.lat_min AS latMin,
+        A.lat_max AS latMax,
+        A.keywords AS keyWords,
+        A.remark AS remark,
+        A.data_type AS dataType,
+        A.extent as extent,
+        A.meta_data as metaData,
+        A.min_level as minLevel,
+        A.max_level as maxLevel,
+        C.catalog_id as catalogId
+        FROM
+        bus_catalog_data_info C inner join bus_data_info A on C.data_id=A.id
+        where C.catalog_id IN
+        <foreach collection="bo.datasets" item="datasetId" open="(" close=")" separator=",">
+            #{datasetId}
+        </foreach>
+        <if test="bo.beginTime!=null and bo.endTime!=null">
+            and A.product_time between TO_DATE(#{bo.beginTime},'YYYY-MM-DD') and TO_DATE(#{bo.endTime},'YYYY-MM-DD')
+        </if>
+
+        UNION ALL
+
+        SELECT
+        A.ID AS ID,
+        A.NAME AS NAME,
+        A.TYPE AS TYPE,
+        A.product_time AS productTime,
+        A.actual_time AS asactualTime,
+        A.description AS description,
+        A.lng_min AS lngMin,
+        A.lng_max AS lngMax,
+        A.lat_min AS latMin,
+        A.lat_max AS latMax,
+        A.keywords AS keyWords,
+        A.remark AS remark,
+        A.data_type AS dataType,
+        A.extent as extent,
+        A.meta_data as metaData,
+        A.min_level as minLevel,
+        A.max_level as maxLevel,
+        C.catalog_id as catalogId
+        FROM
+        st_user_catalog_data_info C inner join bus_data_info A on C.data_id=A.id
+        where C.catalog_id IN
+        <foreach collection="bo.datasets" item="datasetId" open="(" close=")" separator=",">
+            #{datasetId}
+        </foreach>
+       and C.user_id=#{bo.userId}
+        <if test="bo.beginTime!=null and bo.endTime!=null">
+            and A.product_time between TO_DATE(#{bo.beginTime},'YYYY-MM-DD') and TO_DATE(#{bo.endTime},'YYYY-MM-DD')
+        </if>
+                                                                             ) D
+        <choose>
+            <!--地图选择-->
+            <when test="bo.local.type==1 and bo.local.value.type!='no'">
+                <choose>
+                    <!--圆形：需要单独处理-->
+                    <when test="bo.local.value.type=='circle'">
+                        where
+                        ST_Intersects(ST_Transform(D.extent,3857),st_buffer(ST_Transform(ST_GeomFromText(#{bo.local.value.center.wkt},4326),3857),#{bo.local.value.radius}))
+                    </when>
+                    <otherwise>
+                        where ST_Intersects(D.extent,ST_GeomFromText(#{bo.local.value.wkt},4326))
+                    </otherwise>
+                </choose>
+            </when>
+            <!--行政区-->
+            <when test="bo.local.type==2">
+                <if test="bo.local.value.prov!=0">
+                    left join bus_region_info E
+                    on ST_Intersects(D.extent,E.geometry) where
+                    <choose>
+                        <when test="bo.city!=0">
+                            E.code=#{bo.local.value.city}
+                        </when>
+                        <otherwise>
+                            E.code=#{bo.local.value.prov}
+                        </otherwise>
+                    </choose>
+                </if>
+            </when>
+            <!--经纬度-->
+            <when test="bo.local.type==3">
+                where ST_Intersects(D.extent,ST_GeomFromText(#{bo.local.value.wkt},4326))
+            </when>
+        </choose>
+    </select>
+
+
+    <select id="checkDataIntersects" resultType="java.lang.Boolean">
+        select ST_INTERSECTS(A.extent, B.extent)
+        from (SELECT extent from bus_data_info where id = #{id1}) A,
+             (SELECT extent from bus_data_info where id = #{id2}) B
+    </select>
+    <select id="statistic" resultType="java.util.Map">
+        select
+        <if test="groupField!=null and groupField!=''">
+            "${groupField}",
+        </if>
+        "${oneField}"
+        <if test="twoField!=null and twoField!=''">
+            ,"${twoField}"
+        </if>
+        ,sum("${statsField}") as sum from shp_${id} group by
+        <if test="groupField!=null and groupField!=''">
+            "${groupField}",
+        </if>
+        "${oneField}"
+        <if test="twoField!=null and twoField!=''">
+            ,"${twoField}"
+        </if>
+    </select>
+</mapper>

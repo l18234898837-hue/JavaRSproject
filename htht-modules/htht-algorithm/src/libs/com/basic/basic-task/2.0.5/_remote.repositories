@@ -1,0 +1,6 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Thu May 22 17:00:32 CST 2025
+basic-task-2.0.5.jar>insecure-repo=
+basic-task-2.0.5.jar>public-release=
+basic-task-2.0.5.pom>insecure-repo=
+basic-task-2.0.5.pom>public-release=

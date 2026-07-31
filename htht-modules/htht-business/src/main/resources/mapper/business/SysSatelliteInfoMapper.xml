@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.htht.business.mapper.SysSatelliteInfoMapper">
+
+    <select id="dictSysSatelliteInfo"
+        resultType="com.htht.business.domain.vo.DictVO">
+        select satellite_name as label, id as value from sys_satellite_info wtia where satellite_name is not null and del_flag ='0' order by 1 desc
+    </select>
+</mapper>

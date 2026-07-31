@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.htht.algorithm.data.mapper.StIslandInfoMapper">
+
+    <select id="pageStIslandInfo"
+        resultType="com.htht.algorithm.data.domain.StIslandInfo"
+        parameterType="com.htht.algorithm.data.domain.vo.StIslandInfoQueryVO">
+        SELECT id, archipelago, standard_name, chinese_name, latitude, longitude, parent_id, level, ST_AsText(geom) geom,
+               del_flag, create_by, create_time, update_by, update_time
+        FROM st_island_info
+        WHERE del_flag = '0'
+        <if test="queryVO.archipelago != null and queryVO.archipelago != ''">
+            and archipelago = #{queryVO.archipelago}
+        </if>
+        <if test="queryVO.standardName != null and queryVO.standardName != ''">
+            and standard_name like concat('%', #{queryVO.standardName}, '%')
+        </if>
+        <if test="queryVO.chineseName != null and queryVO.chineseName != ''">
+            and chinese_name like concat('%', #{queryVO.chineseName}, '%')
+        </if>
+        order by update_time desc
+    </select>
+
+    <select id="getStIslandInfo"
+            resultType="com.htht.algorithm.data.domain.StIslandInfo">
+        SELECT id, archipelago, standard_name, chinese_name, latitude, longitude, parent_id, level, ST_AsText(geom) geom,
+        del_flag, create_by, create_time, update_by, update_time
+        FROM st_island_info
+        WHERE del_flag = '0' and id = #{id}
+    </select>
+
+</mapper>

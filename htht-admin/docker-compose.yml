@@ -1,0 +1,24 @@
+services:
+  htht-admin:
+    image: htht-admin:latest
+    ports:
+      - "8080:8080"
+      - "8888:8888"
+    environment:
+      - SERVER_PORT=8080
+      - TILE_SERVER_PORT=8888
+      # 1. 设置时区
+      - TZ=Asia/Shanghai
+      # 2. 设置系统字符集为UTF-8（关键）
+      - LANG=zh_CN.UTF-8
+      # 3. 指定Java启动参数（强制JVM使用UTF-8编码，核心！）
+      - JAVA_OPTS=-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8
+    volumes:
+      - /home/st/htht/server:/htht/server
+      - /home/python:/htht/python
+    depends_on:
+      - redis
+  redis:
+    image: docker.1ms.run/redis:latest
+    ports:
+      - "6379:6379"

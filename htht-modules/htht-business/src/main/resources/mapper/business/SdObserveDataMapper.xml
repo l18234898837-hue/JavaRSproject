@@ -1,0 +1,273 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.htht.business.mapper.SdObserveDataMapper">
+
+    <select id="getObserveListByCondition" resultType="com.htht.business.domain.vo.SdObserveDataVo">
+        select
+        A.id as id,
+        A.sd_id as sdId,
+        A.site as site,
+        A."date" as "date",
+        A."time" as "time",
+        A.water_depth as waterDepth,
+        A.longitude as longitude,
+        A.latitude as latitude,
+        A.spm as spm,
+        A.pim as pim,
+        A.pom as pom,
+        A.pim_per as pimPer,
+        A.pom_per as pomPer,
+        A.chla as chla,
+        A.sst as sst,
+        A.salinity as salinity,
+        A.ag as ag,
+        A.s as s,
+        A.cdom as cdom,
+        A.tsm as tsm,
+        A.ssh as ssh,
+        A.wind as wind,
+        A."current" as "current",
+        A.device_model as deviceModel
+        FROM
+        sd_observe_data A
+        <where>
+            <!-- 水深区间 -->
+            <if test="dto.waterDepthStart != null">
+                AND A.water_depth &gt;= #{dto.waterDepthStart}
+            </if>
+            <if test="dto.waterDepthEnd != null">
+                AND A.water_depth &lt;= #{dto.waterDepthEnd}
+            </if>
+
+            <if test="dto.sdId!=null">
+                AND A.sd_id=#{dto.sdId}
+            </if>
+
+            <!-- spm 区间 -->
+            <if test="dto.spmStart != null">
+                AND A.spm &gt;= #{dto.spmStart}
+            </if>
+            <if test="dto.spmEnd != null">
+                AND A.spm &lt;= #{dto.spmEnd}
+            </if>
+
+            <!-- pim 区间 -->
+            <if test="dto.pimStart != null">
+                AND A.pim &gt;= #{dto.pimStart}
+            </if>
+            <if test="dto.pimEnd != null">
+                AND A.pim &lt;= #{dto.pimEnd}
+            </if>
+
+            <!-- pom 区间 -->
+            <if test="dto.pomStart != null">
+                AND A.pom &gt;= #{dto.pomStart}
+            </if>
+            <if test="dto.pomEnd != null">
+                AND A.pom &lt;= #{dto.pomEnd}
+            </if>
+
+            <!-- pimPer 区间 -->
+            <if test="dto.pimPerStart != null">
+                AND A.pim_per &gt;= #{dto.pimPerStart}
+            </if>
+            <if test="dto.pimPerEnd != null">
+                AND A.pim_per &lt;= #{dto.pimPerEnd}
+            </if>
+
+            <!-- pomPer 区间 -->
+            <if test="dto.pomPerStart != null">
+                AND A.pom_per &gt;= #{dto.pomPerStart}
+            </if>
+            <if test="dto.pomPerEnd != null">
+                AND A.pom_per &lt;= #{dto.pomPerEnd}
+            </if>
+
+            <!-- chla 区间 -->
+            <if test="dto.chlaStart != null">
+                AND A.chla &gt;= #{dto.chlaStart}
+            </if>
+            <if test="dto.chlaEnd != null">
+                AND A.chla &lt;= #{dto.chlaEnd}
+            </if>
+
+            <!-- sst 区间 -->
+            <if test="dto.sstStart != null">
+                AND A.sst &gt;= #{dto.sstStart}
+            </if>
+            <if test="dto.sstEnd != null">
+                AND A.sst &lt;= #{dto.sstEnd}
+            </if>
+
+            <!-- salinity 区间 -->
+            <if test="dto.salinityStart != null">
+                AND A.salinity &gt;= #{dto.salinityStart}
+            </if>
+            <if test="dto.salinityEnd != null">
+                AND A.salinity &lt;= #{dto.salinityEnd}
+            </if>
+
+            <!-- tsm 区间 -->
+            <if test="dto.tsmStart != null">
+                AND A.tsm &gt;= #{dto.tsmStart}
+            </if>
+            <if test="dto.tsmEnd != null">
+                AND A.tsm &lt;= #{dto.tsmEnd}
+            </if>
+
+            <!-- ssh 区间 -->
+            <if test="dto.sshStart != null">
+                AND A.ssh &gt;= #{dto.sshStart}
+            </if>
+            <if test="dto.sshEnd != null">
+                AND A.ssh &lt;= #{dto.sshEnd}
+            </if>
+
+            <!-- wind 区间 -->
+            <if test="dto.windStart != null">
+                AND A.wind &gt;= #{dto.windStart}
+            </if>
+            <if test="dto.windEnd != null">
+                AND A.wind &lt;= #{dto.windEnd}
+            </if>
+
+            <!-- current 区间 -->
+            <if test="dto.currentStart != null">
+                AND A."current" &gt;= #{dto.currentStart}
+            </if>
+            <if test="dto.currentEnd != null">
+                AND A."current" &lt;= #{dto.currentEnd}
+            </if>
+
+            <!-- ag 区间 -->
+            <if test="dto.agStart != null">
+                AND A.ag &gt;= #{dto.agStart}
+            </if>
+            <if test="dto.agEnd != null">
+                AND A.ag &lt;= #{dto.agEnd}
+            </if>
+
+            <!-- s 区间 -->
+            <if test="dto.sStart != null">
+                AND A.s &gt;= #{dto.sStart}
+            </if>
+            <if test="dto.sEnd != null">
+                AND A.s &lt;= #{dto.sEnd}
+            </if>
+
+            <!-- cdom 区间 -->
+            <if test="dto.cdomStart != null and dto.cdomStart != ''">
+                AND A.cdom &gt;= #{dto.cdomStart}
+            </if>
+            <if test="dto.cdomEnd != null and dto.cdomEnd != ''">
+                AND A.cdom &lt;= #{dto.cdomEnd}
+            </if>
+
+            <!-- 仪器类型多选 -->
+            <if test="dto.deviceModeList!=null and dto.deviceModeList.size>0">
+                AND A.device_mode in
+                <foreach collection="dto.deviceModeList" item="item" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+
+            <!-- 日期条件 -->
+            <choose>
+                <when test="dto.dateQueryType==1 and dto.startDate!=null and dto.endDate!=null">
+                    AND A."date" between #{dto.startDate} and #{dto.endDate}
+                </when>
+                <when test="dto.dateQueryType==2 and dto.monthList!=null and dto.monthList.size>0">
+                    AND EXTRACT(MONTH FROM A.date) IN
+                    <foreach collection="dto.monthList" item="month" open="(" separator="," close=")">
+                        #{month}
+                    </foreach>
+                </when>
+                <when test="dto.dateQueryType==3 and dto.yearList!=null and dto.yearList.size>0">
+                    AND EXTRACT(YEAR FROM A.date) IN
+                    <foreach collection="dto.yearList" item="year" open="(" separator="," close=")">
+                        #{year}
+                    </foreach>
+                </when>
+            </choose>
+
+            <!-- 地图条件 -->
+            <choose>
+                <when test="dto.mapQueryType==1 and dto.wkt != null and dto.wkt!='' ">
+                    AND ST_Intersects(A.geom,ST_GeomFromText(#{dto.wkt},4326))
+                </when>
+                <when test="dto.mapQueryType==2 and dto.wkt != null and dto.wkt!='' and dto.radius != null">
+                    AND A.geom IS NOT NULL
+                    AND ST_Intersects(ST_Transform(A.geom,3857),st_buffer(ST_Transform(ST_GeomFromText(#{dto.wkt},4326),3857),#{dto.radius}))
+                </when>
+                <when test="dto.mapQueryType==3 and dto.siteList !=null and dto.siteList.size>0">
+                    AND A.site IN
+                    <foreach collection="dto.siteList" item="site" open="(" separator="," close=")">
+                        #{site}
+                    </foreach>
+                </when>
+            </choose>
+        </where>
+    </select>
+
+
+    <!-- 1. 查询 sd_observe_data 的所有字段最大最小值 -->
+    <select id="getObserveDataMaxMin" resultType="com.htht.business.domain.vo.SdObserveIntervalVo">
+        SELECT
+            MIN(water_depth)     AS waterDepthStart,
+            MAX(water_depth)     AS waterDepthEnd,
+
+            MIN(spm)             AS spmStart,
+            MAX(spm)             AS spmEnd,
+
+            MIN(pim)             AS pimStart,
+            MAX(pim)             AS pimEnd,
+
+            MIN(pom)             AS pomStart,
+            MAX(pom)             AS pomEnd,
+
+            MIN(pim_per)         AS pimPerStart,
+            MAX(pim_per)         AS pimPerEnd,
+
+            MIN(pom_per)         AS pomPerStart,
+            MAX(pom_per)         AS pomPerEnd,
+
+            MIN(chla)            AS chlaStart,
+            MAX(chla)            AS chlaEnd,
+
+            MIN(sst)             AS sstStart,
+            MAX(sst)             as sstEnd,
+
+            MIN(salinity)        AS salinityStart,
+            MAX(salinity)        AS salinityEnd,
+
+            MIN(tsm)             AS tsmStart,
+            MAX(tsm)             AS tsmEnd,
+
+            MIN(ssh)             AS sshStart,
+            MAX(ssh)             AS sshEnd,
+
+            MIN(wind)            AS windStart,
+            MAX(wind)            AS windEnd,
+
+            MIN(current)         AS currentStart,
+            MAX(current)         AS currentEnd,
+
+            MIN(ag)              AS agStart,
+            MAX(ag)              AS agEnd,
+
+            MIN(s)               AS sStart,
+            MAX(s)               AS sEnd,
+
+            MIN(cdom)            AS cdomStart,
+            MAX(cdom)            AS cdomEnd
+        FROM sd_observe_data
+    </select>
+
+    <!-- 2. 单独查询波长的最大最小值 -->
+    <select id="getWavelengthMaxMin" resultType="com.htht.business.domain.vo.SdObserveIntervalVo">
+        SELECT
+            MIN(wavelength)      AS wavelengthStart,
+            MAX(wavelength)      AS wavelengthEnd
+        FROM sd_wavelength_data
+    </select>
+</mapper>

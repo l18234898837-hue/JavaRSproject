@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.htht</groupId>
+        <artifactId>htht-server</artifactId>
+        <version>4.8.0</version>
+    </parent>
+
+    <artifactId>htht-common</artifactId>
+    <packaging>pom</packaging>
+    <description>
+        common 通用模块
+    </description>
+    <modules>
+        <module>htht-common-bom</module>
+        <module>htht-common-core</module>
+        <module>htht-common-framework</module>
+        <module>htht-common-job</module>
+        <module>htht-common-oss</module>
+        <module>htht-common-sms</module>
+        <module>htht-common-websocket</module>
+        <module>htht-common-thread</module>
+    </modules>
+
+
+</project>
