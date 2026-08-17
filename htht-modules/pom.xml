@@ -10,6 +10,7 @@
     <module>htht-demo</module>
     <module>htht-business</module>
     <module>htht-algorithm</module>
+    <module>htht-multisource</module>
     <module>satellite-orbit</module>
   </modules>
   <artifactId>htht-modules</artifactId>
