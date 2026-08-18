@@ -45,6 +45,7 @@ nbdist/
 !*/build/*.html
 !*/build/*.xml
 /.vscode/settings.json
+.worktrees/
 
 
 htht-modules/htht-business/src/test/
