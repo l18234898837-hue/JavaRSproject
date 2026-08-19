@@ -111,7 +111,8 @@ Repository adapters map domain records explicitly:
 - each candidate file maps to `rs_task_input_asset` with `(task_id, role,
   ordinal)` uniqueness, including its `storageUriSnapshot`;
 - a `TaskStage` maps to `rs_task_stage` and always retains its task ID,
-  stage key, status, and attempt;
+  stage key, status, and attempt. Its stage type is resolved from the owning
+  task's versioned `plan_snapshot`, avoiding a second mutable representation;
 - an `Artifact` maps to `rs_artifact` with URI and checksum preserved;
 - a `ProcessingBatch` maps to `rs_processing_batch` before child tasks.
 

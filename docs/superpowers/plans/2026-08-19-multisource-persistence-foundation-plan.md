@@ -73,7 +73,7 @@ Expected: scripts are absent.
 
 - [x] **Step 3: Create scripts**
 
-Create only `rs_schema_migration`, `rs_processing_batch`, `rs_processing_task`, `rs_task_input_asset`, `rs_task_product`, `rs_task_stage`, `rs_task_stage_dependency`, `rs_task_event`, `rs_artifact`, `rs_quality_result`, `rs_product_profile`, `rs_processing_capability`, `rs_profile_capability`. Use internal foreign keys, JSONB snapshots, timestamptz execution fields, event uniqueness `(stage_id, attempt, event_sequence)`, and no legacy table references. Seed only the four approved `SUPPORTED` v1 profiles.
+Create only `rs_schema_migration`, `rs_processing_batch`, `rs_processing_task`, `rs_task_input_asset`, `rs_task_product`, `rs_task_stage`, `rs_task_stage_dependency`, `rs_task_event`, `rs_artifact`, `rs_quality_result`, `rs_product_profile`, `rs_processing_capability`, `rs_profile_capability`. Use internal foreign keys, JSONB snapshots, timestamptz execution fields, event uniqueness `(stage_id, attempt, event_sequence)`, and no legacy table references. `rs_task_stage` retains execution state only; resolve the stage type from the owning task's `plan_snapshot`. Seed only the four approved `SUPPORTED` v1 profiles.
 
 - [x] **Step 4: Run green test and commit**
 

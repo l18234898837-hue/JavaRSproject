@@ -63,7 +63,6 @@ CREATE TABLE rs_task_stage (
     stage_id bigint PRIMARY KEY,
     task_id bigint NOT NULL REFERENCES rs_processing_task(task_id) ON DELETE CASCADE,
     stage_key varchar(128) NOT NULL,
-    stage_type varchar(128) NOT NULL,
     execution_status varchar(32) NOT NULL,
     attempt integer NOT NULL,
     execution_id varchar(128),

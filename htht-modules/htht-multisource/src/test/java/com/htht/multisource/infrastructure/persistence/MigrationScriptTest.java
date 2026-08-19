@@ -26,6 +26,7 @@ class MigrationScriptTest {
             "UNIQUE (stage_id, attempt, event_sequence)"
         );
         assertThat(coreSql).doesNotContain("bus_data_info", "sd_algorithm_run_record", "st_algorithm_record");
+        assertThat(coreSql).doesNotContain("stage_type");
     }
 
     @Test
