@@ -77,6 +77,9 @@ class CreateProcessingTaskUseCaseTest {
         assertThat(fakes.batches.saved()).hasSize(1);
         assertThat(fakes.tasks.saved()).hasSize(2);
         assertThat(fakes.stages.saved()).hasSize(4);
+        assertThat(fakes.tasks.saved()).allSatisfy(task ->
+            assertThat(task.name()).isEqualTo("batch-01")
+        );
     }
 
     @Test
@@ -95,6 +98,11 @@ class CreateProcessingTaskUseCaseTest {
         assertThat(fakes.tasks.saved()).singleElement().satisfies(task ->
             assertThat(task.batch().candidates()).containsExactly(candidate)
         );
+        assertThat(fakes.tasks.saved()).singleElement().satisfies(task -> {
+            assertThat(task.name()).isEqualTo("task-01");
+            assertThat(task.parameterSnapshot()).isEqualTo("{\"mode\":\"standard\"}");
+            assertThat(task.outputUri()).isEqualTo(new StorageUri("rs://output/task-01"));
+        });
     }
 
     @Test

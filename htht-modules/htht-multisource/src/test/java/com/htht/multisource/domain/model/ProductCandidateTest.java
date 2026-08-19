@@ -16,6 +16,7 @@ class ProductCandidateTest {
         "MAIN",
         0,
         new AssetReference("LOCAL_FILE", "fy3h-mersi-01.hdf"),
+        new StorageUri("rs://input/fy3h-mersi-01.hdf"),
         "sha256:main",
         true
     );
@@ -23,6 +24,7 @@ class ProductCandidateTest {
         "METADATA",
         1,
         new AssetReference("LOCAL_FILE", "fy3h-mersi-01.xml"),
+        new StorageUri("rs://input/fy3h-mersi-01.xml"),
         "sha256:metadata",
         false
     );

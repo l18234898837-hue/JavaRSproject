@@ -52,15 +52,21 @@ public final class TaskCreationCoordinator {
 
     public TaskId create(
         ProcessingBatch batch,
+        String name,
         AccessSubject subject,
         ProductCandidate candidate,
         String parameterSnapshot,
         StorageUri outputUri
     ) {
         Objects.requireNonNull(batch, "batch");
+        Objects.requireNonNull(name, "name");
         Objects.requireNonNull(subject, "subject");
         Objects.requireNonNull(candidate, "candidate");
+        Objects.requireNonNull(parameterSnapshot, "parameterSnapshot");
         Objects.requireNonNull(outputUri, "outputUri");
+        if (name.isBlank() || parameterSnapshot.isBlank()) {
+            throw new IllegalArgumentException("Processing task creation snapshots are invalid.");
+        }
         if (candidate.supportStatus() != ProductSupportStatus.SUPPORTED) {
             throw new IllegalArgumentException("Only supported candidates may create processing tasks.");
         }
@@ -69,7 +75,8 @@ public final class TaskCreationCoordinator {
         AssetAccessGrant readGrant = assetStorage.grantRead(subject, candidate.files());
         ProcessingPlan plan = planner.buildPlan(new PlanRequest(taskId, candidate, parameterSnapshot, readGrant));
         ProcessingTask task = new ProcessingTask(
-            taskId, subject, TaskLifecycleStatus.CREATED, QualityStatus.NOT_CHECKED, plan, batch, List.of(candidate)
+            taskId, name, subject, TaskLifecycleStatus.CREATED, QualityStatus.NOT_CHECKED,
+            parameterSnapshot, outputUri, plan, batch, List.of(candidate)
         );
         taskRepository.save(task);
         for (ProcessingStage stage : plan.stages()) {

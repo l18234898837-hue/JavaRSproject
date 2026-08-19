@@ -42,7 +42,7 @@ public final class CreateProcessingBatchService implements CreateProcessingBatch
         List<TaskId> taskIds = new ArrayList<>();
         for (ProductCandidate candidate : command.candidates()) {
             taskIds.add(coordinator.create(
-                batch, command.subject(), candidate, command.parameterSnapshot(), command.outputUri()
+                batch, command.name(), command.subject(), candidate, command.parameterSnapshot(), command.outputUri()
             ));
         }
         return new BatchCreationResult(batch, taskIds);

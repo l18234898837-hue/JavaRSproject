@@ -16,7 +16,7 @@
 
 **Files:** Modify `domain/model/ProcessingTask.java`, `domain/model/InputAsset.java`, `application/usecase/service/TaskCreationCoordinator.java`, related domain/application fixtures and tests.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```java
 assertThat(task.name()).isEqualTo("task-01");
@@ -25,7 +25,7 @@ assertThat(task.outputUri()).isEqualTo(new StorageUri("rs://output/task-01"));
 assertThat(asset.storageUriSnapshot()).isEqualTo(new StorageUri("rs://input/granule.hdf"));
 ```
 
-- [ ] **Step 2: Run red test**
+- [x] **Step 2: Run red test**
 
 ```powershell
 mvn -pl htht-modules\htht-multisource -am -Dtest=ProcessingTaskTest,CreateProcessingTaskUseCaseTest -DfailIfNoTests=false test
@@ -33,7 +33,7 @@ mvn -pl htht-modules\htht-multisource -am -Dtest=ProcessingTaskTest,CreateProces
 
 Expected: snapshot accessors do not compile.
 
-- [ ] **Step 3: Implement minimum record changes**
+- [x] **Step 3: Implement minimum record changes**
 
 ```java
 public record ProcessingTask(TaskId id, String name, AccessSubject creator,
@@ -47,7 +47,7 @@ public record InputAsset(String role, int ordinal, AssetReference reference,
 
 Reject blank task name/snapshot and null URI fields. Pass command name, snapshot, and URI through the coordinator; batch children use the batch name.
 
-- [ ] **Step 4: Run green test and commit**
+- [x] **Step 4: Run green test and commit**
 
 Run Step 2, expect zero failures/errors, then commit `feat: retain multisource task persistence snapshots`.
 

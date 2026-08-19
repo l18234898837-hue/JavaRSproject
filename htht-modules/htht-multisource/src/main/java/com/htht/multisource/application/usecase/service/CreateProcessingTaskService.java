@@ -39,7 +39,7 @@ public final class CreateProcessingTaskService implements CreateProcessingTaskUs
         );
         batchRepository.save(batch);
         return coordinator.create(
-            batch, command.subject(), command.candidate(), command.parameterSnapshot(), command.outputUri()
+            batch, command.name(), command.subject(), command.candidate(), command.parameterSnapshot(), command.outputUri()
         );
     }
 }

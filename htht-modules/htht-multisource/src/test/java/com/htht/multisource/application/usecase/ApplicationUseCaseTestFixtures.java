@@ -15,6 +15,7 @@ import com.htht.multisource.domain.model.ProductSupportStatus;
 import com.htht.multisource.domain.model.QualityStatus;
 import com.htht.multisource.domain.model.TaskId;
 import com.htht.multisource.domain.model.TaskLifecycleStatus;
+import com.htht.multisource.domain.model.StorageUri;
 
 import java.util.List;
 
@@ -31,6 +32,7 @@ final class ApplicationUseCaseTestFixtures {
         ProductProfileKey key = new ProductProfileKey("FY-3H-MERSI", "v1");
         InputAsset asset = new InputAsset(
             "MAIN", 0, new AssetReference("LOCAL_FILE", packageId + ".hdf"),
+            new StorageUri("rs://input/" + packageId + ".hdf"),
             "sha256:" + packageId, true
         );
         return new ProductCandidate(
@@ -51,7 +53,8 @@ final class ApplicationUseCaseTestFixtures {
             11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate)
         );
         return new ProcessingTask(
-            taskId, creator, TaskLifecycleStatus.CREATED, QualityStatus.NOT_CHECKED,
+            taskId, "task-01", creator, TaskLifecycleStatus.CREATED, QualityStatus.NOT_CHECKED,
+            "{\"mode\":\"standard\"}", new StorageUri("rs://output/task-01"),
             samplePlan(), batch, List.of(candidate)
         );
     }
