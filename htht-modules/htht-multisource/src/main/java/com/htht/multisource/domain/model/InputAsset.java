@@ -12,7 +12,8 @@ public record InputAsset(
     public InputAsset {
         Objects.requireNonNull(role, "role");
         Objects.requireNonNull(reference, "reference");
-        if (role.isBlank() || ordinal < 0) {
+        Objects.requireNonNull(checksum, "checksum");
+        if (role.isBlank() || checksum.isBlank() || ordinal < 0) {
             throw new IllegalArgumentException("Input asset role and ordinal are invalid.");
         }
     }

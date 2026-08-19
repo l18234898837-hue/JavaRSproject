@@ -6,8 +6,10 @@ public record Artifact(TaskId taskId, StageId stageId, String type, StorageUri u
 
     public Artifact {
         Objects.requireNonNull(taskId, "taskId");
+        Objects.requireNonNull(stageId, "stageId");
         Objects.requireNonNull(uri, "uri");
-        if (type == null || type.isBlank()) {
+        Objects.requireNonNull(checksum, "checksum");
+        if (type == null || type.isBlank() || checksum.isBlank()) {
             throw new IllegalArgumentException("Artifact type must not be blank.");
         }
     }
