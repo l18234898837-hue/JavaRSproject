@@ -398,7 +398,7 @@ git commit -m "feat: add multisource batch creation ports"
 - Create: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/application/usecase/service/CreateProcessingBatchService.java`
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/application/usecase/CreateProcessingTaskUseCaseTest.java`
 
-- [ ] **Step 1: Write failing tests for supported and unsafe candidates**
+- [x] **Step 1: Write failing tests for supported and unsafe candidates**
 
 ```java
 @Test
@@ -582,7 +582,7 @@ private static final class IncrementingStageIdGenerator implements StageIdGenera
 }
 ```
 
-- [ ] **Step 2: Run the focused test and confirm it fails because services are absent**
+- [x] **Step 2: Run the focused test and confirm it fails because services are absent**
 
 Run:
 
@@ -598,7 +598,7 @@ $env:Path="$env:JAVA_HOME\bin;$env:Path"
 Expected: compilation fails because `CreateProcessingBatchService` and
 `CreateProcessingTaskService` do not exist.
 
-- [ ] **Step 3: Implement the shared creation sequence**
+- [x] **Step 3: Implement the shared creation sequence**
 
 ```java
 public interface CreateProcessingTaskUseCase {
@@ -641,14 +641,14 @@ validates every selected candidate before persisting anything, creates one
 batch, calls the coordinator once per candidate, and returns
 `new BatchCreationResult(batch, taskIds)`.
 
-- [ ] **Step 4: Run the focused test and confirm it passes**
+- [x] **Step 4: Run the focused test and confirm it passes**
 
 Run the command from Step 2.
 
 Expected: `CreateProcessingTaskUseCaseTest` passes with zero failures and zero
 errors. It proves that unsafe candidates never reach `ProcessingPlanner`.
 
-- [ ] **Step 5: Commit the creation services**
+- [x] **Step 5: Commit the creation services**
 
 ```powershell
 git add htht-modules/htht-multisource/src/main/java/com/htht/multisource/application
