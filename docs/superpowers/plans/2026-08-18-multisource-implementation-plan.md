@@ -10,6 +10,17 @@
 
 ---
 
+## 2026-08-19 计划修订：应用层切片边界
+
+原 Task 3 同时包含预检、批次/任务创建、查询、调度、Worker 回调、取消、重试和超时恢复，超出了当前持久化与 Worker 契约的可验证边界。后续执行以：
+
+- `docs/superpowers/specs/2026-08-19-application-slice-boundary-design.md`
+- `docs/superpowers/plans/2026-08-19-multisource-application-slice-a-plan.md`
+
+为准。
+
+先执行新的 Slice A：多候选预检、批次/任务创建和任务详情；仅允许 `SUPPORTED` 候选进入建计划和任务创建。原 Task 3 中的 `DispatchNextStageUseCase`、`ReceiveWorkerEventUseCase`、`RecoverExpiredStageUseCase`、取消派发和重试派发不在 Slice A 实现，必须等 Task 4 的持久化边界以及 Task 6/Task 7 的版本化 `execute-stage` 契约完成后，另行形成执行编排切片计划。
+
 ### Task 1: 同步总览文档并冻结首版范围
 
 **Files:**
