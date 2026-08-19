@@ -55,7 +55,7 @@ Run Step 2, expect zero failures/errors, then commit `feat: retain multisource t
 
 **Files:** Create `script/sql/migrations/V20260819_01__create_multisource_core_tables.sql`, `V20260819_02__create_multisource_indexes.sql`, `V20260819_03__seed_multisource_profiles.sql`, and `src/test/java/com/htht/multisource/infrastructure/persistence/MigrationScriptTest.java`.
 
-- [ ] **Step 1: Write failing script test**
+- [x] **Step 1: Write failing script test**
 
 ```java
 assertThat(coreSql).contains("CREATE TABLE rs_processing_batch", "CREATE TABLE rs_task_event");
@@ -63,7 +63,7 @@ assertThat(coreSql).contains("UNIQUE (stage_id, attempt, event_sequence)");
 assertThat(coreSql).doesNotContain("bus_data_info", "sd_algorithm_run_record", "st_algorithm_record");
 ```
 
-- [ ] **Step 2: Run red test**
+- [x] **Step 2: Run red test**
 
 ```powershell
 mvn -pl htht-modules\htht-multisource -am -Dtest=MigrationScriptTest -DfailIfNoTests=false test
@@ -71,11 +71,11 @@ mvn -pl htht-modules\htht-multisource -am -Dtest=MigrationScriptTest -DfailIfNoT
 
 Expected: scripts are absent.
 
-- [ ] **Step 3: Create scripts**
+- [x] **Step 3: Create scripts**
 
 Create only `rs_schema_migration`, `rs_processing_batch`, `rs_processing_task`, `rs_task_input_asset`, `rs_task_product`, `rs_task_stage`, `rs_task_stage_dependency`, `rs_task_event`, `rs_artifact`, `rs_quality_result`, `rs_product_profile`, `rs_processing_capability`, `rs_profile_capability`. Use internal foreign keys, JSONB snapshots, timestamptz execution fields, event uniqueness `(stage_id, attempt, event_sequence)`, and no legacy table references. Seed only the four approved `SUPPORTED` v1 profiles.
 
-- [ ] **Step 4: Run green test and commit**
+- [x] **Step 4: Run green test and commit**
 
 Run Step 2, expect zero failures/errors, then commit `feat: add multisource PostgreSQL migrations`.
 
