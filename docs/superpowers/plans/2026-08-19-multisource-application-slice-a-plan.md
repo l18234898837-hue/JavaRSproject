@@ -267,7 +267,7 @@ git commit -m "feat: add multisource preflight application service"
 - Modify: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/application/usecase/CreateProcessingTaskCommand.java`
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/application/usecase/CreateProcessingTaskUseCaseTest.java`
 
-- [ ] **Step 1: Write tests for immutable commands and allocated identifiers**
+- [x] **Step 1: Write tests for immutable commands and allocated identifiers**
 
 ```java
 @Test
@@ -286,7 +286,7 @@ void batchCommandCopiesSelectedCandidates() {
 }
 ```
 
-- [ ] **Step 2: Run the focused test and confirm it fails because the command is absent**
+- [x] **Step 2: Run the focused test and confirm it fails because the command is absent**
 
 Run:
 
@@ -301,7 +301,7 @@ $env:Path="$env:JAVA_HOME\bin;$env:Path"
 
 Expected: compilation fails because `BatchCreateCommand` does not exist.
 
-- [ ] **Step 3: Implement the ports and commands**
+- [x] **Step 3: Implement the ports and commands**
 
 ```java
 public interface ProcessingBatchRepository {
@@ -373,14 +373,14 @@ public record CreateProcessingTaskCommand(
 }
 ```
 
-- [ ] **Step 4: Run the focused test and confirm it passes**
+- [x] **Step 4: Run the focused test and confirm it passes**
 
 Run the command from Step 2.
 
 Expected: `CreateProcessingTaskUseCaseTest` passes with zero failures and zero
 errors.
 
-- [ ] **Step 5: Commit the creation ports**
+- [x] **Step 5: Commit the creation ports**
 
 ```powershell
 git add htht-modules/htht-multisource/src/main/java/com/htht/multisource/application
