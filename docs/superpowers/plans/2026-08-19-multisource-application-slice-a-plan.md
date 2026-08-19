@@ -666,7 +666,7 @@ git commit -m "feat: add multisource task creation services"
 - Create: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/application/usecase/service/GetTaskDetailService.java`
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/application/usecase/GetTaskDetailUseCaseTest.java`
 
-- [ ] **Step 1: Write failing owner and non-owner detail tests**
+- [x] **Step 1: Write failing owner and non-owner detail tests**
 
 ```java
 @Test
@@ -796,7 +796,7 @@ private static final class EmptyArtifactRepository implements ArtifactRepository
 }
 ```
 
-- [ ] **Step 2: Run the focused test and confirm it fails because the detail service is absent**
+- [x] **Step 2: Run the focused test and confirm it fails because the detail service is absent**
 
 Run:
 
@@ -812,7 +812,7 @@ $env:Path="$env:JAVA_HOME\bin;$env:Path"
 Expected: compilation fails because `GetTaskDetailService` and the detail view
 types do not exist.
 
-- [ ] **Step 3: Implement immutable detail views and service**
+- [x] **Step 3: Implement immutable detail views and service**
 
 ```java
 public interface GetTaskDetailUseCase {
@@ -851,13 +851,13 @@ public record TaskDetailView(
    `ArtifactRepository.findByTaskId(taskId)` into the views above.
 5. Return `TaskDetailView` without changing task, stage, or artifact state.
 
-- [ ] **Step 4: Run the focused test and confirm it passes**
+- [x] **Step 4: Run the focused test and confirm it passes**
 
 Run the command from Step 2.
 
 Expected: `GetTaskDetailUseCaseTest` passes with zero failures and zero errors.
 
-- [ ] **Step 5: Run all Slice A tests and commit**
+- [x] **Step 5: Run all Slice A tests and commit**
 
 Run:
 
