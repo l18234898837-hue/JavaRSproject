@@ -56,7 +56,7 @@ storage and the `execute-stage` contract are implemented.
 - Create: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/application/usecase/service/PreflightProductService.java`
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/application/usecase/PreflightProductUseCaseTest.java`
 
-- [ ] **Step 1: Write the preflight test before changing production contracts**
+- [x] **Step 1: Write the preflight test before changing production contracts**
 
 Create this reusable package-local fixture class first; every test in this plan
 uses static imports for `candidate(...)`, `samplePlan()`, `subject()`, and
@@ -142,7 +142,7 @@ private static final class FakeAssetStorage implements AssetStorage {
 }
 ```
 
-- [ ] **Step 2: Run the focused test and confirm it fails because the types are absent**
+- [x] **Step 2: Run the focused test and confirm it fails because the types are absent**
 
 Run:
 
@@ -158,7 +158,7 @@ $env:Path="$env:JAVA_HOME\bin;$env:Path"
 Expected: compilation fails because `InspectionResponse`, `PreflightResult`, or
 `PreflightProductService` does not exist.
 
-- [ ] **Step 3: Implement the minimal inspection boundary**
+- [x] **Step 3: Implement the minimal inspection boundary**
 
 ```java
 public record InspectionResponse(String rulePackageVersion, List<ProductCandidate> candidates) {
@@ -240,14 +240,14 @@ public record PlanRequest(
 }
 ```
 
-- [ ] **Step 4: Run the focused test and confirm it passes**
+- [x] **Step 4: Run the focused test and confirm it passes**
 
 Run the command from Step 2.
 
 Expected: `PreflightProductUseCaseTest` passes with zero failures and zero
 errors.
 
-- [ ] **Step 5: Commit the normalized inspection contract**
+- [x] **Step 5: Commit the normalized inspection contract**
 
 ```powershell
 git add htht-modules/htht-multisource/src/main/java/com/htht/multisource/application

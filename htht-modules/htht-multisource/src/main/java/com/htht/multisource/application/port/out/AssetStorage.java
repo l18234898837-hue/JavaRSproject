@@ -13,7 +13,7 @@ import java.util.List;
 
 public interface AssetStorage {
 
-    AssetAccessGrant grantPreflightRead(AccessSubject subject, List<InputAsset> inputs);
+    AssetAccessGrant grantRead(AccessSubject subject, List<InputAsset> inputs);
 
     ExecutionGrant grant(TaskId taskId, List<InputAsset> inputs, StorageUri outputUri);
 
