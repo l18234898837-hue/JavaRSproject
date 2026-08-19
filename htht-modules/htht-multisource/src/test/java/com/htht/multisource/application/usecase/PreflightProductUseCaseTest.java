@@ -29,6 +29,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PreflightProductUseCaseTest {
 
     @Test
+    void preflightResultRejectsEmptyCandidates() {
+        assertThatThrownBy(() -> new PreflightResult("rules-2026.08", List.of()))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void preflightReturnsEveryCandidateFromInspector() {
         ProductCandidate first = candidate("fy3h-granule-01", ProductSupportStatus.SUPPORTED);
         ProductCandidate second = candidate("fy3h-granule-02", ProductSupportStatus.CANDIDATE);

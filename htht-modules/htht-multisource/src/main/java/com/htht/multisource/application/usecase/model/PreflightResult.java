@@ -14,5 +14,8 @@ public record PreflightResult(
             throw new IllegalArgumentException("Rule package version must not be blank.");
         }
         candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates"));
+        if (candidates.isEmpty()) {
+            throw new IllegalArgumentException("Preflight candidates must not be empty.");
+        }
     }
 }
