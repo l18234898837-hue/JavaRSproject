@@ -9,6 +9,8 @@ import java.util.List;
 public interface ArtifactMyBatisMapper extends BaseMapper<ArtifactEntity> {
 
     default List<ArtifactEntity> selectByTaskId(long taskId) {
-        return selectList(new LambdaQueryWrapper<ArtifactEntity>().eq(ArtifactEntity::getTaskId, taskId));
+        return selectList(new LambdaQueryWrapper<ArtifactEntity>()
+            .eq(ArtifactEntity::getTaskId, taskId)
+            .orderByAsc(ArtifactEntity::getArtifactId));
     }
 }

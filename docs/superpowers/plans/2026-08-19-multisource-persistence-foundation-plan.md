@@ -83,7 +83,7 @@ Run Step 2, expect zero failures/errors, then commit `feat: add multisource Post
 
 **Files:** Modify `htht-modules/htht-multisource/pom.xml`; create entities, mappers, and repository adapters for batch, task, task product, input asset, stage, and artifact under `src/main/java/com/htht/multisource/infrastructure/persistence`; create `RepositoryMappingTest.java`.
 
-- [ ] **Step 1: Write failing mapping test**
+- [x] **Step 1: Write failing mapping test**
 
 ```java
 ProcessingTaskEntity entity = mapper.toEntity(task);
@@ -92,7 +92,7 @@ assertThat(entity.getParameterSnapshot()).isEqualTo("{\"mode\":\"standard\"}");
 assertThat(mapper.toTask(entity, batch, candidates)).isEqualTo(task);
 ```
 
-- [ ] **Step 2: Run red test**
+- [x] **Step 2: Run red test**
 
 ```powershell
 mvn -pl htht-modules\htht-multisource -am -Dtest=RepositoryMappingTest -DfailIfNoTests=false test
@@ -100,11 +100,11 @@ mvn -pl htht-modules\htht-multisource -am -Dtest=RepositoryMappingTest -DfailIfN
 
 Expected: persistence types do not compile.
 
-- [ ] **Step 3: Add adapters**
+- [x] **Step 3: Add adapters**
 
 Add test-scope `org.postgresql:postgresql`. Use `@TableName`, input IDs, and `BaseMapper<Entity>`. Repositories implement only matching outbound ports. Task save writes task, candidates, then assets; lookup rebuilds the immutable task. ID adapters wrap an injected positive `LongSupplier`.
 
-- [ ] **Step 4: Run green test and commit**
+- [x] **Step 4: Run green test and commit**
 
 Run Step 2, expect zero failures/errors, then commit `feat: add multisource MyBatis persistence adapters`.
 
@@ -126,7 +126,7 @@ Run Step 2, expect zero failures/errors, then commit `feat: add multisource MyBa
 
 **Files:** Create `src/test/java/com/htht/multisource/infrastructure/persistence/PostgreSqlMigrationIntegrationTest.java`.
 
-- [ ] **Step 1: Write the opt-in integration test**
+- [x] **Step 1: Write the opt-in integration test**
 
 ```java
 String schema = "rs_ms_it_" + UUID.randomUUID().toString().replace("-", "");
@@ -151,7 +151,7 @@ mvn -pl htht-modules\htht-multisource -am -Dtest=PostgreSqlMigrationIntegrationT
 
 Expected: skip only when all three `MULTISOURCE_IT_*` variables are absent.
 
-- [x] **Step 3: Verify development database migrations and cleanup; repository round-trip and transaction rollback assertions remain pending.**
+- [x] **Step 3: Verify development database migrations, repository round-trip, transaction rollback, stable ordering, and cleanup.**
 
 ```powershell
 $env:MULTISOURCE_IT_JDBC_URL='jdbc:postgresql://127.0.0.1:5433/htht_rs_dev'
@@ -166,12 +166,13 @@ Expected: zero failures/errors and the random schema is absent after the test. C
 
 **Files:** Modify `docs/superpowers/plans/2026-08-18-multisource-implementation-plan.md` and this plan.
 
-- [ ] **Step 1: Link this detailed plan from broad Task 4 and mark completed steps.**
+- [x] **Step 1: Link this detailed plan from broad Task 4 and mark completed steps.**
 
-- [ ] **Step 2: Run the final regression**
+- [x] **Step 2: Run the final regression**
 
 ```powershell
 mvn -pl htht-modules\htht-multisource -am -Dtest=PreflightProductUseCaseTest,CreateProcessingTaskUseCaseTest,GetTaskDetailUseCaseTest -DfailIfNoTests=false clean test
 ```
 
-Expected: 8 tests, zero failures/errors. Commit `docs: track multisource persistence implementation`.
+Actual: 23 focused tests, zero failures/errors. The opt-in PostgreSQL suite separately passed 3 tests
+(migration/cleanup, MyBatis repository round-trip, and rollback cleanup) against random schemas.
