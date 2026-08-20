@@ -8,7 +8,7 @@
 
 **Tech Stack:** Java 17, Spring Boot 2.7, Spring MVC, JUnit 5, MockMvc, Mockito, MyBatis-Plus, PostgreSQL/PostGIS.
 
-**Implementation status (2026-08-20):** Task 1 request DTOs are implemented as immutable validated values and covered by four executed `dev`-tagged unit tests. Response DTOs remain coupled to the controller mapping task. Task 2 (expiring preflight sessions) is implemented in `htht-multisource` and covered by three executed `dev`-tagged unit tests. Task 3 (`sys_file` asset adapter) is implemented and covered by three executed `dev`-tagged unit tests, including managed-root and grant-scope checks. Controllers and Spring assembly have not yet been implemented.
+**Implementation status (2026-08-20):** Tasks 1 through 3 are implemented and covered by focused `dev`-tagged tests. Task 4 now exposes the four Slice A controller routes, preserves server-side preflight candidate snapshots, allocates logical output URIs server-side, and returns task plan/candidate/stage/artifact detail using logical identifiers only. The latest controller regression executed three tests with zero failures. Production Spring assembly (Task 5) and boundary regression (Task 6) remain pending.
 
 ---
 
@@ -119,7 +119,7 @@ Run the focused test and `git diff --check`; expect all tests to pass. Commit wi
 - Create: `htht-admin/src/test/java/com/htht/web/controller/multisource/ProcessingTaskControllerTest.java`
 - Create: `htht-admin/src/test/java/com/htht/web/controller/multisource/ProcessingBatchControllerTest.java`
 
-- [ ] **Step 1: Write failing MockMvc tests**
+- [x] **Step 1: Write failing MockMvc tests**
 
 Mock the four use cases, current-user provider, and preflight-session service. Verify:
 
@@ -132,12 +132,12 @@ GET  /api/multisource/processing-tasks/{id} -> 200 and lifecycleStatus, stages[]
 
 Also verify malformed JSON, blank names, unsupported source types, and an absent task produce the repository's normal client/error response without invoking a Worker directly.
 
-- [ ] **Step 2: Run the controller tests and confirm missing web components**
+- [x] **Step 2: Run the controller tests and confirm missing web components**
 
 Run `mvn -pl htht-admin -am -Dtest=ProcessingTaskControllerTest,ProcessingBatchControllerTest test`.
 Expected: compilation failure or missing-route failure because the controllers and DTO mappings are absent.
 
-- [ ] **Step 3: Implement thin controllers and response mapping**
+- [x] **Step 3: Implement thin controllers and response mapping**
 
 Use the project's standard response envelope and `LoginHelper.getUserId()`. Map incoming `SYS_FILE` IDs through `SysFileAssetStorageAdapter`, create `AccessSubject` from the authenticated user, then preflight and store server-side candidates before returning a token. Task and batch creation load candidates only from the owned unexpired session and consume it after successful creation. Delegate to `PreflightProductUseCase`, `CreateProcessingTaskUseCase`, `CreateProcessingBatchUseCase`, and `GetTaskDetailUseCase`; keep routes under `/api/multisource` and return no filesystem path or Worker command.
 
