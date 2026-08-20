@@ -36,8 +36,8 @@ class LocalProcessWorkerGatewayTest {
     void inspectionGatewayReturnsAllCandidatesFromVerifiedResponse() {
         LocalProcessWorkerGateway gateway = gatewayReturning("inspect", """
             {"rulePackageVersion":"rules-2026.08","candidates":[
-              {"packageId":"package-01","profileKey":{"productCode":"FY-3H-MERSI","profileVersion":"v1"},"dataShape":"SWATH_RASTER","supportStatus":"SUPPORTED","files":[{"role":"MAIN","ordinal":0,"reference":{"sourceType":"LOCAL_FILE","sourceId":"package-01.hdf"},"storageUriSnapshot":{"value":"rs://input/package-01.hdf"},"checksum":"sha256:package-01","required":true}],"confidence":0.91},
-              {"packageId":"package-02","profileKey":{"productCode":"FY-3H-MERSI","profileVersion":"v1"},"dataShape":"SWATH_RASTER","supportStatus":"CANDIDATE","files":[{"role":"MAIN","ordinal":0,"reference":{"sourceType":"LOCAL_FILE","sourceId":"package-02.hdf"},"storageUriSnapshot":{"value":"rs://input/package-02.hdf"},"checksum":"sha256:package-02","required":true}],"confidence":0.81}
+              {"packageId":"package-01","profileKey":{"productCode":"FY-3H-MERSI","profileVersion":"v1"},"dataShape":"SWATH_RASTER","supportStatus":"SUPPORTED","files":[{"role":"MAIN","ordinal":0,"reference":{"sourceType":"LOCAL_FILE","sourceId":"package-01.hdf"},"storageUriSnapshot":{"value":"rs://input/package-01.hdf"},"checksum":"sha256:package-01","required":true}],"metadataSnapshot":{},"confidence":0.91},
+              {"packageId":"package-02","profileKey":{"productCode":"FY-3H-MERSI","profileVersion":"v1"},"dataShape":"SWATH_RASTER","supportStatus":"CANDIDATE","files":[{"role":"MAIN","ordinal":0,"reference":{"sourceType":"LOCAL_FILE","sourceId":"package-02.hdf"},"storageUriSnapshot":{"value":"rs://input/package-02.hdf"},"checksum":"sha256:package-02","required":true}],"metadataSnapshot":{},"confidence":0.81}
             ]}
             """);
 
@@ -91,7 +91,8 @@ class LocalProcessWorkerGatewayTest {
     private static StageExecutionRequest stageRequest() {
         return new StageExecutionRequest(TaskId.of(101L), new StageId(201L), "CAL", 1,
             new ExecutionId("exec-01"), "1.0", "FY-3H-MERSI", "v1", "processor-1",
-            "{\"mode\":\"standard\"}", new ExecutionGrant("write-01", Instant.parse("2026-08-20T00:00:00Z")));
+            "{\"mode\":\"standard\"}", List.of(asset("package-01")), new StorageUri("rs://output/task-101"),
+            new ExecutionGrant("write-01", Instant.parse("2026-08-20T00:00:00Z")));
     }
 
     private static ProductCandidate candidate() {

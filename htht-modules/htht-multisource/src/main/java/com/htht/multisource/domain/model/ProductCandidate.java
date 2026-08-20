@@ -37,6 +37,7 @@ public record ProductCandidate(
         ProductDataShape dataShape,
         ProductSupportStatus supportStatus,
         List<InputAsset> files,
+        String metadataSnapshot,
         double confidence
     ) {
         this(
@@ -44,12 +45,27 @@ public record ProductCandidate(
             profileKey,
             dataShape,
             supportStatus,
-            new ProductPackage(packageId, profileKey, dataShape, files),
+            new ProductPackage(packageId, profileKey, dataShape, files, metadataSnapshot),
             confidence
         );
     }
 
+    public ProductCandidate(
+        String packageId,
+        ProductProfileKey profileKey,
+        ProductDataShape dataShape,
+        ProductSupportStatus supportStatus,
+        List<InputAsset> files,
+        double confidence
+    ) {
+        this(packageId, profileKey, dataShape, supportStatus, files, "{}", confidence);
+    }
+
     public List<InputAsset> files() {
         return productPackage.files();
+    }
+
+    public String metadataSnapshot() {
+        return productPackage.metadataSnapshot();
     }
 }

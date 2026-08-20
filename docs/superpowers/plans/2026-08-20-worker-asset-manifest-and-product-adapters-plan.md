@@ -61,7 +61,7 @@ Run: `.\.venv\Scripts\python.exe -m pip install -e ".[test]"; .\.venv\Scripts\py
 
 Expected: `1 passed`.
 
-- [ ] **Step 5: Commit the Worker scaffold**
+- [x] **Step 5: Commit the Worker scaffold**
 
 ```powershell
 git add rs-algorithm-worker
@@ -76,7 +76,7 @@ git commit -m "feat: scaffold multisource python worker"
 - Modify: `infrastructure/worker/WorkerContractCodec.java`, `WorkerResultTranslator.java`
 - Test: `domain/model/ProductCandidateMetadataTest.java`, `infrastructure/worker/WorkerContractCodecTest.java`
 
-- [ ] **Step 1: Write failing domain and codec tests**
+- [x] **Step 1: Write failing domain and codec tests**
 
 ```java
 @Test
@@ -87,13 +87,13 @@ void candidatePreservesObjectMetadataSnapshot() {
 }
 ```
 
-- [ ] **Step 2: Run focused Java tests and confirm the contract is absent**
+- [x] **Step 2: Run focused Java tests and confirm the contract is absent**
 
 Run Maven for `ProductCandidateMetadataTest,WorkerContractCodecTest` with `-DfailIfNoTests=false`.
 
 Expected: compilation fails for the missing metadata and stage fields.
 
-- [ ] **Step 3: Implement immutable snapshots and additive Worker fields**
+- [x] **Step 3: Implement immutable snapshots and additive Worker fields**
 
 ```java
 public record ProductPackage(String packageId, ProductProfileKey profileKey,
@@ -106,7 +106,7 @@ public record StageExecutionRequest(..., String parameterSnapshot,
 
 Copy lists defensively, require non-blank metadata JSON and non-empty stage inputs, and encode candidate `metadataSnapshot`, stage `inputs`, and `outputUri`. Require a JSON object metadata snapshot when translating inspection responses. Update all fixtures with `{}` and explicit stage inputs/output URI.
 
-- [ ] **Step 4: Re-run focused tests and commit**
+- [x] **Step 4: Re-run focused tests and commit**
 
 Run the Step 2 command; expect no database access. Then:
 

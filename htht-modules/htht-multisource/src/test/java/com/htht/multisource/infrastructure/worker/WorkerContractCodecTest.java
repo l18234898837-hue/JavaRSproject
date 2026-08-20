@@ -23,6 +23,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -44,6 +45,8 @@ class WorkerContractCodecTest {
         assertThat(root.path("payload").path("taskId").asLong()).isEqualTo(101L);
         assertThat(root.path("payload").path("stageId").asLong()).isEqualTo(201L);
         assertThat(root.path("payload").path("executionId").asText()).isEqualTo("exec-01");
+        assertThat(root.path("payload").path("inputs")).hasSize(1);
+        assertThat(root.path("payload").path("outputUri").asText()).isEqualTo("rs://output/task-101");
     }
 
     @Test
@@ -105,6 +108,7 @@ class WorkerContractCodecTest {
         return new StageExecutionRequest(
             TaskId.of(101L), new StageId(201L), "CAL", 1, new ExecutionId("exec-01"),
             "1.0", "FY-3H-MERSI", "v1", "processor-1", "{\"mode\":\"standard\"}",
+            List.of(asset()), new StorageUri("rs://output/task-101"),
             new ExecutionGrant("write-01", Instant.parse("2026-08-20T00:00:00Z"))
         );
     }
@@ -128,7 +132,7 @@ class WorkerContractCodecTest {
         return new ProductCandidate(
             "package-01", new ProductProfileKey("FY-3H-MERSI", "v1"),
             ProductDataShape.SWATH_RASTER, ProductSupportStatus.SUPPORTED,
-            java.util.List.of(asset()), 0.95
+            List.of(asset()), "{}", 0.95
         );
     }
 

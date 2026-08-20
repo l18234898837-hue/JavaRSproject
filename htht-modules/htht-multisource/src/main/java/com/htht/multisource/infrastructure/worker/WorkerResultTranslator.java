@@ -20,8 +20,10 @@ import java.util.Objects;
 
 public final class WorkerResultTranslator {
 
+    private final ObjectMapper objectMapper;
+
     public WorkerResultTranslator(ObjectMapper objectMapper) {
-        Objects.requireNonNull(objectMapper, "objectMapper");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     }
 
     public InspectionResponse toInspection(DecodedWorkerResponse response) {
@@ -73,8 +75,17 @@ public final class WorkerResultTranslator {
             new ProductProfileKey(requiredText(response, profileKey, "productCode"), requiredText(response, profileKey, "profileVersion")),
             enumValue(response, node, "dataShape", ProductDataShape.class),
             enumValue(response, node, "supportStatus", ProductSupportStatus.class),
-            files, requiredDouble(response, node, "confidence")
+            files, objectJson(response, node, "metadataSnapshot"), requiredDouble(response, node, "confidence")
         );
+    }
+
+    private String objectJson(DecodedWorkerResponse response, JsonNode parent, String field) {
+        JsonNode value = requiredObject(response, parent, field);
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception exception) {
+            throw failure(response, field + " cannot be serialized");
+        }
     }
 
     private static JsonNode requiredObject(DecodedWorkerResponse response, JsonNode parent, String field) {

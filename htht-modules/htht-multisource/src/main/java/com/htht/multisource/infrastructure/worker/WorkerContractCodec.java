@@ -34,6 +34,8 @@ public final class WorkerContractCodec {
         payload.put("profileVersion", request.profileVersion());
         payload.put("processorVersion", request.processorVersion());
         payload.put("parameterSnapshot", request.parameterSnapshot());
+        payload.set("inputs", objectMapper.valueToTree(request.inputs()));
+        payload.put("outputUri", request.outputUri().value());
         ObjectNode executionGrant = payload.putObject("executionGrant");
         executionGrant.put("grantReference", request.executionGrant().grantReference());
         executionGrant.put("expiresAt", request.executionGrant().expiresAt().toString());
