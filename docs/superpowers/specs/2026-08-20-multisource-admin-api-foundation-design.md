@@ -51,6 +51,10 @@ The in-memory store is suitable for the initial single-instance Admin deployment
 
 The Admin-side output URI allocator generates `rs://output/{userId}/{requestUuid}` for each task or batch creation request. `userId` is taken from the authenticated `AccessSubject`; `requestUuid` is generated server-side and is never supplied by the client. Batch child tasks share the batch request URI in this initial creation slice because no dispatch or artifact writer yet maps logical output URIs to final storage. The Local Worker still writes only inside its controlled `workRoot/{requestId}/output` directory. The logical URI is an immutable task snapshot and must not be treated as a client-accessible filesystem path.
 
+### Worker Deployment Configuration
+
+The application declares `multisource.worker.command`, `multisource.worker.work-root`, and `multisource.worker.timeout` in the common configuration, but their values come only from the deployment environment: `MULTISOURCE_WORKER_COMMAND`, `MULTISOURCE_WORK_ROOT`, and `MULTISOURCE_WORKER_TIMEOUT`. `MULTISOURCE_WORKER_COMMAND` is a comma-separated process argument list, for example `python,/opt/rs-algorithm-worker/main.py`; it must resolve to the environment's actual Python or container entry command. No local path is committed. The application binds these values at startup and rejects an empty command, missing work root, or non-positive timeout. Environment promotion therefore changes configuration only, not Java code, HTTP contracts, database schema, or client input.
+
 ## Explicit Deferrals
 
 The API does not yet provide task list, batch detail, capabilities, cancellation, retry, stage progress events, artifact query/download, or quality/report endpoints. Those operations depend on new application use cases and full execution orchestration: dispatch, execution IDs, event persistence, state transitions, artifact validation/registration, cancellation, retry, and timeout recovery. They require a separate design and implementation plan.

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Java 17, Spring Boot 2.7, Spring MVC, JUnit 5, MockMvc, Mockito, MyBatis-Plus, PostgreSQL/PostGIS.
 
-**Implementation status (2026-08-20):** Tasks 1 through 3 are implemented and covered by focused `dev`-tagged tests. Task 4 now exposes the four Slice A controller routes, preserves server-side preflight candidate snapshots, allocates logical output URIs server-side, and returns task plan/candidate/stage/artifact detail using logical identifiers only. The latest controller regression executed three tests with zero failures. Production Spring assembly (Task 5) and boundary regression (Task 6) remain pending.
+**Implementation status (2026-08-20):** Tasks 1 through 3 are implemented and covered by focused `dev`-tagged tests. Task 4 exposes the four Slice A controller routes, preserves server-side preflight candidate snapshots, allocates logical output URIs server-side, and returns task plan/candidate/stage/artifact detail using logical identifiers only. Task 5 now explicitly assembles the Slice A repository, Worker, asset, session, ID-generator, use-case, and authenticated-subject Bean graph. Worker command, work root, and timeout are bound from environment variables rather than repository paths. The latest configuration-context regression executed one test with zero failures. Task 6 boundary regression remains pending.
 
 ---
 
@@ -141,7 +141,7 @@ Expected: compilation failure or missing-route failure because the controllers a
 
 Use the project's standard response envelope and `LoginHelper.getUserId()`. Map incoming `SYS_FILE` IDs through `SysFileAssetStorageAdapter`, create `AccessSubject` from the authenticated user, then preflight and store server-side candidates before returning a token. Task and batch creation load candidates only from the owned unexpired session and consume it after successful creation. Delegate to `PreflightProductUseCase`, `CreateProcessingTaskUseCase`, `CreateProcessingBatchUseCase`, and `GetTaskDetailUseCase`; keep routes under `/api/multisource` and return no filesystem path or Worker command.
 
-- [ ] **Step 4: Run controller tests and commit**
+- [x] **Step 4: Run controller tests and commit**
 
 Run the two focused test classes and `git diff --check`; expect all tests to pass. Commit with `feat: expose multisource slice a api`.
 
@@ -152,20 +152,20 @@ Run the two focused test classes and `git diff --check`; expect all tests to pas
 - Create: `htht-admin/src/test/java/com/htht/config/multisource/MultiSourceAdapterConfigurationTest.java`
 - Modify: `htht-admin/pom.xml` only if dependency verification requires it.
 
-- [ ] **Step 1: Write the context wiring test**
+- [x] **Step 1: Write the context wiring test**
 
 Use a narrow Spring context with mocked infrastructure and assert that the `AssetStorage`, `PreflightProductUseCase`, `CreateProcessingTaskUseCase`, `CreateProcessingBatchUseCase`, and `GetTaskDetailUseCase` beans are present. Assert the multisource module remains free of imports from `htht-admin` or `htht-system`.
 
-- [ ] **Step 2: Run it and confirm the bean graph is missing**
+- [x] **Step 2: Run it and confirm the bean graph is missing**
 
 Run `mvn -pl htht-admin -am -Dtest=MultiSourceAdapterConfigurationTest test`.
 Expected: missing-bean failure before configuration exists.
 
-- [ ] **Step 3: Add explicit configuration**
+- [x] **Step 3: Add explicit configuration**
 
 Construct beans with constructor injection, existing repository implementations, ID generators, Worker gateway, and the `SysFileAssetStorageAdapter`. Use `${file.upload-path}` as the Worker manifest `assetRoot`, and bind Worker command, work root, and timeout from an explicit `multisource.worker` configuration prefix. Do not use component scanning to hide cross-module dependencies. Fail startup with a clear message when Worker settings are absent.
 
-- [ ] **Step 4: Run context and API regression tests and commit**
+- [x] **Step 4: Run context and API regression tests and commit**
 
 Run `mvn -pl htht-admin -am -Dtest=MultiSourceAdapterConfigurationTest,ProcessingTaskControllerTest,ProcessingBatchControllerTest test`. Expect all focused tests to pass. Commit with `feat: assemble multisource admin adapters`.
 
