@@ -236,7 +236,7 @@ Run `.\.venv\Scripts\python.exe -m pytest tests\test_contracts.py tests\test_cli
 - Create: `product_adapters/base.py`, `fy3h_mersi.py`, `hy1c_czi.py`, `fy4b_agri.py`, `hy2d_altimeter.py`
 - Create: `tests/conftest.py`, `test_fy3h_mersi.py`, `test_hy1c_czi.py`, `test_fy4b_agri.py`, `test_hy2d_altimeter.py`
 
-- [ ] **Step 1: Write real-sample tests with explicit roots**
+- [x] **Step 1: Write real-sample tests with explicit roots**
 
 ```python
 @pytest.mark.real_sample
@@ -252,19 +252,19 @@ def test_hy2d_is_along_track(hy2d_manifest):
 
 Use `MULTISOURCE_FY3H_SAMPLE_ROOT`, `MULTISOURCE_HY1C_SAMPLE_ROOT`, `MULTISOURCE_FY4B_SAMPLE_FILE`, and `MULTISOURCE_HY2D_SAMPLE_ROOT`. Skip only tests whose real root is absent; never pass raw paths as product input.
 
-- [ ] **Step 2: Run tests before implementation**
+- [x] **Step 2: Run tests before implementation**
 
 Expected: synthetic tests fail due to absent adapters; missing sample roots produce explicit skips.
 
-- [ ] **Step 3: Implement evidence-based inspection and minimal plans**
+- [x] **Step 3: Implement evidence-based inspection and minimal plans**
 
 Use HDF5/NetCDF structure and required metadata, not filenames alone. Emit one `SWATH_RASTER` candidate per FY-3H granule, HY-1C H5/XML package, `GEOSTATIONARY_RASTER` FY-4B package, and `ALONG_TRACK_OBSERVATION` HY-2D package. Reject incomplete evidence instead of guessing dataset paths; every supported plan starts with `validate-source`.
 
-- [ ] **Step 4: Run all four suites with sample variables configured**
+- [x] **Step 4: Run all four suites with sample variables configured**
 
 Expected: inspection and minimal-plan tests pass and adapters read only manifest-listed files.
 
-- [ ] **Step 5: Commit approved adapters**
+- [x] **Step 5: Commit approved adapters**
 
 ```powershell
 git add rs-algorithm-worker
