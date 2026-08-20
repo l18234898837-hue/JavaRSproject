@@ -56,9 +56,11 @@ missing payloads, duplicate JSON properties, and trailing JSON content.
 
 ## Request Payloads
 
-`inspect` contains a preflight identifier, read-only input asset snapshots,
-and a read grant. It returns every candidate recognized from the supplied
-assets, including unsupported and unknown candidates.
+`inspect` uses the envelope `requestId` as its preflight identifier and contains
+read-only input asset snapshots and a read grant. It returns every candidate
+recognized from the supplied assets, including unsupported and unknown
+candidates. No separate `preflightId` is added to the existing application
+port.
 
 `build-plan` contains a task identifier, one selected `SUPPORTED` candidate,
 an immutable parameter snapshot, and a read grant. It returns a validated
