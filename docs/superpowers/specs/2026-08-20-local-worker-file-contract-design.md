@@ -66,10 +66,12 @@ port.
 an immutable parameter snapshot, and a read grant. It returns a validated
 processing plan and its processor version.
 
-`execute-stage` contains the existing `StageExecutionRequest` fields: task and
-stage identifiers, stage key, attempt, execution identifier, profile and
-processor versions, parameter snapshot, and execution grant. Its output grant
-must be restricted to the task's output prefix.
+`execute-stage` contains task and stage identifiers, stage key, attempt,
+execution identifier, profile and processor versions, parameter snapshot, an
+immutable input-asset snapshot, a logical output URI, and an execution grant.
+Its output grant must be restricted to the task's output prefix. The local
+infrastructure maps those logical values to a per-invocation asset manifest;
+absolute paths are not part of this business envelope.
 
 All asset locations remain controlled `storageUri` values or asset references.
 No absolute local path, arbitrary command argument, credential, or unbounded

@@ -78,11 +78,11 @@ directory. The Java manifest writer rejects duplicate `storageUri`, duplicate
 path outside its configured root.
 
 For `inspect` and `build-plan`, the grant comes from `AssetAccessGrant`. For
-`execute-stage`, the manifest uses the `ExecutionGrant`; it still lists only
-the stage request's logical input assets and creates the invocation output
-directory. The current execution request does not expose an output storage
-URI, so this directory is staging only. A later orchestration slice validates
-and registers artifacts from this directory.
+`execute-stage`, the manifest uses the `ExecutionGrant`, the immutable input
+asset snapshot, and the logical output URI carried by `StageExecutionRequest`.
+It creates the invocation output directory as a staging location for that
+logical destination. A later orchestration slice validates and registers
+artifacts from this directory.
 
 ## Java Boundaries
 
@@ -95,7 +95,9 @@ it is not implemented in the domain module using arbitrary path conversion.
 work root. It creates a `WorkerAssetManifest` for one invocation and writes it
 to the invocation directory. The manifest writer owns all local path handling.
 
-`WorkerInvocation` gains the manifest JSON or an immutable manifest value.
+`StageExecutionRequest` gains immutable `List<InputAsset> inputs` and
+`StorageUri outputUri` fields. `WorkerInvocation` gains the manifest JSON or
+an immutable manifest value.
 `LocalWorkerProcessLauncher` writes `asset-manifest.json`, creates `output/`,
 and passes `--asset-manifest`. It still treats only `response.json` as the
 business result. `LocalProcessWorkerGateway` receives the manifest writer as
