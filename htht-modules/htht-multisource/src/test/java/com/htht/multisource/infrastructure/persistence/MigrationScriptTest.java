@@ -42,4 +42,22 @@ class MigrationScriptTest {
         assertThat(seedSql).contains("FY-3H-MERSI", "HY-1C-CZI", "FY-4B-AGRI", "HY-2D-ALTIMETER", "SUPPORTED");
         assertThat(seedSql).doesNotContain("CFOSAT", "SPOT");
     }
+
+    @Test
+    void forwardMigrationsAddMetadataSnapshotsAndOnlyTheBrowseCapabilityForGf6() throws IOException {
+        String snapshotSql = Files.readString(MIGRATIONS.resolve("V20260820_01__add_product_metadata_snapshots.sql"));
+        String gf6Sql = Files.readString(MIGRATIONS.resolve("V20260820_02__seed_gf6_browse_profile.sql"));
+
+        assertThat(snapshotSql).contains(
+            "ALTER TABLE rs_batch_product ADD COLUMN metadata_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb",
+            "ALTER TABLE rs_task_product ADD COLUMN metadata_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb",
+            "jsonb_typeof(metadata_snapshot) = 'object'"
+        );
+        assertThat(gf6Sql).contains("GF-6-WFV-BROWSE", "RASTER_GRID", "BROWSE_VISUAL_FEATURES");
+        assertThat(gf6Sql).contains(
+            "RADIOMETRIC_CALIBRATION", "SPECTRAL_INDEX", "RPC_ORTHORECTIFICATION",
+            "ATMOSPHERIC_CORRECTION", "SCIENTIFIC_QUALITY_MASK"
+        );
+        assertThat(gf6Sql).doesNotContain("CALIBRATION_CAPABILITY", "SPECTRAL_INDEX_CAPABILITY");
+    }
 }

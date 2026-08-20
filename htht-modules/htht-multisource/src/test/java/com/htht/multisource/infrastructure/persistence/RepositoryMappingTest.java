@@ -107,6 +107,20 @@ class RepositoryMappingTest {
     }
 
     @Test
+    void candidateMetadataSnapshotsRoundTripAcrossBatchAndTaskProducts() {
+        ProcessingTask task = sampleTask();
+        ProductCandidate candidate = task.candidates().get(0);
+
+        BatchProductEntity batchProduct = mapper.toBatchProductEntity(11L, candidate);
+        TaskProductEntity taskProduct = mapper.toProductEntities(task).get(0);
+
+        assertThat(batchProduct.getMetadataSnapshot()).isEqualTo("{\"cloudPercent\":27}");
+        assertThat(taskProduct.getMetadataSnapshot()).isEqualTo("{\"cloudPercent\":27}");
+        assertThat(mapper.toBatchCandidate(batchProduct)).isEqualTo(candidate);
+        assertThat(mapper.toCandidate(taskProduct, mapper.toInputAssetEntities(task))).isEqualTo(candidate);
+    }
+
+    @Test
     void stageAndArtifactRetainExecutionIdentifiersAndStorage() {
         TaskStage stage = new TaskStage(new StageId(201L), TaskId.of(101L), "READ", StageExecutionStatus.PENDING, 1);
         Artifact artifact = new Artifact(TaskId.of(101L), new StageId(201L), "OUTPUT", new StorageUri("rs://output/a.tif"), "sha256:a");
@@ -122,6 +136,10 @@ class RepositoryMappingTest {
         assertThat(jsonbField(ProcessingTaskEntity.class, "planSnapshot").typeHandler().getName())
             .isEqualTo("com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler");
         assertThat(jsonbField(BatchProductEntity.class, "inputAssetsSnapshot").typeHandler().getName())
+            .isEqualTo("com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler");
+        assertThat(jsonbField(BatchProductEntity.class, "metadataSnapshot").typeHandler().getName())
+            .isEqualTo("com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler");
+        assertThat(jsonbField(TaskProductEntity.class, "metadataSnapshot").typeHandler().getName())
             .isEqualTo("com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler");
     }
 
@@ -140,6 +158,7 @@ class RepositoryMappingTest {
                 "MAIN", 0, new AssetReference("LOCAL_FILE", "fy3h-granule-01.hdf"),
                 new StorageUri("rs://input/fy3h-granule-01.hdf"), "sha256:fy3h-granule-01", true
             )),
+            "{\"cloudPercent\":27}",
             0.91
         );
         ProcessingBatch batch = new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate));

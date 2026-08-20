@@ -20,6 +20,8 @@ public class BatchProductEntity {
     private Double confidence;
     @TableField(value = "input_assets_snapshot", jdbcType = JdbcType.OTHER, typeHandler = PostgreSqlJsonbTypeHandler.class)
     private String inputAssetsSnapshot;
+    @TableField(value = "metadata_snapshot", jdbcType = JdbcType.OTHER, typeHandler = PostgreSqlJsonbTypeHandler.class)
+    private String metadataSnapshot;
     public Long getBatchProductId() { return batchProductId; }
     public void setBatchProductId(Long batchProductId) { this.batchProductId = batchProductId; }
     public Long getBatchId() { return batchId; }
@@ -38,4 +40,6 @@ public class BatchProductEntity {
     public void setConfidence(Double confidence) { this.confidence = confidence; }
     public String getInputAssetsSnapshot() { return inputAssetsSnapshot; }
     public void setInputAssetsSnapshot(String inputAssetsSnapshot) { this.inputAssetsSnapshot = inputAssetsSnapshot; }
+    public String getMetadataSnapshot() { return metadataSnapshot; }
+    public void setMetadataSnapshot(String metadataSnapshot) { this.metadataSnapshot = metadataSnapshot; }
 }

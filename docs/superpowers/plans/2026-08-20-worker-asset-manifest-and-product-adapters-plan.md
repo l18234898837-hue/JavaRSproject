@@ -123,7 +123,7 @@ git commit -m "feat: preserve worker candidate metadata"
 - Modify: `BatchProductEntity.java`, `TaskProductEntity.java`, `TaskPersistenceMapper.java`
 - Test: `RepositoryAdapterTest.java`
 
-- [ ] **Step 1: Write a failing persistence round-trip test**
+- [x] **Step 1: Write a failing persistence round-trip test**
 
 ```java
 @Test
@@ -134,19 +134,19 @@ void repositoriesRoundTripCandidateMetadataSnapshot() {
 }
 ```
 
-- [ ] **Step 2: Run `RepositoryAdapterTest` and confirm missing fields**
+- [x] **Step 2: Run `RepositoryAdapterTest` and confirm missing fields**
 
 Expected: compilation fails because product entities lack `metadataSnapshot`.
 
-- [ ] **Step 3: Add forward-only migrations and JSONB mappings**
+- [x] **Step 3: Add forward-only migrations and JSONB mappings**
 
 Add `metadata_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb` with an object check to `rs_batch_product` and `rs_task_product`. Seed `GF-6-WFV-BROWSE/v1` as `RASTER_GRID/SUPPORTED`, and link only `BROWSE_VISUAL_FEATURES/v1`; its definition forbids radiometric calibration, spectral index, and orthorectification. Map with `PostgreSqlJsonbTypeHandler` and reconstruct snapshots unchanged.
 
-- [ ] **Step 4: Verify Java repository tests and disposable migrations**
+- [x] **Step 4: Verify Java repository tests and disposable migrations**
 
 Run `mvn ... -Dtest=RepositoryAdapterTest` and the existing disposable migration verification script. Expected: no writes to `public` or the development schema.
 
-- [ ] **Step 5: Commit persistence work**
+- [x] **Step 5: Commit persistence work**
 
 ```powershell
 git add script\sql\migrations htht-modules\htht-multisource\src\main htht-modules\htht-multisource\src\test

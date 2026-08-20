@@ -2,9 +2,12 @@ package com.htht.multisource.infrastructure.persistence.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler;
+import org.apache.ibatis.type.JdbcType;
 
-@TableName("rs_task_product")
+@TableName(value = "rs_task_product", autoResultMap = true)
 public class TaskProductEntity {
 
     @TableId(value = "task_product_id", type = IdType.AUTO)
@@ -16,6 +19,8 @@ public class TaskProductEntity {
     private String dataShape;
     private String supportStatus;
     private Double confidence;
+    @TableField(value = "metadata_snapshot", jdbcType = JdbcType.OTHER, typeHandler = PostgreSqlJsonbTypeHandler.class)
+    private String metadataSnapshot;
 
     public Long getTaskProductId() { return taskProductId; }
     public void setTaskProductId(Long taskProductId) { this.taskProductId = taskProductId; }
@@ -33,4 +38,6 @@ public class TaskProductEntity {
     public void setSupportStatus(String supportStatus) { this.supportStatus = supportStatus; }
     public Double getConfidence() { return confidence; }
     public void setConfidence(Double confidence) { this.confidence = confidence; }
+    public String getMetadataSnapshot() { return metadataSnapshot; }
+    public void setMetadataSnapshot(String metadataSnapshot) { this.metadataSnapshot = metadataSnapshot; }
 }

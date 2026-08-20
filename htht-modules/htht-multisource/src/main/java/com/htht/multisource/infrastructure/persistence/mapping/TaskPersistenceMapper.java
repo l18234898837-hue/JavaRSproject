@@ -84,6 +84,7 @@ public final class TaskPersistenceMapper {
             entity.setDataShape(candidate.dataShape().name());
             entity.setSupportStatus(candidate.supportStatus().name());
             entity.setConfidence(candidate.confidence());
+            entity.setMetadataSnapshot(candidate.metadataSnapshot());
             return entity;
         }).toList();
     }
@@ -112,7 +113,7 @@ public final class TaskPersistenceMapper {
         return new ProductCandidate(
             product.getPackageId(), new ProductProfileKey(product.getProductCode(), product.getProfileVersion()),
             ProductDataShape.valueOf(product.getDataShape()), ProductSupportStatus.valueOf(product.getSupportStatus()),
-            inputs, product.getConfidence()
+            inputs, product.getMetadataSnapshot(), product.getConfidence()
         );
     }
 
@@ -126,13 +127,14 @@ public final class TaskPersistenceMapper {
         entity.setSupportStatus(candidate.supportStatus().name());
         entity.setConfidence(candidate.confidence());
         entity.setInputAssetsSnapshot(writeAssets(candidate.files()));
+        entity.setMetadataSnapshot(candidate.metadataSnapshot());
         return entity;
     }
 
     public ProductCandidate toBatchCandidate(BatchProductEntity entity) {
         return new ProductCandidate(entity.getPackageId(), new ProductProfileKey(entity.getProductCode(), entity.getProfileVersion()),
             ProductDataShape.valueOf(entity.getDataShape()), ProductSupportStatus.valueOf(entity.getSupportStatus()),
-            readAssets(entity.getInputAssetsSnapshot()), entity.getConfidence());
+            readAssets(entity.getInputAssetsSnapshot()), entity.getMetadataSnapshot(), entity.getConfidence());
     }
 
     public TaskStageEntity toStageEntity(TaskStage stage) {

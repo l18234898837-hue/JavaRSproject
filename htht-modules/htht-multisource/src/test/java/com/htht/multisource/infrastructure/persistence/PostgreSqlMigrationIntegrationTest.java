@@ -59,7 +59,9 @@ class PostgreSqlMigrationIntegrationTest {
     private static final List<String> MIGRATION_FILES = List.of(
         "V20260819_01__create_multisource_core_tables.sql",
         "V20260819_02__create_multisource_indexes.sql",
-        "V20260819_03__seed_multisource_profiles.sql"
+        "V20260819_03__seed_multisource_profiles.sql",
+        "V20260820_01__add_product_metadata_snapshots.sql",
+        "V20260820_02__seed_gf6_browse_profile.sql"
     );
 
     @Test
@@ -135,7 +137,7 @@ class PostgreSqlMigrationIntegrationTest {
                     session.commit();
 
                     ProcessingBatch restoredBatch = batchRepository.findById(task.batch().id()).orElseThrow();
-                    assertThat(restoredBatch).isEqualTo(task.batch());
+                    assertBatchEquivalent(restoredBatch, task.batch());
                     ProcessingTask restoredTask = taskRepository.findById(task.id()).orElseThrow();
                     assertThat(restoredTask.name()).isEqualTo(task.name());
                     assertThat(restoredTask.creator()).isEqualTo(task.creator());
@@ -145,10 +147,14 @@ class PostgreSqlMigrationIntegrationTest {
                         .isEqualTo(new ObjectMapper().readTree(task.parameterSnapshot()));
                     assertThat(restoredTask.outputUri()).isEqualTo(task.outputUri());
                     assertThat(restoredTask.plan()).isEqualTo(task.plan());
-                    assertThat(restoredTask.batch()).isEqualTo(task.batch());
+                    assertBatchEquivalent(restoredTask.batch(), task.batch());
                     assertThat(restoredTask.candidates())
                         .extracting(ProductCandidate::packageId)
                         .containsExactly("fy3h-granule-01", "hy1c-granule-01");
+                    assertThat(restoredTask.candidates())
+                        .extracting(ProductCandidate::metadataSnapshot)
+                        .doesNotContainNull();
+                    assertCandidateMetadataEquivalent(restoredTask.candidates(), task.candidates());
                     assertThat(stageRepository.findById(stage.id())).contains(stage);
                     assertThat(stageRepository.findByTaskId(task.id())).containsExactly(stage, laterStage);
                     assertThat(artifactRepository.findByTaskId(task.id()))
@@ -251,7 +257,32 @@ class PostgreSqlMigrationIntegrationTest {
         return new ProductCandidate(packageId, new ProductProfileKey(productCode, "v1"),
             ProductDataShape.SWATH_RASTER, ProductSupportStatus.SUPPORTED,
             List.of(new InputAsset("MAIN", 0, new AssetReference("LOCAL_FILE", packageId + ".hdf"),
-                new StorageUri(uri), "sha256:" + packageId, true)), 0.91);
+                new StorageUri(uri), "sha256:" + packageId, true)), "{\"packageId\":\"" + packageId + "\"}", 0.91);
+    }
+
+    private static void assertBatchEquivalent(ProcessingBatch actual, ProcessingBatch expected) throws Exception {
+        assertThat(actual.id()).isEqualTo(expected.id());
+        assertThat(actual.name()).isEqualTo(expected.name());
+        assertThat(actual.status()).isEqualTo(expected.status());
+        assertCandidateMetadataEquivalent(actual.candidates(), expected.candidates());
+    }
+
+    private static void assertCandidateMetadataEquivalent(
+        List<ProductCandidate> actual,
+        List<ProductCandidate> expected
+    ) throws Exception {
+        assertThat(actual).hasSameSizeAs(expected);
+        ObjectMapper objectMapper = new ObjectMapper();
+        for (int index = 0; index < actual.size(); index++) {
+            assertThat(actual.get(index).packageId()).isEqualTo(expected.get(index).packageId());
+            assertThat(actual.get(index).profileKey()).isEqualTo(expected.get(index).profileKey());
+            assertThat(actual.get(index).dataShape()).isEqualTo(expected.get(index).dataShape());
+            assertThat(actual.get(index).supportStatus()).isEqualTo(expected.get(index).supportStatus());
+            assertThat(actual.get(index).files()).isEqualTo(expected.get(index).files());
+            assertThat(objectMapper.readTree(actual.get(index).metadataSnapshot()))
+                .isEqualTo(objectMapper.readTree(expected.get(index).metadataSnapshot()));
+            assertThat(actual.get(index).confidence()).isEqualTo(expected.get(index).confidence());
+        }
     }
 
     private static void runMigrations(Connection connection) throws Exception {
@@ -274,10 +305,16 @@ class PostgreSqlMigrationIntegrationTest {
         assertThat(tableExists(connection, "rs_task_event")).isTrue();
         assertThat(indexExists(connection, "idx_rs_processing_task_lifecycle")).isTrue();
         assertThat(queryInt(connection, "SELECT count(*) FROM rs_product_profile WHERE support_status = 'SUPPORTED'"))
-            .isEqualTo(4);
+            .isEqualTo(5);
         assertThat(queryString(connection, "SELECT data_type FROM information_schema.columns "
             + "WHERE table_name = 'rs_processing_task' AND column_name = 'parameter_snapshot'"))
             .isEqualTo("jsonb");
+        assertThat(queryString(connection, "SELECT data_type FROM information_schema.columns "
+            + "WHERE table_name = 'rs_task_product' AND column_name = 'metadata_snapshot'"))
+            .isEqualTo("jsonb");
+        assertThat(queryInt(connection, "SELECT count(*) FROM rs_profile_capability "
+            + "WHERE product_code = 'GF-6-WFV-BROWSE' AND capability_code = 'BROWSE_VISUAL_FEATURES'"))
+            .isEqualTo(1);
     }
 
     private static void createSchema(Connection connection, String schema) throws SQLException {
