@@ -15,6 +15,7 @@
 ## File Map
 
 - Create `htht-admin/src/main/java/com/htht/config/multisource/MultiSourceAdapterConfiguration.java`: Spring beans for asset storage, Worker gateway, repositories, ID generators, planner, and Slice A services.
+- Create `htht-admin/src/main/java/com/htht/config/multisource/ServerOutputUriAllocator.java`: creates `rs://output/{userId}/{requestUuid}` only from the authenticated subject and a server-side UUID source.
 - Create `htht-modules/htht-multisource/src/main/java/com/htht/multisource/application/port/out/PreflightSessionStore.java`: application port for owned, expiring candidate snapshots.
 - Create `htht-modules/htht-multisource/src/main/java/com/htht/multisource/infrastructure/session/InMemoryPreflightSessionStore.java`: initial atomic in-memory implementation with a 30-minute TTL.
 - Create `htht-admin/src/main/java/com/htht/config/multisource/SysFileAssetStorageAdapter.java`: resolve `SYS_FILE` IDs through `ISysFileService`, map them to immutable `InputAsset` snapshots with `rs://sys-file/{id}` URIs, issue grants, and resolve those URIs for the Worker manifest.

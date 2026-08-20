@@ -47,6 +47,10 @@ The in-memory store is suitable for the initial single-instance Admin deployment
 
 `GET /processing-tasks/{taskId}` uses the authenticated user ID to enforce domain ownership. A non-owner receives the same not-found result as an absent task. Request validation failures use the application's normal validation/error envelope. Worker command, work root, timeout, and `${file.upload-path}` are server configuration only; none is accepted in a request body.
 
+### Output URI Allocation
+
+The Admin-side output URI allocator generates `rs://output/{userId}/{requestUuid}` for each task or batch creation request. `userId` is taken from the authenticated `AccessSubject`; `requestUuid` is generated server-side and is never supplied by the client. Batch child tasks share the batch request URI in this initial creation slice because no dispatch or artifact writer yet maps logical output URIs to final storage. The Local Worker still writes only inside its controlled `workRoot/{requestId}/output` directory. The logical URI is an immutable task snapshot and must not be treated as a client-accessible filesystem path.
+
 ## Explicit Deferrals
 
 The API does not yet provide task list, batch detail, capabilities, cancellation, retry, stage progress events, artifact query/download, or quality/report endpoints. Those operations depend on new application use cases and full execution orchestration: dispatch, execution IDs, event persistence, state transitions, artifact validation/registration, cancellation, retry, and timeout recovery. They require a separate design and implementation plan.
