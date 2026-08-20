@@ -316,11 +316,11 @@ Expected: two real candidates and no scientific plan. Commit as `feat: add const
 - Modify: `docs/superpowers/plans/2026-08-18-multisource-implementation-plan.md`
 - Test: opt-in Java/Python integration test under `infrastructure/worker`
 
-- [ ] **Step 1: Add an opt-in integration test**
+- [x] **Step 1: Add an opt-in integration test**
 
 Tag it `integration` and skip unless `MULTISOURCE_GF_SAMPLE_ROOT` and `MULTISOURCE_WORKER_PYTHON` are set. Assert Java receives two `GF-6-WFV-BROWSE` candidates through the authorized manifest; do not connect to PostgreSQL.
 
-- [ ] **Step 2: Run Java and Python regressions**
+- [x] **Step 2: Run Java and Python regressions**
 
 ```powershell
 & 'C:\Users\24257\Desktop\GIS开发\.tools\apache-maven-3.9.16\bin\mvn.cmd' '-Dmaven.repo.local=C:/Users/24257/.m2/repository' -pl htht-modules\htht-multisource -am test
@@ -330,6 +330,6 @@ cd rs-algorithm-worker
 
 Expected: all unit tests pass; real integration tests run only with explicit variables.
 
-- [ ] **Step 3: Review and commit**
+- [x] **Step 3: Review and commit**
 
 Confirm Worker responses contain no absolute paths, domain code has no filesystem/Python imports, Gateway has no repository dependency, and the broad plan describes GF as visual-only. Mark only verified steps complete, then commit the adapter slice.
