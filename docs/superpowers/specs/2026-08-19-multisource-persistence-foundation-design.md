@@ -68,8 +68,9 @@ The first migration creates these `rs_` tables:
 | --- | --- |
 | `rs_schema_migration` | applied migration audit |
 | `rs_processing_batch` | explicit parent batch |
+| `rs_batch_product` | immutable batch candidate and input-asset snapshots |
 | `rs_processing_task` | task lifecycle, plan and request snapshots |
-| `rs_task_input_asset` | immutable input asset snapshots |
+| `rs_task_input_asset` | immutable input asset snapshots, associated with a candidate package |
 | `rs_task_product` | selected candidate/profile snapshots |
 | `rs_task_stage` | materialized plan stages and future lease fields |
 | `rs_task_stage_dependency` | DAG dependencies for Slice B |
@@ -108,13 +109,18 @@ Repository adapters map domain records explicitly:
 
 - a `ProcessingTask` maps to its task row and one `rs_task_product` row for
   each selected candidate;
-- each candidate file maps to `rs_task_input_asset` with `(task_id, role,
-  ordinal)` uniqueness, including its `storageUriSnapshot`;
+- each candidate file maps to `rs_task_input_asset` with its owning
+  `package_id` and `(task_id, package_id, role, ordinal)` uniqueness,
+  including its `storageUriSnapshot`; this keeps inputs distinct when multiple
+  candidates use the same role and ordinal;
 - a `TaskStage` maps to `rs_task_stage` and always retains its task ID,
   stage key, status, and attempt. Its stage type is resolved from the owning
   task's versioned `plan_snapshot`, avoiding a second mutable representation;
 - an `Artifact` maps to `rs_artifact` with URI and checksum preserved;
 - a `ProcessingBatch` maps to `rs_processing_batch` before child tasks.
+  Its selected candidates are preserved in `rs_batch_product`, including each
+  candidate's JSONB input-asset snapshot, so a batch remains readable before
+  it has child tasks.
 
 JSON snapshots are stored as JSONB. `ProcessingTask.parameterSnapshot` is
 validated as a nonblank JSON object before insertion. The plan snapshot is a

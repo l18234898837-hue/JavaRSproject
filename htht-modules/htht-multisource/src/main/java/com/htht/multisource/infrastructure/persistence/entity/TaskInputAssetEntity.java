@@ -10,6 +10,7 @@ public class TaskInputAssetEntity {
     @TableId(value = "input_asset_id", type = IdType.AUTO)
     private Long inputAssetId;
     private Long taskId;
+    private String packageId;
     private String role;
     private Integer ordinal;
     private String referenceType;
@@ -22,6 +23,8 @@ public class TaskInputAssetEntity {
     public void setInputAssetId(Long inputAssetId) { this.inputAssetId = inputAssetId; }
     public Long getTaskId() { return taskId; }
     public void setTaskId(Long taskId) { this.taskId = taskId; }
+    public String getPackageId() { return packageId; }
+    public void setPackageId(String packageId) { this.packageId = packageId; }
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }
     public Integer getOrdinal() { return ordinal; }

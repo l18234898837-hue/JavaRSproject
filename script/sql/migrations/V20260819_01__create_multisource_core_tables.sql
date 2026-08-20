@@ -16,6 +16,20 @@ CREATE TABLE rs_processing_batch (
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE rs_batch_product (
+    batch_product_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    batch_id bigint NOT NULL REFERENCES rs_processing_batch(batch_id) ON DELETE CASCADE,
+    package_id varchar(255) NOT NULL,
+    product_code varchar(128) NOT NULL,
+    profile_version varchar(64) NOT NULL,
+    data_shape varchar(64) NOT NULL,
+    support_status varchar(32) NOT NULL,
+    confidence numeric(5,4) NOT NULL,
+    input_assets_snapshot jsonb NOT NULL,
+    UNIQUE (batch_id, package_id),
+    CHECK (jsonb_typeof(input_assets_snapshot) = 'array')
+);
+
 CREATE TABLE rs_processing_task (
     task_id bigint PRIMARY KEY,
     batch_id bigint NOT NULL REFERENCES rs_processing_batch(batch_id),
@@ -48,6 +62,7 @@ CREATE TABLE rs_task_product (
 CREATE TABLE rs_task_input_asset (
     input_asset_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     task_id bigint NOT NULL REFERENCES rs_processing_task(task_id) ON DELETE CASCADE,
+    package_id varchar(255) NOT NULL,
     role varchar(64) NOT NULL,
     ordinal integer NOT NULL,
     reference_type varchar(64) NOT NULL,
@@ -55,7 +70,8 @@ CREATE TABLE rs_task_input_asset (
     storage_uri_snapshot varchar(2048) NOT NULL,
     checksum varchar(255) NOT NULL,
     required boolean NOT NULL,
-    UNIQUE (task_id, role, ordinal),
+    UNIQUE (task_id, package_id, role, ordinal),
+    FOREIGN KEY (task_id, package_id) REFERENCES rs_task_product(task_id, package_id),
     CHECK (ordinal >= 0)
 );
 

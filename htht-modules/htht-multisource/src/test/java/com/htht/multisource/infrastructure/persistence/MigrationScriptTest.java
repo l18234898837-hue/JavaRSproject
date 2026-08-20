@@ -20,10 +20,16 @@ class MigrationScriptTest {
 
         assertThat(coreSql).contains(
             "CREATE TABLE rs_processing_batch",
+            "CREATE TABLE rs_batch_product",
             "CREATE TABLE rs_processing_task",
             "CREATE TABLE rs_task_input_asset",
             "CREATE TABLE rs_task_event",
             "UNIQUE (stage_id, attempt, event_sequence)"
+        );
+        assertThat(coreSql).contains(
+            "package_id varchar(255) NOT NULL",
+            "UNIQUE (task_id, package_id, role, ordinal)",
+            "FOREIGN KEY (task_id, package_id) REFERENCES rs_task_product(task_id, package_id)"
         );
         assertThat(coreSql).doesNotContain("bus_data_info", "sd_algorithm_run_record", "st_algorithm_record");
         assertThat(coreSql).doesNotContain("stage_type");
