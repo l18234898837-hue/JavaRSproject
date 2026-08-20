@@ -92,6 +92,20 @@ public final class WorkerContractCodec {
             if (!requestId.equals(root.path("requestId").asText())) {
                 throw new WorkerProtocolException(requestId, expectedOperation, "response requestId does not match invocation");
             }
+            JsonNode error = root.get("error");
+            if (error != null && !error.isNull()) {
+                if (!error.isObject() || !error.path("code").isTextual() || error.path("code").asText().isBlank()
+                    || !error.path("message").isTextual() || error.path("message").asText().isBlank()
+                    || !error.path("retryable").isBoolean()) {
+                    throw new WorkerProtocolException(requestId, expectedOperation, "response error is incomplete");
+                }
+                throw new WorkerProtocolException(
+                    requestId,
+                    expectedOperation,
+                    "Worker error " + error.path("code").asText() + ": " + error.path("message").asText()
+                        + " (retryable=" + error.path("retryable").asBoolean() + ")"
+                );
+            }
             JsonNode payload = root.get("payload");
             if (payload == null || payload.isNull()) {
                 throw new WorkerProtocolException(requestId, expectedOperation, "response payload is required");

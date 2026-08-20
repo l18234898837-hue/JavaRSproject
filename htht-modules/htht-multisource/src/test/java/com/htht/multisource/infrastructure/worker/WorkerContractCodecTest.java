@@ -75,6 +75,19 @@ class WorkerContractCodecTest {
             .isEqualTo("package-01");
     }
 
+    @Test
+    void preservesWorkerDeclaredFailureDetails() {
+        String response = """
+            {"schemaVersion":"1.0","operation":"inspect","requestId":"req-01",
+             "error":{"code":"UNSUPPORTED_PRODUCT","message":"No supported profile.","retryable":false}}
+            """;
+
+        assertThatThrownBy(() -> codec.decodeResponse("req-01", WorkerOperation.INSPECT, response))
+            .isInstanceOf(WorkerProtocolException.class)
+            .hasMessageContaining("UNSUPPORTED_PRODUCT")
+            .hasMessageContaining("retryable=false");
+    }
+
     private static StageExecutionRequest stageRequest() {
         return new StageExecutionRequest(
             TaskId.of(101L), new StageId(201L), "CAL", 1, new ExecutionId("exec-01"),
