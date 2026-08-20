@@ -204,7 +204,7 @@ Run codec, gateway, launcher, and manifest tests; expect zero failures. Commit a
 - Create: `rs-algorithm-worker/src/rs_algorithm_worker/contracts.py`, `cli.py`, `registry.py`
 - Create: `rs-algorithm-worker/tests/test_contracts.py`, `test_cli.py`
 
-- [ ] **Step 1: Write failing Python boundary tests**
+- [x] **Step 1: Write failing Python boundary tests**
 
 ```python
 def test_rejects_manifest_uri_not_declared_by_request(tmp_path):
@@ -218,15 +218,15 @@ def test_cli_writes_response_atomically(tmp_path):
 
 Add separate tests for expiration, duplicate role/ordinal, and request ID mismatch.
 
-- [ ] **Step 2: Run tests and confirm imports fail**
+- [x] **Step 2: Run tests and confirm imports fail**
 
 Expected: collection fails because Worker contract modules are absent.
 
-- [ ] **Step 3: Implement strict envelope/manifest validation and CLI**
+- [x] **Step 3: Implement strict envelope/manifest validation and CLI**
 
 Require schema `1.0`, matching request ID, unexpired manifest, unique entries, exact request/manifest URI sets, and output containment. Convert invalid input to non-retryable `INVALID_ASSET_MANIFEST` without returning local paths. Write responses by sibling temp file plus atomic replace.
 
-- [ ] **Step 4: Run Python boundary tests and commit**
+- [x] **Step 4: Run Python boundary tests and commit**
 
 Run `.\.venv\Scripts\python.exe -m pytest tests\test_contracts.py tests\test_cli.py -q`; expect all pass. Commit as `feat: add worker file contract cli`.
 
