@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
+from PIL import Image
 
 
 def test_cli_writes_response_atomically(tmp_path):
@@ -10,7 +11,7 @@ def test_cli_writes_response_atomically(tmp_path):
     response_file = tmp_path / "response.json"
     request_file.write_text(json.dumps({
         "schemaVersion": "1.0",
-        "operation": "inspect",
+        "operation": "execute-stage",
         "requestId": "req-01",
         "payload": {"inputs": [{"storageUriSnapshot": {"value": "rs://input/a.jpg"}}]},
     }), encoding="utf-8")
@@ -23,7 +24,7 @@ def test_cli_writes_response_atomically(tmp_path):
                      "path": str(tmp_path / "a.jpg"), "checksum": "sha256:test"}],
         "output": {"path": str(tmp_path / "output")},
     }), encoding="utf-8")
-    (tmp_path / "a.jpg").write_bytes(b"sample")
+    Image.new("RGB", (2, 2), (10, 20, 30)).save(tmp_path / "a.jpg")
 
     result = subprocess.run([
         sys.executable, "-m", "rs_algorithm_worker.cli",
