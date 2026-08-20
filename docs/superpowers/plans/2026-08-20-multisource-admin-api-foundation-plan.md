@@ -8,7 +8,7 @@
 
 **Tech Stack:** Java 17, Spring Boot 2.7, Spring MVC, JUnit 5, MockMvc, Mockito, MyBatis-Plus, PostgreSQL/PostGIS.
 
-**Implementation status (2026-08-20):** Task 1 request DTOs are implemented as immutable validated values and covered by four executed `dev`-tagged unit tests. Response DTOs remain coupled to the controller mapping task. Task 2 (expiring preflight sessions) is implemented in `htht-multisource` and covered by three executed `dev`-tagged unit tests. The asset adapter, controllers, and Spring assembly have not yet been implemented.
+**Implementation status (2026-08-20):** Task 1 request DTOs are implemented as immutable validated values and covered by four executed `dev`-tagged unit tests. Response DTOs remain coupled to the controller mapping task. Task 2 (expiring preflight sessions) is implemented in `htht-multisource` and covered by three executed `dev`-tagged unit tests. Task 3 (`sys_file` asset adapter) is implemented and covered by three executed `dev`-tagged unit tests, including managed-root and grant-scope checks. Controllers and Spring assembly have not yet been implemented.
 
 ---
 
@@ -93,20 +93,20 @@ Run the focused test and `git diff --check`; expect all tests to pass. Commit wi
 - Create: `htht-admin/src/main/java/com/htht/config/multisource/SysFileAssetStorageAdapter.java`
 - Create: `htht-admin/src/test/java/com/htht/config/multisource/SysFileAssetStorageAdapterTest.java`
 
-- [ ] **Step 1: Write failing adapter tests**
+- [x] **Step 1: Write failing adapter tests**
 
 Mock `ISysFileService` with a temporary regular file below a configured upload root. Verify the adapter maps `SYS_FILE` requests to immutable `InputAsset` values with `rs://sys-file/{id}` and a stable SHA-256 checksum; verify `grantRead` returns a non-expired grant; verify the Worker resolver maps that URI back to the same server-side file. Unknown IDs, directories, paths outside the upload root, and `sourceType != SYS_FILE` must fail. Verify the adapter never reads a client-provided path.
 
-- [ ] **Step 2: Run the adapter tests and confirm the adapter is absent**
+- [x] **Step 2: Run the adapter tests and confirm the adapter is absent**
 
 Run `mvn -pl htht-admin -am -Dtest=SysFileAssetStorageAdapterTest test`.
 Expected: compilation failure for the missing adapter.
 
-- [ ] **Step 3: Implement server-side resolution and snapshotting**
+- [x] **Step 3: Implement server-side resolution and snapshotting**
 
 Load `SysFile` by ID through `ISysFileService.getById`. Resolve only its server-side `filePath`, require that its real path is a readable regular file below `${file.upload-path}`, compute SHA-256 by streaming bytes, and construct `AssetReference`, `StorageUri("rs://sys-file/{id}")`, `InputAsset`, and `AssetAccessGrant` values. Implement `LocalWorkerAssetResolver` by parsing only that URI pattern and reapplying the same root check. Do not add ownership claims that `sys_file` cannot prove; document the limitation in the class Javadoc.
 
-- [ ] **Step 4: Run the adapter tests and commit**
+- [x] **Step 4: Run the adapter tests and commit**
 
 Run the focused test and `git diff --check`; expect all tests to pass. Commit with `feat: adapt sys file assets for multisource api`.
 
