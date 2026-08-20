@@ -19,7 +19,7 @@
 - Create: `rs-algorithm-worker/src/rs_algorithm_worker/__init__.py`
 - Create: `rs-algorithm-worker/tests/test_runtime_contract.py`
 
-- [ ] **Step 1: Write the failing interpreter test**
+- [x] **Step 1: Write the failing interpreter test**
 
 ```python
 def test_runtime_requires_python_311_or_newer():
@@ -27,7 +27,7 @@ def test_runtime_requires_python_311_or_newer():
     assert sys.version_info >= (3, 11)
 ```
 
-- [ ] **Step 2: Run it in the required virtual environment**
+- [x] **Step 2: Run it in the required virtual environment**
 
 ```powershell
 cd "C:\Users\24257\Desktop\GIS开发\JavaRSproject\rs-algorithm-worker"
@@ -38,7 +38,7 @@ py -3.11 -m venv .venv
 
 Expected: Python 3.11 is available and test collection runs. If `py -3.11` is unavailable, stop for environment installation.
 
-- [ ] **Step 3: Add reproducible package metadata**
+- [x] **Step 3: Add reproducible package metadata**
 
 ```toml
 [build-system]
@@ -55,7 +55,7 @@ test = ["pytest>=8,<9"]
 rs-worker = "rs_algorithm_worker.cli:main"
 ```
 
-- [ ] **Step 4: Install and verify the runtime**
+- [x] **Step 4: Install and verify the runtime**
 
 Run: `.\.venv\Scripts\python.exe -m pip install -e ".[test]"; .\.venv\Scripts\python.exe -m pytest tests\test_runtime_contract.py -q`
 

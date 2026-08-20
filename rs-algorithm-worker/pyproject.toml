@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rs-algorithm-worker"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "Pillow>=10,<11",
+    "h5py>=3.10,<4",
+    "netCDF4>=1.6,<2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+rs-worker = "rs_algorithm_worker.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

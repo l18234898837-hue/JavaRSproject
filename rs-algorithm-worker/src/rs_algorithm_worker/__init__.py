@@ -1,0 +1,1 @@
+MINIMUM_PYTHON = (3, 11)
