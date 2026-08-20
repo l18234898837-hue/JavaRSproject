@@ -65,7 +65,7 @@ git commit -m "docs: add detailed multisource implementation plan"
 
 ---
 
-### Task 2: 扩展领域契约和产品候选模型
+### Task 2: 扩展领域契约和产品候选模型（已完成）
 
 **Files:**
 - Create: `C:\Users\24257\Desktop\GIS开发\JavaRSproject\htht-modules\htht-multisource\src\main\java\com\htht\multisource\domain\model\ProductCandidate.java`
@@ -145,7 +145,7 @@ git commit -m "feat: expand multisource domain contracts"
 
 ---
 
-### Task 3: 扩展应用层用例和出站端口
+### Task 3: 扩展应用层用例和出站端口（Slice A 已完成，执行编排待专项计划）
 
 **Files:**
 - Create: `C:\Users\24257\Desktop\GIS开发\JavaRSproject\htht-modules\htht-multisource\src\main\java\com\htht\multisource\application\usecase\CreateProcessingBatchUseCase.java`
@@ -223,7 +223,7 @@ git commit -m "feat: expand multisource application layer"
 
 ---
 
-### Task 4: 落地数据库迁移和仓储骨架
+### Task 4: 落地数据库迁移和仓储骨架（已完成）
 
 **Files:**
 - Create: `C:\Users\24257\Desktop\GIS开发\JavaRSproject\script\sql\migrations\V20260818_01__create_multisource_core_tables.sql`
@@ -336,7 +336,7 @@ git commit -m "feat: add multisource http api and adapters"
 
 ---
 
-### Task 6: 实现本地 Worker Gateway 和版本化文件契约
+### Task 6: 实现本地 Worker Gateway 和版本化文件契约（已完成）
 
 **Files:**
 - Create: `C:\Users\24257\Desktop\GIS开发\JavaRSproject\htht-modules\htht-multisource\src\main\java\com\htht\multisource\infrastructure\worker\LocalProcessWorkerGateway.java`
@@ -389,7 +389,7 @@ git commit -m "feat: add multisource local worker gateway"
 
 ---
 
-### Task 7: 落地四类首批产品适配器
+### Task 7: 落地四类首批产品适配器（已完成，并新增 GF-6 WFV 受限浏览适配）
 
 **Files:**
 - Create: `C:\Users\24257\Desktop\GIS开发\JavaRSproject\rs-algorithm-worker\pyproject.toml`
@@ -439,7 +439,7 @@ git commit -m "feat: add first multisource worker adapters"
 
 ---
 
-### Task 8: 做后端全链路验证和回归收口
+### Task 8: 做后端全链路验证和回归收口（部分完成，待 API 与执行编排完成后收口）
 
 **Files:**
 - Verify: `C:\Users\24257\Desktop\GIS开发\JavaRSproject\htht-modules\htht-multisource\src\test\java\com\htht\multisource\domain\model\ProcessingPlanValidatorTest.java`
@@ -486,6 +486,21 @@ git commit -m "feat: deliver multisource foundation slice"
 ```
 
 ---
+
+## 2026-08-20 实施状态同步
+
+本文件早期任务清单的勾选状态未在每次专项交付后回填。本节及下列专项计划是当前 feature worktree 的权威状态；早期任务正文保留，作为原始实施与验收要求。
+
+- 已完成：领域模型、应用层 Slice A（预检、批次/任务创建、归属校验的任务详情）、`rs_` 迁移与 MyBatis 持久化、本地 Worker Gateway、受控资产清单、FY-3H MERSI、HY-1C CZI、FY-4B AGRI、HY-2D 高度计和 GF-6 WFV 受限浏览适配。
+- 尚未开始：Admin Spring 装配、后端 HTTP API、生产 `AssetStorage` 适配器，以及阶段派发、Worker 事件接收、取消/重试派发、超时恢复和产物登记等执行编排。
+- 当前不能称为“完整后端已完成”。后续先为 Admin HTTP API 与装配层编写专项计划；执行编排使用独立专项计划，不能直接扩写 Slice A。
+
+专项计划索引：
+
+- `docs/superpowers/plans/2026-08-19-multisource-application-slice-a-plan.md`
+- `docs/superpowers/plans/2026-08-19-multisource-persistence-foundation-plan.md`
+- `docs/superpowers/plans/2026-08-20-local-worker-gateway-plan.md`
+- `docs/superpowers/plans/2026-08-20-worker-asset-manifest-and-product-adapters-plan.md`
 
 ### Execution Notes
 
