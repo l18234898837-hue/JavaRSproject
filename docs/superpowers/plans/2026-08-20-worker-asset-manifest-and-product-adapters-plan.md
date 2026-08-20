@@ -160,7 +160,7 @@ git commit -m "feat: persist product metadata snapshots"
 - Modify: `WorkerInvocation.java`, `LocalWorkerProcessLauncher.java`, `LocalProcessWorkerGateway.java`
 - Test: `LocalWorkerAssetManifestWriterTest.java`, `LocalWorkerProcessLauncherTest.java`, `LocalProcessWorkerGatewayTest.java`
 
-- [ ] **Step 1: Write failing manifest security tests**
+- [x] **Step 1: Write failing manifest security tests**
 
 ```java
 @Test
@@ -172,11 +172,11 @@ void rejectsResolvedPathOutsideConfiguredAssetRoot() {
 
 Add separate tests for missing files, duplicate URI, duplicate role/ordinal, expired grant, and output-directory containment.
 
-- [ ] **Step 2: Run focused tests and confirm missing manifest types**
+- [x] **Step 2: Run focused tests and confirm missing manifest types**
 
 Expected: compilation fails because the manifest writer and manifest value are absent.
 
-- [ ] **Step 3: Implement the resolver, writer, and launcher handoff**
+- [x] **Step 3: Implement the resolver, writer, and launcher handoff**
 
 ```java
 public interface LocalWorkerAssetResolver {
@@ -190,11 +190,11 @@ public record WorkerAssetManifest(String requestId, String grantReference,
 
 Require real paths beneath the configured asset root, write only `asset-manifest.json`, create `<request>/output`, and pass `--asset-manifest`. Do not place absolute paths in request/response JSON.
 
-- [ ] **Step 4: Inject manifest creation into the gateway**
+- [x] **Step 4: Inject manifest creation into the gateway**
 
 Use inspection inputs/read grant, plan candidate files/read grant, and stage inputs/output URI/execution grant. Keep the gateway repository-free.
 
-- [ ] **Step 5: Run focused Worker tests and commit**
+- [x] **Step 5: Run focused Worker tests and commit**
 
 Run codec, gateway, launcher, and manifest tests; expect zero failures. Commit as `feat: authorize local worker assets by manifest`.
 

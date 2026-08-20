@@ -11,8 +11,13 @@ public final class FixtureWorker {
 
     public static void main(String[] arguments) throws Exception {
         String mode = arguments[0];
-        Path request = Path.of(arguments[2]);
-        Path response = Path.of(arguments[4]);
+        Path request = argumentPath(arguments, "--request");
+        Path response = argumentPath(arguments, "--response");
+        for (int index = 0; index < arguments.length - 1; index++) {
+            if ("--asset-manifest".equals(arguments[index])) {
+                Files.writeString(response.getParent().resolve("manifest-seen.txt"), arguments[index + 1]);
+            }
+        }
         if ("sleep".equals(mode)) {
             Thread.sleep(5_000L);
             return;
@@ -23,5 +28,14 @@ public final class FixtureWorker {
         String requestJson = Files.readString(request);
         String requestId = requestJson.replaceFirst(".*\\\"requestId\\\":\\\"([^\\\"]+)\\\".*", "$1");
         Files.writeString(response, "{\"schemaVersion\":\"1.0\",\"operation\":\"inspect\",\"requestId\":\"" + requestId + "\",\"payload\":{}}");
+    }
+
+    private static Path argumentPath(String[] arguments, String name) {
+        for (int index = 0; index < arguments.length - 1; index++) {
+            if (name.equals(arguments[index])) {
+                return Path.of(arguments[index + 1]);
+            }
+        }
+        throw new IllegalArgumentException("Missing argument " + name);
     }
 }

@@ -27,13 +27,20 @@ public final class LocalWorkerProcessLauncher implements WorkerProcessLauncher {
         }
         Path requestFile = invocationDirectory.resolve("request.json");
         Path responseFile = invocationDirectory.resolve("response.json");
+        Path manifestFile = invocation.manifestFile();
+        if (manifestFile != null && (!manifestFile.normalize().startsWith(invocationDirectory)
+            || !Files.isRegularFile(manifestFile))) {
+            throw protocolFailure(invocation, "asset manifest is outside invocation directory or missing", null);
+        }
+        Path outputDirectory = invocationDirectory.resolve("output");
         Path stdoutFile = invocationDirectory.resolve("stdout.log");
         Path stderrFile = invocationDirectory.resolve("stderr.log");
         try {
             Files.createDirectories(properties.workRoot());
-            Files.createDirectory(invocationDirectory);
+            Files.createDirectories(invocationDirectory);
+            Files.createDirectories(outputDirectory);
             Files.writeString(requestFile, invocation.requestJson(), StandardCharsets.UTF_8);
-            Process process = startProcess(requestFile, responseFile, stdoutFile, stderrFile);
+            Process process = startProcess(requestFile, manifestFile, responseFile, stdoutFile, stderrFile);
             runningProcesses.put(invocation.requestId(), process);
             try {
                 if (!process.waitFor(properties.timeout().toMillis(), TimeUnit.MILLISECONDS)) {
@@ -69,11 +76,15 @@ public final class LocalWorkerProcessLauncher implements WorkerProcessLauncher {
         }
     }
 
-    private Process startProcess(Path requestFile, Path responseFile, Path stdoutFile, Path stderrFile)
+    private Process startProcess(Path requestFile, Path manifestFile, Path responseFile, Path stdoutFile, Path stderrFile)
         throws IOException {
         ArrayList<String> command = new ArrayList<>(properties.command());
         command.add("--request");
         command.add(requestFile.toString());
+        if (manifestFile != null) {
+            command.add("--asset-manifest");
+            command.add(manifestFile.toString());
+        }
         command.add("--response");
         command.add(responseFile.toString());
         return new ProcessBuilder(command)

@@ -62,6 +62,20 @@ class LocalWorkerProcessLauncherTest {
     }
 
     @Test
+    void passesAssetManifestToWorkerAlongsideRequestAndResponse() throws Exception {
+        LocalWorkerProcessLauncher launcher = launcher("success", Duration.ofSeconds(2));
+        Path invocationDirectory = workRoot.resolve("req-manifest");
+        Files.createDirectories(invocationDirectory.resolve("output"));
+        Path manifest = Files.writeString(invocationDirectory.resolve("asset-manifest.json"), "{}");
+
+        launcher.launch(new WorkerInvocation(
+            "req-manifest", WorkerOperation.INSPECT, "{\"schemaVersion\":\"1.0\",\"requestId\":\"req-manifest\"}", manifest
+        ));
+
+        assertThat(Files.readString(invocationDirectory.resolve("manifest-seen.txt"))).isEqualTo(manifest.toString());
+    }
+
+    @Test
     void failsWhenSuccessfulProcessDoesNotWriteResponseFile() {
         LocalWorkerProcessLauncher launcher = launcher("missing", Duration.ofSeconds(2));
 

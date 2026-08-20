@@ -21,6 +21,7 @@ public final class LocalProcessWorkerGateway implements ProductInspector, Proces
     private final WorkerContractCodec codec;
     private final WorkerResultTranslator translator;
     private final WorkerProcessLauncher launcher;
+    private final LocalWorkerAssetManifestWriter manifestWriter;
     private final Supplier<String> requestIdSupplier;
     private final Map<ExecutionId, String> runningRequests = new ConcurrentHashMap<>();
 
@@ -30,22 +31,35 @@ public final class LocalProcessWorkerGateway implements ProductInspector, Proces
         WorkerProcessLauncher launcher,
         Supplier<String> requestIdSupplier
     ) {
+        this(codec, translator, launcher, requestIdSupplier, null);
+    }
+
+    public LocalProcessWorkerGateway(
+        WorkerContractCodec codec,
+        WorkerResultTranslator translator,
+        WorkerProcessLauncher launcher,
+        Supplier<String> requestIdSupplier,
+        LocalWorkerAssetManifestWriter manifestWriter
+    ) {
         this.codec = Objects.requireNonNull(codec, "codec");
         this.translator = Objects.requireNonNull(translator, "translator");
         this.launcher = Objects.requireNonNull(launcher, "launcher");
         this.requestIdSupplier = Objects.requireNonNull(requestIdSupplier, "requestIdSupplier");
+        this.manifestWriter = manifestWriter;
     }
 
     @Override
     public InspectionResponse inspect(InspectionRequest request) {
         String requestId = nextRequestId(WorkerOperation.INSPECT);
-        return translator.toInspection(invoke(requestId, WorkerOperation.INSPECT, codec.encodeInspect(requestId, request)));
+        return translator.toInspection(invoke(requestId, WorkerOperation.INSPECT, codec.encodeInspect(requestId, request),
+            manifestWriter == null ? null : manifestWriter.write(requestId, request.readGrant(), request.inputs())));
     }
 
     @Override
     public ProcessingPlan buildPlan(PlanRequest request) {
         String requestId = nextRequestId(WorkerOperation.BUILD_PLAN);
-        return translator.toPlan(invoke(requestId, WorkerOperation.BUILD_PLAN, codec.encodeBuildPlan(requestId, request)));
+        return translator.toPlan(invoke(requestId, WorkerOperation.BUILD_PLAN, codec.encodeBuildPlan(requestId, request),
+            manifestWriter == null ? null : manifestWriter.write(requestId, request.readGrant(), request.candidate().files())));
     }
 
     @Override
@@ -54,7 +68,9 @@ public final class LocalProcessWorkerGateway implements ProductInspector, Proces
         runningRequests.put(request.executionId(), requestId);
         try {
             return translator.toDispatchReceipt(invoke(
-                requestId, WorkerOperation.EXECUTE_STAGE, codec.encodeStageExecution(requestId, request)
+                requestId, WorkerOperation.EXECUTE_STAGE, codec.encodeStageExecution(requestId, request),
+                manifestWriter == null ? null : manifestWriter.write(
+                    requestId, request.executionGrant(), request.inputs(), request.outputUri())
             ));
         } finally {
             runningRequests.remove(request.executionId(), requestId);
@@ -70,7 +86,12 @@ public final class LocalProcessWorkerGateway implements ProductInspector, Proces
     }
 
     private DecodedWorkerResponse invoke(String requestId, WorkerOperation operation, String requestJson) {
-        WorkerInvocationResult result = launcher.launch(new WorkerInvocation(requestId, operation, requestJson));
+        return invoke(requestId, operation, requestJson, null);
+    }
+
+    private DecodedWorkerResponse invoke(String requestId, WorkerOperation operation, String requestJson,
+                                         java.nio.file.Path manifestFile) {
+        WorkerInvocationResult result = launcher.launch(new WorkerInvocation(requestId, operation, requestJson, manifestFile));
         return codec.decodeResponse(requestId, operation, result.responseJson());
     }
 

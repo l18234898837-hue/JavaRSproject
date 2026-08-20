@@ -21,10 +21,16 @@ import com.htht.multisource.domain.model.StageId;
 import com.htht.multisource.domain.model.StorageUri;
 import com.htht.multisource.domain.model.TaskId;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -70,6 +76,43 @@ class LocalProcessWorkerGatewayTest {
         DispatchReceipt receipt = gateway.dispatch(stageRequest());
 
         assertThat(receipt.workerId()).isEqualTo("worker-local-01");
+    }
+
+    @Test
+    void gatewayCreatesAuthorizedManifestForEachWorkerOperation(@TempDir Path tempRoot) throws IOException {
+        Path assetRoot = Files.createDirectories(tempRoot.resolve("assets"));
+        Path input = Files.writeString(assetRoot.resolve("package-01.hdf"), "sample");
+        Path workRoot = tempRoot.resolve("work");
+        LocalWorkerAssetManifestWriter manifestWriter = new LocalWorkerAssetManifestWriter(
+            workRoot,
+            assetRoot,
+            (grantReference, storageUri) -> Map.of("rs://input/package-01.hdf", input)
+                .get(storageUri.value()),
+            Clock.fixed(Instant.parse("2026-08-19T00:00:00Z"), java.time.ZoneOffset.UTC)
+        );
+        RecordingLauncher launcher = new RecordingLauncher();
+        LocalProcessWorkerGateway gateway = new LocalProcessWorkerGateway(
+            new WorkerContractCodec(new ObjectMapper()),
+            new WorkerResultTranslator(new ObjectMapper()),
+            launcher,
+            new AtomicInteger()::toString,
+            manifestWriter
+        );
+
+        gateway.inspect(inspectRequest());
+        gateway.buildPlan(planRequest());
+        gateway.dispatch(stageRequest());
+
+        assertThat(launcher.invocations()).hasSize(3)
+            .allSatisfy(invocation -> {
+                assertThat(invocation.manifestFile()).isRegularFile();
+                assertThat(invocation.manifestFile()).isEqualTo(
+                    workRoot.resolve(invocation.requestId()).resolve("asset-manifest.json"));
+                assertThat(new ObjectMapper().readTree(Files.readString(invocation.manifestFile()))
+                    .at("/inputs/0/path").asText()).isEqualTo(input.toRealPath().toString());
+            });
+        assertThat(launcher.invocations()).extracting(invocation -> invocation.operation())
+            .containsExactly(WorkerOperation.INSPECT, WorkerOperation.BUILD_PLAN, WorkerOperation.EXECUTE_STAGE);
     }
 
     private static LocalProcessWorkerGateway gatewayReturning(String operation, String payload) {
@@ -119,6 +162,42 @@ class LocalProcessWorkerGatewayTest {
 
         @Override
         public void cancel(String requestId) {
+        }
+    }
+
+    private static final class RecordingLauncher implements WorkerProcessLauncher {
+        private final java.util.ArrayList<WorkerInvocation> invocations = new java.util.ArrayList<>();
+
+        @Override
+        public WorkerInvocationResult launch(WorkerInvocation invocation) {
+            invocations.add(invocation);
+            String operation = switch (invocation.operation()) {
+                case INSPECT -> "inspect";
+                case BUILD_PLAN -> "build-plan";
+                case EXECUTE_STAGE -> "execute-stage";
+            };
+            String payload = switch (invocation.operation()) {
+                case INSPECT -> "{\"rulePackageVersion\":\"rules-2026.08\",\"candidates\":["
+                    + "{\"packageId\":\"package-01\",\"profileKey\":{\"productCode\":\"FY-3H-MERSI\",\"profileVersion\":\"v1\"},"
+                    + "\"dataShape\":\"SWATH_RASTER\",\"supportStatus\":\"SUPPORTED\",\"files\":["
+                    + "{\"role\":\"MAIN\",\"ordinal\":0,\"reference\":{\"sourceType\":\"LOCAL_FILE\",\"sourceId\":\"package-01.hdf\"},"
+                    + "\"storageUriSnapshot\":{\"value\":\"rs://input/package-01.hdf\"},\"checksum\":\"sha256:package-01\",\"required\":true}],"
+                    + "\"metadataSnapshot\":{},\"confidence\":0.91}]}";
+                case BUILD_PLAN -> "{\"version\":\"plan-v1\",\"stages\":["
+                    + "{\"stageKey\":\"READ\",\"stageCode\":\"READ_SOURCE\",\"dependsOnStageKeys\":[]}] }";
+                case EXECUTE_STAGE -> "{\"workerId\":\"worker-local-01\"}";
+            };
+            String response = "{\"schemaVersion\":\"1.0\",\"operation\":\"" + operation
+                + "\",\"requestId\":\"" + invocation.requestId() + "\",\"payload\":" + payload + "}";
+            return new WorkerInvocationResult(invocation.requestId(), 0, response);
+        }
+
+        @Override
+        public void cancel(String requestId) {
+        }
+
+        private List<WorkerInvocation> invocations() {
+            return invocations;
         }
     }
 }
