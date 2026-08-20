@@ -491,9 +491,9 @@ git commit -m "feat: deliver multisource foundation slice"
 
 本文件早期任务清单的勾选状态未在每次专项交付后回填。本节及下列专项计划是当前 feature worktree 的权威状态；早期任务正文保留，作为原始实施与验收要求。
 
-- 已完成：领域模型、应用层 Slice A（预检、批次/任务创建、归属校验的任务详情）、`rs_` 迁移与 MyBatis 持久化、本地 Worker Gateway、受控资产清单、FY-3H MERSI、HY-1C CZI、FY-4B AGRI、HY-2D 高度计和 GF-6 WFV 受限浏览适配。
-- 尚未开始：Admin Spring 装配、后端 HTTP API、生产 `AssetStorage` 适配器，以及阶段派发、Worker 事件接收、取消/重试派发、超时恢复和产物登记等执行编排。
-- 当前不能称为“完整后端已完成”。后续先为 Admin HTTP API 与装配层编写专项计划；执行编排使用独立专项计划，不能直接扩写 Slice A。
+- 已完成：领域模型、应用层 Slice A（预检、批次/任务创建、归属校验的任务详情）、`rs_` 迁移与 MyBatis 持久化、本地 Worker Gateway、受控资产清单、FY-3H MERSI、HY-1C CZI、FY-4B AGRI、HY-2D 高度计和 GF-6 WFV 受限浏览适配；Admin Spring 显式装配、`sys_file` 生产资产适配器，以及四个 Slice A 后端 HTTP API。Worker 命令、工作目录和超时通过部署环境变量提供，不提交本机路径。
+- 已验证：2026-08-21 执行 `mvn -pl htht-modules/htht-multisource,htht-admin -am test`，13 项 Java 测试通过；Worker 执行 `pytest -q --basetemp .pytest-tmp`，14 项通过、6 项真实样本标记测试跳过。回归未执行数据库迁移或业务表写入。
+- 尚未开始：阶段派发、Worker 事件接收、取消/重试派发、超时恢复和产物登记等执行编排。当前不能称为“完整后端已完成”；这些能力必须使用独立专项设计和计划，不能直接扩写 Slice A。
 
 专项计划索引：
 

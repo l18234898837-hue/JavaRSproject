@@ -175,19 +175,19 @@ Run `mvn -pl htht-admin -am -Dtest=MultiSourceAdapterConfigurationTest,Processin
 - Modify: `docs/superpowers/plans/2026-08-18-multisource-implementation-plan.md`
 - Verify: existing Slice A, persistence, Worker, and Python test suites.
 
-- [ ] **Step 1: Run focused Java regression**
+- [x] **Step 1: Run focused Java regression**
 
 Run `mvn -pl htht-modules\\htht-multisource,htht-admin -am test` with the same integration profile and database opt-in rules already used by the worktree. Expected: all implemented Java tests pass; PostgreSQL tests may remain skipped when opt-in variables are absent.
 
-- [ ] **Step 2: Run Python regression**
+- [x] **Step 2: Run Python regression**
 
 Run `pytest -q` in `rs-algorithm-worker` with configured sample roots. Expected: all existing adapter tests pass.
 
-- [ ] **Step 3: Verify API security boundary**
+- [x] **Step 3: Verify API security boundary**
 
 Confirm no controller accepts `path`, `command`, `python`, `workdir`, or arbitrary output URI fields; confirm unknown `sys_file` IDs fail before a use case is called; confirm task detail always receives the authenticated `AccessSubject`.
 
-- [ ] **Step 4: Update the total plan and commit verification evidence**
+- [x] **Step 4: Update the total plan and commit verification evidence**
 
 Mark Admin API work complete, record any `sys_file` ownership limitation, and explicitly leave execution orchestration deferred. Commit with `docs: record multisource admin api verification`.
 
