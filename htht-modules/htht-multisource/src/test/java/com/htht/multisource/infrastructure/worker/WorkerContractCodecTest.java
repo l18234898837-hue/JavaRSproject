@@ -19,6 +19,8 @@ import com.htht.multisource.domain.model.StorageUri;
 import com.htht.multisource.domain.model.TaskId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Instant;
 
@@ -86,6 +88,17 @@ class WorkerContractCodecTest {
             .isInstanceOf(WorkerProtocolException.class)
             .hasMessageContaining("UNSUPPORTED_PRODUCT")
             .hasMessageContaining("retryable=false");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "{\"schemaVersion\":\"2.0\",\"operation\":\"inspect\",\"requestId\":\"req-01\",\"payload\":{}}",
+        "{\"schemaVersion\":\"1.0\",\"operation\":\"inspect\",\"requestId\":\"other\",\"payload\":{}}",
+        "not-json"
+    })
+    void rejectsInvalidOrMismatchedResponse(String response) {
+        assertThatThrownBy(() -> codec.decodeResponse("req-01", WorkerOperation.INSPECT, response))
+            .isInstanceOf(WorkerProtocolException.class);
     }
 
     private static StageExecutionRequest stageRequest() {

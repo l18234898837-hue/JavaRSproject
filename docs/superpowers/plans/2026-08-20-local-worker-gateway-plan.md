@@ -1,6 +1,6 @@
 # Local Worker Gateway Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
 **Goal:** Provide a testable local file-based Worker gateway that implements inspection, plan construction, and stage dispatch ports without owning task state.
 
@@ -36,7 +36,7 @@
 - Create: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/infrastructure/worker/WorkerContractCodec.java`
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/infrastructure/worker/WorkerContractCodecTest.java`
 
-- [ ] **Step 1: Write failing codec tests for a versioned stage request and a matching success response**
+- [x] **Step 1: Write failing codec tests for a versioned stage request and a matching success response**
 
 ```java
 @Test
@@ -62,7 +62,7 @@ void rejectsResponseWhoseOperationDoesNotMatchInvocation() {
 }
 ```
 
-- [ ] **Step 2: Run the codec tests and confirm they fail because Worker types are absent**
+- [x] **Step 2: Run the codec tests and confirm they fail because Worker types are absent**
 
 ```powershell
 $env:JAVA_HOME='C:\Program Files\Eclipse Adoptium\jdk-17.0.20.8-hotspot'
@@ -75,7 +75,7 @@ $env:Path="$env:JAVA_HOME\bin;$env:Path"
 
 Expected: compilation fails because `WorkerContractCodec`, `WorkerOperation`, and `WorkerProtocolException` do not exist.
 
-- [ ] **Step 3: Implement the minimum strict codec**
+- [x] **Step 3: Implement the minimum strict codec**
 
 ```java
 public enum WorkerOperation {
@@ -115,11 +115,11 @@ payload nor an error object. `encodeStageExecution` preserves every field in
 `StageExecutionRequest`; `encodeInspect` and `encodeBuildPlan` use matching
 application-port input values.
 
-- [ ] **Step 4: Re-run the codec tests and confirm they pass**
+- [x] **Step 4: Re-run the codec tests and confirm they pass**
 
 Run the command in Step 2. Expected: `WorkerContractCodecTest` passes with no failures or errors.
 
-- [ ] **Step 5: Commit codec work**
+- [x] **Step 5: Commit codec work**
 
 ```powershell
 git add htht-modules/htht-multisource/src/main/java/com/htht/multisource/infrastructure/worker `
@@ -137,7 +137,7 @@ git commit -m "feat: add versioned worker contract codec"
 - Create: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/infrastructure/worker/LocalWorkerProcessLauncher.java`
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/infrastructure/worker/LocalWorkerProcessLauncherTest.java`
 
-- [ ] **Step 1: Write failing launcher tests for response-file handoff and missing response failure**
+- [x] **Step 1: Write failing launcher tests for response-file handoff and missing response failure**
 
 ```java
 @Test
@@ -164,7 +164,7 @@ command. The fixture Worker writes its response using the `--response` argument;
 the missing-response fixture exits zero without creating it. Do not invoke
 Python or any real Worker during unit tests.
 
-- [ ] **Step 2: Run the launcher tests and confirm they fail because the launcher is absent**
+- [x] **Step 2: Run the launcher tests and confirm they fail because the launcher is absent**
 
 ```powershell
 & 'C:\Users\24257\Desktop\GIS开发\.tools\apache-maven-3.9.16\bin\mvn.cmd' `
@@ -175,7 +175,7 @@ Python or any real Worker during unit tests.
 
 Expected: compilation fails because launcher and invocation types are absent.
 
-- [ ] **Step 3: Implement the launcher with isolated paths and timeout handling**
+- [x] **Step 3: Implement the launcher with isolated paths and timeout handling**
 
 ```java
 public record LocalProcessWorkerProperties(List<String> command, Path workRoot, Duration timeout) {
@@ -202,12 +202,12 @@ only up to `timeout`, and removes a tracked process entry after it exits. It
 throws `WorkerProtocolException` on timeout, nonzero exit, missing response,
 or response-read failure. It never parses stdout or stderr as a result.
 
-- [ ] **Step 4: Re-run the launcher tests and confirm they pass**
+- [x] **Step 4: Re-run the launcher tests and confirm they pass**
 
 Run the command in Step 2. Expected: successful response handoff and missing
 response behavior both pass; the test work root is removed in `@AfterEach`.
 
-- [ ] **Step 5: Commit process-launcher work**
+- [x] **Step 5: Commit process-launcher work**
 
 ```powershell
 git add htht-modules/htht-multisource/src/main/java/com/htht/multisource/infrastructure/worker `
@@ -222,7 +222,7 @@ git commit -m "feat: launch local workers through response files"
 - Create: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/infrastructure/worker/LocalProcessWorkerGateway.java`
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/infrastructure/worker/LocalProcessWorkerGatewayTest.java`
 
-- [ ] **Step 1: Write failing gateway tests for all three application ports**
+- [x] **Step 1: Write failing gateway tests for all three application ports**
 
 ```java
 @Test
@@ -256,7 +256,7 @@ Use a test `WorkerProcessLauncher` that returns prepared response JSON. Assert
 the launcher was called with the expected operation and assert no repository is
 accepted by the gateway constructor.
 
-- [ ] **Step 2: Run the gateway tests and confirm they fail because translator and gateway are absent**
+- [x] **Step 2: Run the gateway tests and confirm they fail because translator and gateway are absent**
 
 ```powershell
 & 'C:\Users\24257\Desktop\GIS开发\.tools\apache-maven-3.9.16\bin\mvn.cmd' `
@@ -268,7 +268,7 @@ accepted by the gateway constructor.
 Expected: compilation fails because `WorkerResultTranslator` and
 `LocalProcessWorkerGateway` do not exist.
 
-- [ ] **Step 3: Implement result translation and the port adapter**
+- [x] **Step 3: Implement result translation and the port adapter**
 
 ```java
 public final class LocalProcessWorkerGateway
@@ -324,12 +324,12 @@ Worker error response raises a dedicated `WorkerProtocolException` containing
 the Worker error code and retryable flag. `cancel(ExecutionId)` delegates only
 to the tracked local invocation mapping; it performs no persistence.
 
-- [ ] **Step 4: Re-run gateway tests and confirm they pass**
+- [x] **Step 4: Re-run gateway tests and confirm they pass**
 
 Run the command in Step 2. Expected: all three port adapter behaviors pass,
 and no test depends on PostgreSQL or a real worker executable.
 
-- [ ] **Step 5: Commit gateway work**
+- [x] **Step 5: Commit gateway work**
 
 ```powershell
 git add htht-modules/htht-multisource/src/main/java/com/htht/multisource/infrastructure/worker `
@@ -345,7 +345,7 @@ git commit -m "feat: adapt local worker to multisource ports"
 - Modify: `docs/superpowers/plans/2026-08-18-multisource-implementation-plan.md`
 - Modify: `docs/superpowers/plans/2026-08-20-local-worker-gateway-plan.md`
 
-- [ ] **Step 1: Write focused failing tests for malformed and stale transport data**
+- [x] **Step 1: Write focused failing tests for malformed and stale transport data**
 
 ```java
 @ParameterizedTest
@@ -364,7 +364,7 @@ Add a launcher test where the fixture worker sleeps beyond the configured
 timeout. Assert the exception identifies the invocation and that the tracked
 process is removed after termination.
 
-- [ ] **Step 2: Run focused tests and confirm the new failure cases fail for the expected missing checks**
+- [x] **Step 2: Run focused tests and confirm the new failure cases fail for the expected missing checks**
 
 ```powershell
 & 'C:\Users\24257\Desktop\GIS开发\.tools\apache-maven-3.9.16\bin\mvn.cmd' `
@@ -377,7 +377,7 @@ process is removed after termination.
 Expected: new tests fail only until schema validation, request matching, and
 timeout cleanup are implemented.
 
-- [ ] **Step 3: Implement only the missing validations and cleanup**
+- [x] **Step 3: Implement only the missing validations and cleanup**
 
 Reject all response envelope mismatches before translation. On timeout call
 `destroy()`, wait briefly, then call `destroyForcibly()` only when necessary;
@@ -385,7 +385,7 @@ always remove the request from the running-process map in `finally`. Keep
 request/response diagnostic files for inspection and do not add repository,
 controller, or database writes.
 
-- [ ] **Step 4: Run the Worker suite and existing Slice A regression**
+- [x] **Step 4: Run the Worker suite and existing Slice A regression**
 
 ```powershell
 & 'C:\Users\24257\Desktop\GIS开发\.tools\apache-maven-3.9.16\bin\mvn.cmd' `
@@ -398,7 +398,7 @@ controller, or database writes.
 Expected: zero failures and errors. This suite must not set
 `MULTISOURCE_IT_*` or write to the development database.
 
-- [ ] **Step 5: Mark Task 6 progress and commit verification/documentation**
+- [x] **Step 5: Mark Task 6 progress and commit verification/documentation**
 
 Mark Task 6 Steps 1-5 complete in both plan documents. Do not mark execution
 or product-adapter tasks complete. Then commit:

@@ -6,8 +6,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
+import java.nio.file.FileSystemException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,16 +23,28 @@ class LocalWorkerProcessLauncherTest {
 
     @AfterEach
     void removeTestWorkDirectories() throws Exception {
-        try (var paths = Files.walk(workRoot)) {
-            paths.sorted(java.util.Comparator.reverseOrder())
+        for (int attempt = 0; attempt < 20; attempt++) {
+            try {
+                deleteTestWorkDirectories();
+                return;
+            } catch (FileSystemException exception) {
+                if (attempt == 19) {
+                    throw exception;
+                }
+                Thread.sleep(50L);
+            }
+        }
+    }
+
+    private void deleteTestWorkDirectories() throws Exception {
+        List<Path> paths;
+        try (var walk = Files.walk(workRoot)) {
+            paths = walk.sorted(Comparator.reverseOrder())
                 .filter(path -> !path.equals(workRoot))
-                .forEach(path -> {
-                    try {
-                        Files.delete(path);
-                    } catch (Exception exception) {
-                        throw new IllegalStateException(exception);
-                    }
-                });
+                .toList();
+        }
+        for (Path path : paths) {
+            Files.delete(path);
         }
     }
 
@@ -54,6 +68,17 @@ class LocalWorkerProcessLauncherTest {
         assertThatThrownBy(() -> launcher.launch(new WorkerInvocation("req-02", WorkerOperation.INSPECT, "{}")))
             .isInstanceOf(WorkerProtocolException.class)
             .hasMessageContaining("response");
+    }
+
+    @Test
+    void terminatesTimedOutProcessAndRetainsDiagnosticDirectory() {
+        LocalWorkerProcessLauncher launcher = launcher("sleep", Duration.ofMillis(100));
+
+        assertThatThrownBy(() -> launcher.launch(new WorkerInvocation("req-timeout", WorkerOperation.INSPECT, "{}")))
+            .isInstanceOf(WorkerProtocolException.class)
+            .hasMessageContaining("timed out");
+
+        assertThat(workRoot.resolve("req-timeout").resolve("request.json")).isRegularFile();
     }
 
     private LocalWorkerProcessLauncher launcher(String mode, Duration timeout) {

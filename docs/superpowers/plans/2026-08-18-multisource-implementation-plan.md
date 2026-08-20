@@ -336,7 +336,7 @@ git commit -m "feat: add multisource http api and adapters"
 
 ---
 
-### Task 6: 实现本地 Worker Gateway 和受控事件流
+### Task 6: 实现本地 Worker Gateway 和版本化文件契约
 
 **Files:**
 - Create: `C:\Users\24257\Desktop\GIS开发\JavaRSproject\htht-modules\htht-multisource\src\main\java\com\htht\multisource\infrastructure\worker\LocalProcessWorkerGateway.java`
@@ -350,9 +350,9 @@ git commit -m "feat: add multisource http api and adapters"
 - Test: `C:\Users\24257\Desktop\GIS开发\JavaRSproject\htht-modules\htht-multisource\src\test\java\com\htht\multisource\infrastructure\worker\LocalProcessWorkerGatewayTest.java`
 - Test: `C:\Users\24257\Desktop\GIS开发\JavaRSproject\htht-modules\htht-multisource\src\test\java\com\htht\multisource\infrastructure\worker\WorkerContractCodecTest.java`
 
-- [ ] **Step 1: 先写契约编码和网关测试**
+- [x] **Step 1: 先写契约编码和网关测试**
 
-测试重点是三类请求能否按固定版本 JSON 编码，以及 Worker 返回的事件、产物和校验值能否被译回领域对象。
+测试重点是三类请求能否按固定版本 JSON 编码，以及 Worker 返回的结构化成功结果或错误码能否被译回领域对象或协议异常。
 
 ```java
 @Test
@@ -363,7 +363,7 @@ void codecWritesVersionedInspectRequest() {
 }
 ```
 
-- [ ] **Step 2: 运行网关测试并观察契约缺失**
+- [x] **Step 2: 运行网关测试并观察契约缺失**
 
 ```powershell
 cd "C:\Users\24257\Desktop\GIS开发\JavaRSproject"
@@ -372,15 +372,15 @@ mvn -pl htht-modules\htht-multisource -am -Dtest=LocalProcessWorkerGatewayTest,W
 
 Expected: 先失败在缺少网关、编码器或模板资源，而不是本地进程调用已经悄悄走通但没有契约约束。
 
-- [ ] **Step 3: 实现最小网关**
+- [x] **Step 3: 实现最小网关**
 
 本地网关只做三件事：写请求 JSON、启动受控进程、收回结构化响应；它不直接承担任务状态机，不吞掉 Worker 错误码，也不把 stdout 当成业务真相。
 
-- [ ] **Step 4: 重新跑网关测试**
+- [x] **Step 4: 重新跑网关测试**
 
-再次执行同一组 Maven 测试，直到 `dispatch`、`cancel` 和事件翻译都能在本地稳定工作，并且请求模板、输出模板和错误码映射都可重复。
+再次执行同一组 Maven 测试，验证 `inspect`、`build-plan`、`execute-stage` 三类请求的版本化文件交换、结构化错误映射和本地取消委托均稳定可重复。事件流翻译、回调分发和任务状态编排属于后续执行编排层，不在本 Gateway 范围内。
 
-- [ ] **Step 5: 提交 Worker 网关改动**
+- [x] **Step 5: 提交 Worker 网关改动**
 
 ```powershell
 git add "C:\Users\24257\Desktop\GIS开发\JavaRSproject\htht-modules\htht-multisource\src\main\java\com\htht\multisource\infrastructure\worker" "C:\Users\24257\Desktop\GIS开发\JavaRSproject\htht-modules\htht-multisource\src\main\resources\worker" "C:\Users\24257\Desktop\GIS开发\JavaRSproject\htht-modules\htht-multisource\src\test\java\com\htht\multisource\infrastructure\worker"
