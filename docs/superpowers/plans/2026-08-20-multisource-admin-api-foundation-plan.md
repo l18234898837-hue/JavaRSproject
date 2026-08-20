@@ -8,7 +8,7 @@
 
 **Tech Stack:** Java 17, Spring Boot 2.7, Spring MVC, JUnit 5, MockMvc, Mockito, MyBatis-Plus, PostgreSQL/PostGIS.
 
-**Implementation status (2026-08-20):** Task 1 is in progress. `AssetRequest` is implemented as an immutable `SYS_FILE`-only reference and covered by two executed `dev`-tagged unit tests. The remaining request/response DTOs, the asset adapter, controllers, and Spring assembly have not yet been implemented.
+**Implementation status (2026-08-20):** Task 1 is in progress. `AssetRequest` is implemented as an immutable `SYS_FILE`-only reference and covered by two executed `dev`-tagged unit tests. Task 2 (expiring preflight sessions) is implemented in `htht-multisource` and covered by three executed `dev`-tagged unit tests. The remaining request/response DTOs, the asset adapter, controllers, and Spring assembly have not yet been implemented.
 
 ---
 
@@ -71,19 +71,19 @@ Run the same Maven command; expect all DTO tests to pass. Commit with `feat: def
 - Create: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/infrastructure/session/InMemoryPreflightSessionStore.java`
 - Create: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/infrastructure/session/InMemoryPreflightSessionStoreTest.java`
 
-- [ ] **Step 1: Write failing session-store tests**
+- [x] **Step 1: Write failing session-store tests**
 
 Prove that a stored token is opaque, bound to its owner, expires after 30 minutes, returns only server-captured candidate snapshots, and is atomically consumed only after successful completion. Rejected creation must not consume it.
 
-- [ ] **Step 2: Run focused tests and confirm the store is absent**
+- [x] **Step 2: Run focused tests and confirm the store is absent**
 
 Run `mvn -pl htht-modules\\htht-multisource -am -Dtest=InMemoryPreflightSessionStoreTest test`.
 
-- [ ] **Step 3: Implement port and in-memory store**
+- [x] **Step 3: Implement port and in-memory store**
 
 Use `Clock` and a secure random token generator through constructor injection. Do not accept or reconstruct candidates from client data. Keep the store internal to the single Admin process and document that service restart invalidates outstanding tokens.
 
-- [ ] **Step 4: Run focused tests and commit**
+- [x] **Step 4: Run focused tests and commit**
 
 Run the focused test and `git diff --check`; expect all tests to pass. Commit with `feat: preserve server-side preflight candidates`.
 
