@@ -277,7 +277,7 @@ git commit -m "feat: inspect first multisource product samples"
 - Create: `product_adapters/gf6_wfv_browse.py`
 - Create: `tests/test_gf6_wfv_browse.py`, `tests/fixtures/gf6_invalid/`
 
-- [ ] **Step 1: Write failing GF tests**
+- [x] **Step 1: Write failing GF tests**
 
 ```python
 @pytest.mark.real_sample
@@ -294,19 +294,19 @@ def test_scientific_operation_is_rejected(gf_candidate):
 
 Synthetic tests also cover missing JGW, non-finite coefficients, and invalid JSON.
 
-- [ ] **Step 2: Run the GF test before implementation**
+- [x] **Step 2: Run the GF test before implementation**
 
 Run with `$env:MULTISOURCE_GF_SAMPLE_ROOT='C:\Users\24257\Desktop\GIS开发\GF'`; expected: adapter registration failure before implementation.
 
-- [ ] **Step 3: Implement strict grouping and inspection**
+- [x] **Step 3: Implement strict grouping and inspection**
 
 Require exactly `BROWSE_IMAGE`, `GEOREFERENCE`, and `METADATA` files with one common stem. Parse positive RGB JPEG dimensions; six finite JGW values with non-zero determinant; JSON `GF6`, `WFV`, `LEVEL1A`, matching ID, ordered acquisition interval, cloud `[0,100]`, and a closed longitude/latitude polygon. Compare JGW origin with the footprint tolerance. Return `SUPPORTED` only for `BROWSE_VISUAL_FEATURES`.
 
-- [ ] **Step 4: Implement the visual-only plan**
+- [x] **Step 4: Implement the visual-only plan**
 
 Return `validate-browse -> georeference-browse -> extract-visual-features -> write-browse-report`. Write deterministic report JSON below manifest output. Reject calibration, spectral indices, atmospheric correction, RPC/orthorectification, terrain correction, and quality-mask interpretation with non-retryable `UNSUPPORTED_BROWSE_OPERATION`.
 
-- [ ] **Step 5: Run synthetic and real tests and commit**
+- [x] **Step 5: Run synthetic and real tests and commit**
 
 Expected: two real candidates and no scientific plan. Commit as `feat: add constrained GF6 browse adapter`.
 
