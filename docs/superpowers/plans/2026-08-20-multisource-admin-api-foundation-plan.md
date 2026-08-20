@@ -8,7 +8,7 @@
 
 **Tech Stack:** Java 17, Spring Boot 2.7, Spring MVC, JUnit 5, MockMvc, Mockito, MyBatis-Plus, PostgreSQL/PostGIS.
 
-**Implementation status (2026-08-20):** Task 1 is in progress. `AssetRequest` is implemented as an immutable `SYS_FILE`-only reference and covered by two executed `dev`-tagged unit tests. Task 2 (expiring preflight sessions) is implemented in `htht-multisource` and covered by three executed `dev`-tagged unit tests. The remaining request/response DTOs, the asset adapter, controllers, and Spring assembly have not yet been implemented.
+**Implementation status (2026-08-20):** Task 1 request DTOs are implemented as immutable validated values and covered by four executed `dev`-tagged unit tests. Response DTOs remain coupled to the controller mapping task. Task 2 (expiring preflight sessions) is implemented in `htht-multisource` and covered by three executed `dev`-tagged unit tests. The asset adapter, controllers, and Spring assembly have not yet been implemented.
 
 ---
 
@@ -35,16 +35,16 @@
 - Create: `htht-admin/src/main/java/com/htht/web/controller/multisource/dto/BatchCreationResponse.java`
 - Create: `htht-admin/src/test/java/com/htht/web/controller/multisource/MultisourceDtoValidationTest.java`
 
-- [ ] **Step 1: Write failing validation tests**
+- [x] **Step 1: Write failing validation tests**
 
 Test that a request rejects a blank name, an empty asset list, a non-positive `sourceId`, a source type other than `SYS_FILE`, a blank or missing preflight token, blank parameter JSON, and an empty candidate-ID list for batch creation. Test that input order and `ordinal` survive mapping.
 
-- [ ] **Step 2: Run the focused tests and confirm the DTO contract is absent**
+- [x] **Step 2: Run the focused tests and confirm the DTO contract is absent**
 
 Run `mvn -pl htht-admin -am -Dtest=MultisourceDtoValidationTest test`.
 Expected: compilation or assertion failure because the DTOs and validation rules do not exist.
 
-- [ ] **Step 3: Implement immutable request DTOs and explicit mapping data**
+- [x] **Step 3: Implement immutable request DTOs and explicit mapping data**
 
 Use records or the repository's established validated request style. The minimum asset shape is:
 
@@ -60,7 +60,7 @@ public record AssetRequest(
 
 Validate `sourceType.equals("SYS_FILE")` at the adapter boundary as well; HTTP validation alone is not a security boundary.
 
-- [ ] **Step 4: Run the focused tests and commit**
+- [x] **Step 4: Run the focused tests and commit**
 
 Run the same Maven command; expect all DTO tests to pass. Commit with `feat: define multisource admin api dto contract`.
 
