@@ -2,9 +2,12 @@ package com.htht.multisource.infrastructure.persistence.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import org.apache.ibatis.type.JdbcType;
+import com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler;
 
-@TableName("rs_processing_task")
+@TableName(value = "rs_processing_task", autoResultMap = true)
 public class ProcessingTaskEntity {
 
     @TableId(value = "task_id", type = IdType.INPUT)
@@ -15,8 +18,10 @@ public class ProcessingTaskEntity {
     private Long creatorId;
     private String lifecycleStatus;
     private String qualityStatus;
+    @TableField(value = "parameter_snapshot", jdbcType = JdbcType.OTHER, typeHandler = PostgreSqlJsonbTypeHandler.class)
     private String parameterSnapshot;
     private String outputUri;
+    @TableField(value = "plan_snapshot", jdbcType = JdbcType.OTHER, typeHandler = PostgreSqlJsonbTypeHandler.class)
     private String planSnapshot;
 
     public Long getTaskId() { return taskId; }

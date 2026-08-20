@@ -31,6 +31,7 @@ import com.htht.multisource.domain.model.TaskId;
 import com.htht.multisource.domain.model.TaskStage;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -45,6 +46,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Tag("dev")
 class CreateProcessingTaskUseCaseTest {
+
+    @Test
+    void creationServicesDeclareRollbackTransactions() {
+        assertThat(CreateProcessingTaskService.class.isAnnotationPresent(Transactional.class)).isTrue();
+        assertThat(CreateProcessingBatchService.class.isAnnotationPresent(Transactional.class)).isTrue();
+    }
 
     @Test
     void batchCommandCopiesSelectedCandidates() {

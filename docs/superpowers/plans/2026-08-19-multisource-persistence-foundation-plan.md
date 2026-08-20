@@ -108,6 +108,20 @@ Add test-scope `org.postgresql:postgresql`. Use `@TableName`, input IDs, and `Ba
 
 Run Step 2, expect zero failures/errors, then commit `feat: add multisource MyBatis persistence adapters`.
 
+### Task 3a: Harden PostgreSQL Persistence Adapters
+
+**Files:** Modify persistence entities and mapper interfaces; create a JSONB type handler and Spring configuration; modify creation services; extend `RepositoryAdapterTest.java` and the PostgreSQL integration test.
+
+- [ ] **Step 1: Write failing tests for JSONB binding, stable query ordering, and transactional creation rollback.**
+
+- [ ] **Step 2: Run the focused tests and confirm they fail for the missing type handler, ordering, and transactional wiring.**
+
+- [ ] **Step 3: Add the PostgreSQL JSONB type handler, entity field annotations, ordered mapper queries, Spring bean configuration, and application-service transaction boundaries.**
+
+- [ ] **Step 4: Run focused unit and disposable-schema integration tests; verify that the random schema is absent after every run.**
+
+- [ ] **Step 5: Commit the hardening changes separately.**
+
 ### Task 4: Verify a Disposable Development Schema
 
 **Files:** Create `src/test/java/com/htht/multisource/infrastructure/persistence/PostgreSqlMigrationIntegrationTest.java`.

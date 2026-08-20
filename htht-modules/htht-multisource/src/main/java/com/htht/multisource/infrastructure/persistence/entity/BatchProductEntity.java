@@ -2,9 +2,12 @@ package com.htht.multisource.infrastructure.persistence.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import org.apache.ibatis.type.JdbcType;
+import com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler;
 
-@TableName("rs_batch_product")
+@TableName(value = "rs_batch_product", autoResultMap = true)
 public class BatchProductEntity {
     @TableId(value = "batch_product_id", type = IdType.AUTO)
     private Long batchProductId;
@@ -15,6 +18,7 @@ public class BatchProductEntity {
     private String dataShape;
     private String supportStatus;
     private Double confidence;
+    @TableField(value = "input_assets_snapshot", jdbcType = JdbcType.OTHER, typeHandler = PostgreSqlJsonbTypeHandler.class)
     private String inputAssetsSnapshot;
     public Long getBatchProductId() { return batchProductId; }
     public void setBatchProductId(Long batchProductId) { this.batchProductId = batchProductId; }

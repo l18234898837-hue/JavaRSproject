@@ -9,6 +9,7 @@ import java.util.List;
 public interface BatchProductMyBatisMapper extends BaseMapper<BatchProductEntity> {
 
     default List<BatchProductEntity> selectByBatchId(long batchId) {
-        return selectList(new LambdaQueryWrapper<BatchProductEntity>().eq(BatchProductEntity::getBatchId, batchId));
+        return selectList(new LambdaQueryWrapper<BatchProductEntity>()
+            .eq(BatchProductEntity::getBatchId, batchId).orderByAsc(BatchProductEntity::getBatchProductId));
     }
 }

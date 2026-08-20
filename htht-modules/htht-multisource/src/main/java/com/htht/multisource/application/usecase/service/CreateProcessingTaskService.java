@@ -11,7 +11,9 @@ import com.htht.multisource.domain.model.TaskId;
 
 import java.util.List;
 import java.util.Objects;
+import org.springframework.transaction.annotation.Transactional;
 
+@Transactional(rollbackFor = Exception.class)
 public final class CreateProcessingTaskService implements CreateProcessingTaskUseCase {
 
     private final ProcessingBatchRepository batchRepository;

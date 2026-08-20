@@ -8,6 +8,7 @@ import java.util.List;
 
 public interface TaskProductMyBatisMapper extends BaseMapper<TaskProductEntity> {
     default List<TaskProductEntity> selectByTaskId(long taskId) {
-        return selectList(new LambdaQueryWrapper<TaskProductEntity>().eq(TaskProductEntity::getTaskId, taskId));
+        return selectList(new LambdaQueryWrapper<TaskProductEntity>()
+            .eq(TaskProductEntity::getTaskId, taskId).orderByAsc(TaskProductEntity::getTaskProductId));
     }
 }

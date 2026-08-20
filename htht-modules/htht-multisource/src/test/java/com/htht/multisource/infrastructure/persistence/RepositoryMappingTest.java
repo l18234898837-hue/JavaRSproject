@@ -25,11 +25,13 @@ import com.htht.multisource.infrastructure.persistence.entity.ProcessingBatchEnt
 import com.htht.multisource.infrastructure.persistence.entity.BatchProductEntity;
 import com.htht.multisource.infrastructure.persistence.entity.TaskInputAssetEntity;
 import com.htht.multisource.infrastructure.persistence.entity.TaskProductEntity;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMapper;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.lang.reflect.Field;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -111,6 +113,21 @@ class RepositoryMappingTest {
 
         assertThat(mapper.toStageEntity(stage).getStageKey()).isEqualTo("READ");
         assertThat(mapper.toArtifactEntity(artifact).getStorageUri()).isEqualTo("rs://output/a.tif");
+    }
+
+    @Test
+    void jsonSnapshotsDeclarePostgreSqlJsonbTypeHandling() throws NoSuchFieldException {
+        assertThat(jsonbField(ProcessingTaskEntity.class, "parameterSnapshot").typeHandler().getName())
+            .isEqualTo("com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler");
+        assertThat(jsonbField(ProcessingTaskEntity.class, "planSnapshot").typeHandler().getName())
+            .isEqualTo("com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler");
+        assertThat(jsonbField(BatchProductEntity.class, "inputAssetsSnapshot").typeHandler().getName())
+            .isEqualTo("com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler");
+    }
+
+    private static TableField jsonbField(Class<?> type, String name) throws NoSuchFieldException {
+        Field field = type.getDeclaredField(name);
+        return field.getAnnotation(TableField.class);
     }
 
     private static ProcessingTask sampleTask() {
