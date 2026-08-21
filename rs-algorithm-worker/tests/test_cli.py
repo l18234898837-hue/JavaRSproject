@@ -37,4 +37,9 @@ def test_cli_writes_response_atomically(tmp_path):
     response = json.loads(response_file.read_text(encoding="utf-8"))
     assert response["schemaVersion"] == "1.0"
     assert response["requestId"] == "req-01"
+    assert response["payload"] == {
+        "workerId": "worker-local",
+        "status": "SUCCEEDED",
+        "artifacts": [],
+    }
     assert not response_file.with_suffix(".json.tmp").exists()

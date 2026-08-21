@@ -3,7 +3,11 @@ package com.htht.config.multisource;
 import com.htht.multisource.domain.model.AssetReference;
 import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.domain.model.InputAsset;
+import com.htht.multisource.domain.model.ExecutionId;
+import com.htht.multisource.domain.model.StageId;
 import com.htht.multisource.domain.model.StorageUri;
+import com.htht.multisource.domain.model.TaskId;
+import com.htht.multisource.application.port.out.model.ExecutionGrantRequest;
 import com.htht.system.domain.SysFile;
 import com.htht.system.service.ISysFileService;
 import org.junit.jupiter.api.Tag;
@@ -70,6 +74,26 @@ public class SysFileAssetStorageAdapterTest {
         assertThatIllegalArgumentException().isThrownBy(
             () -> adapter.resolve(grant.grantReference(), new StorageUri("rs://sys-file/43"))
         );
+    }
+
+    @Test
+    void executionGrantBindsTaskStageExecutionAndAttempt() throws Exception {
+        Path file = Files.writeString(Files.createDirectories(uploadRoot.resolve("hdf")).resolve("input.hdf"), "input");
+        ISysFileService files = mock(ISysFileService.class);
+        when(files.getById(42L)).thenReturn(sysFile(42L, file));
+        SysFileAssetStorageAdapter adapter = new SysFileAssetStorageAdapter(files, uploadRoot);
+        InputAsset input = adapter.toInputAsset("MAIN", 0, new AssetReference("SYS_FILE", "42"), true);
+
+        var grant = adapter.grant(new ExecutionGrantRequest(
+            TaskId.of(101L), new StageId(201L), new ExecutionId("exec-01"), 2,
+            java.util.List.of(input), new StorageUri("rs://output/7/task-01")
+        ));
+
+        assertThat(grant.taskId()).isEqualTo(TaskId.of(101L));
+        assertThat(grant.stageId()).isEqualTo(new StageId(201L));
+        assertThat(grant.executionId()).isEqualTo(new ExecutionId("exec-01"));
+        assertThat(grant.attempt()).isEqualTo(2);
+        assertThat(adapter.resolve(grant.grantReference(), input.storageUriSnapshot())).isEqualTo(file.toRealPath());
     }
 
     private SysFile sysFile(long id, Path path) {

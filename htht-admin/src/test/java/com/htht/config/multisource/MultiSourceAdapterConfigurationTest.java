@@ -68,7 +68,8 @@ class MultiSourceAdapterConfigurationTest {
                 "file.upload-path=" + uploadRoot,
                 "multisource.worker.command=python,worker.py",
                 "multisource.worker.work-root=" + uploadRoot.resolve("worker"),
-                "multisource.worker.timeout=10m"
+                "multisource.worker.timeout=10m",
+                "multisource.worker.processor-version=worker-test-1.0.0"
             )
             .withBean(ISysFileService.class, () -> mock(ISysFileService.class))
             .withBean(ProcessingTaskMyBatisMapper.class, () -> mock(ProcessingTaskMyBatisMapper.class))

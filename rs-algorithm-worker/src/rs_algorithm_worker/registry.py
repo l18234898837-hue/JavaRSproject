@@ -22,7 +22,7 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
             "dependsOnStageKeys": [],
         }]}
     if operation == "execute-stage":
-        return {"workerId": "worker-local"}
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": []}
     raise ValueError(f"unsupported operation: {operation}")
 
 

@@ -158,7 +158,7 @@ public class MultiSourceAdapterConfiguration {
                                                                        TaskIdGenerator taskIdGenerator,
                                                                        StageIdGenerator stageIdGenerator) {
         return new TaskCreationCoordinator(taskRepository, stageRepository, (ProcessingPlanner) workerGateway,
-            assetStorage, taskIdGenerator, stageIdGenerator);
+            assetStorage, taskIdGenerator, stageIdGenerator, properties.requireProcessorVersion());
     }
 
     @Bean

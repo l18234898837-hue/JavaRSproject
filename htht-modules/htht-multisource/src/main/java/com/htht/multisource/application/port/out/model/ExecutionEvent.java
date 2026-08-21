@@ -42,4 +42,8 @@ public record ExecutionEvent(
             throw new IllegalArgumentException("Execution event is invalid.");
         }
     }
+
+    public ExecutionEvent withAcceptance(Acceptance acceptance) {
+        return new ExecutionEvent(taskId, stageId, executionId, attempt, eventSequence, type, payload, occurredAt, acceptance);
+    }
 }

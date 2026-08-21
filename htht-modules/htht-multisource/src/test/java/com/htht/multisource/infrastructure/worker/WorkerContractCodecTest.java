@@ -93,6 +93,19 @@ class WorkerContractCodecTest {
             .hasMessageContaining("retryable=false");
     }
 
+    @Test
+    void rejectsStageResultWithoutTerminalStatusAndArtifacts() {
+        String response = """
+            {"schemaVersion":"1.0","operation":"execute-stage","requestId":"req-01",
+             "payload":{"workerId":"worker-local"}}
+            """;
+
+        assertThatThrownBy(() -> new WorkerResultTranslator(objectMapper).toDispatchReceipt(
+            codec.decodeResponse("req-01", WorkerOperation.EXECUTE_STAGE, response)
+        )).isInstanceOf(WorkerProtocolException.class)
+            .hasMessageContaining("status");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
         "{\"schemaVersion\":\"2.0\",\"operation\":\"inspect\",\"requestId\":\"req-01\",\"payload\":{}}",

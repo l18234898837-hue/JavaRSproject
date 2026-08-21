@@ -33,6 +33,7 @@ public final class TaskCreationCoordinator {
     private final AssetStorage assetStorage;
     private final TaskIdGenerator taskIdGenerator;
     private final StageIdGenerator stageIdGenerator;
+    private final String processorVersion;
 
     public TaskCreationCoordinator(
         ProcessingTaskRepository taskRepository,
@@ -40,7 +41,8 @@ public final class TaskCreationCoordinator {
         ProcessingPlanner planner,
         AssetStorage assetStorage,
         TaskIdGenerator taskIdGenerator,
-        StageIdGenerator stageIdGenerator
+        StageIdGenerator stageIdGenerator,
+        String processorVersion
     ) {
         this.taskRepository = Objects.requireNonNull(taskRepository, "taskRepository");
         this.taskStageRepository = Objects.requireNonNull(taskStageRepository, "taskStageRepository");
@@ -48,6 +50,10 @@ public final class TaskCreationCoordinator {
         this.assetStorage = Objects.requireNonNull(assetStorage, "assetStorage");
         this.taskIdGenerator = Objects.requireNonNull(taskIdGenerator, "taskIdGenerator");
         this.stageIdGenerator = Objects.requireNonNull(stageIdGenerator, "stageIdGenerator");
+        if (processorVersion == null || processorVersion.isBlank()) {
+            throw new IllegalArgumentException("Processor version must not be blank.");
+        }
+        this.processorVersion = processorVersion;
     }
 
     public TaskId create(
@@ -73,7 +79,8 @@ public final class TaskCreationCoordinator {
 
         TaskId taskId = taskIdGenerator.nextId();
         AssetAccessGrant readGrant = assetStorage.grantRead(subject, candidate.files());
-        ProcessingPlan plan = planner.buildPlan(new PlanRequest(taskId, candidate, parameterSnapshot, readGrant));
+        ProcessingPlan workerPlan = planner.buildPlan(new PlanRequest(taskId, candidate, parameterSnapshot, readGrant));
+        ProcessingPlan plan = new ProcessingPlan(workerPlan.version(), processorVersion, workerPlan.stages());
         ProcessingTask task = new ProcessingTask(
             taskId, name, subject, TaskLifecycleStatus.CREATED, QualityStatus.NOT_CHECKED,
             parameterSnapshot, outputUri, plan, batch, List.of(candidate)

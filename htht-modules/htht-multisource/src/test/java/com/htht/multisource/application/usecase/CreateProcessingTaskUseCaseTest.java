@@ -113,6 +113,20 @@ class CreateProcessingTaskUseCaseTest {
     }
 
     @Test
+    void creationFreezesConfiguredProcessorVersionIntoPlanSnapshot() {
+        Fakes fakes = new Fakes(samplePlan(), "worker-1.2.3");
+
+        fakes.taskService().create(new CreateProcessingTaskCommand(
+            "task-01", subject(), candidate("fy3h-granule-01", ProductSupportStatus.SUPPORTED),
+            "{\"mode\":\"standard\"}", new StorageUri("rs://output/task-01")
+        ));
+
+        assertThat(fakes.tasks.saved()).singleElement().satisfies(task ->
+            assertThat(task.plan().processorVersion()).isEqualTo("worker-1.2.3")
+        );
+    }
+
+    @Test
     void unsafeCandidateIsRejectedBeforePlannerIsCalled() {
         Fakes fakes = new Fakes(samplePlan());
 
@@ -133,10 +147,14 @@ class CreateProcessingTaskUseCaseTest {
         private final TaskCreationCoordinator coordinator;
 
         private Fakes(ProcessingPlan plan) {
+            this(plan, "worker-test-1.0.0");
+        }
+
+        private Fakes(ProcessingPlan plan, String processorVersion) {
             planner = new FixedPlanner(plan);
             coordinator = new TaskCreationCoordinator(
                 tasks, stages, planner, new CreationAssetStorage(),
-                new IncrementingTaskIdGenerator(), new IncrementingStageIdGenerator()
+                new IncrementingTaskIdGenerator(), new IncrementingStageIdGenerator(), processorVersion
             );
         }
 

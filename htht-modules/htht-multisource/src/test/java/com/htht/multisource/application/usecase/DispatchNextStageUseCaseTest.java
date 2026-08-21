@@ -1,13 +1,39 @@
 package com.htht.multisource.application.usecase;
 
+import com.htht.multisource.application.port.out.AssetStorage;
+import com.htht.multisource.application.port.out.ExecutionClock;
+import com.htht.multisource.application.port.out.ExecutionIdGenerator;
+import com.htht.multisource.application.port.out.ProcessingTaskRepository;
+import com.htht.multisource.application.port.out.TaskDispatcher;
 import com.htht.multisource.application.port.out.TaskStageRepository;
+import com.htht.multisource.application.port.out.model.DispatchReceipt;
+import com.htht.multisource.application.port.out.model.ExecutionGrant;
+import com.htht.multisource.application.port.out.model.ExecutionGrantRequest;
 import com.htht.multisource.application.port.out.model.StageClaim;
+import com.htht.multisource.application.port.out.model.StageExecutionRequest;
+import com.htht.multisource.application.usecase.service.DispatchNextStageService;
+import com.htht.multisource.application.usecase.service.AcceptWorkerEventService;
+import com.htht.multisource.domain.model.AccessSubject;
+import com.htht.multisource.domain.model.AssetReference;
 import com.htht.multisource.domain.model.ExecutionId;
+import com.htht.multisource.domain.model.InputAsset;
+import com.htht.multisource.domain.model.ProcessingBatch;
+import com.htht.multisource.domain.model.ProcessingBatchStatus;
+import com.htht.multisource.domain.model.ProcessingPlan;
+import com.htht.multisource.domain.model.ProcessingStage;
+import com.htht.multisource.domain.model.ProcessingTask;
+import com.htht.multisource.domain.model.ProductCandidate;
+import com.htht.multisource.domain.model.ProductDataShape;
+import com.htht.multisource.domain.model.ProductProfileKey;
+import com.htht.multisource.domain.model.ProductSupportStatus;
+import com.htht.multisource.domain.model.QualityStatus;
 import com.htht.multisource.domain.model.StageExecution;
 import com.htht.multisource.domain.model.StageExecutionStatus;
 import com.htht.multisource.domain.model.StageId;
+import com.htht.multisource.domain.model.StorageUri;
 import com.htht.multisource.domain.model.TaskId;
 import com.htht.multisource.domain.model.TaskStage;
+import com.htht.multisource.domain.model.TaskLifecycleStatus;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -57,12 +83,96 @@ class DispatchNextStageUseCaseTest {
             .isEqualTo(StageExecutionStatus.RUNNING);
     }
 
+    @Test
+    void dispatchesClaimedStageWithServerOwnedExecutionGrantAndPlanSnapshot() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "READ")), Map.of("READ", List.of())
+        );
+        RecordingDispatcher dispatcher = new RecordingDispatcher();
+        RecordingAssetStorage storage = new RecordingAssetStorage();
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            new SingleTaskRepository(task(TaskLifecycleStatus.CREATED)), stages, dispatcher, storage,
+            () -> new ExecutionId("exec-01"), () -> NOW, java.time.Duration.ofMinutes(5),
+            new AcceptWorkerEventService(stages, new InMemoryExecutionEventRepository())
+        );
+
+        var result = useCase.dispatch(TASK_ID);
+
+        assertThat(result).contains(new DispatchNextStageUseCase.DispatchResult(201L, "exec-01"));
+        assertThat(stages.findById(new StageId(201L))).get().satisfies(stage -> {
+            assertThat(stage.status()).isEqualTo(StageExecutionStatus.SUCCEEDED);
+            assertThat(stage.execution().executionId()).isEqualTo(new ExecutionId("exec-01"));
+        });
+        assertThat(storage.request).satisfies(request -> {
+            assertThat(request.taskId()).isEqualTo(TASK_ID);
+            assertThat(request.stageId()).isEqualTo(new StageId(201L));
+            assertThat(request.executionId()).isEqualTo(new ExecutionId("exec-01"));
+            assertThat(request.attempt()).isEqualTo(1);
+        });
+        assertThat(dispatcher.request).satisfies(request -> {
+            assertThat(request.stageKey()).isEqualTo("READ");
+            assertThat(request.processorVersion()).isEqualTo("worker-1.2.3");
+            assertThat(request.executionId()).isEqualTo(new ExecutionId("exec-01"));
+        });
+    }
+
+    @Test
+    void doesNotClaimOrDispatchCancelledTask() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "READ")), Map.of("READ", List.of())
+        );
+        RecordingDispatcher dispatcher = new RecordingDispatcher();
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            new SingleTaskRepository(task(TaskLifecycleStatus.CANCELED)), stages, dispatcher, new RecordingAssetStorage(),
+            () -> new ExecutionId("exec-01"), () -> NOW, java.time.Duration.ofMinutes(5),
+            new AcceptWorkerEventService(stages, new InMemoryExecutionEventRepository())
+        );
+
+        assertThat(useCase.dispatch(TASK_ID)).isEmpty();
+        assertThat(stages.findById(new StageId(201L))).get().extracting(TaskStage::status)
+            .isEqualTo(StageExecutionStatus.PENDING);
+        assertThat(dispatcher.request).isNull();
+    }
+
+    @Test
+    void recordsDispatchFailureAsTerminalEvent() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "READ")), Map.of("READ", List.of())
+        );
+        InMemoryExecutionEventRepository events = new InMemoryExecutionEventRepository();
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            new SingleTaskRepository(task(TaskLifecycleStatus.CREATED)), stages, new FailingDispatcher(), new RecordingAssetStorage(),
+            () -> new ExecutionId("exec-01"), () -> NOW, java.time.Duration.ofMinutes(5),
+            new AcceptWorkerEventService(stages, events)
+        );
+
+        assertThat(useCase.dispatch(TASK_ID)).contains(new DispatchNextStageUseCase.DispatchResult(201L, "exec-01"));
+        assertThat(stages.findById(new StageId(201L))).get().satisfies(stage ->
+            assertThat(stage.status()).isEqualTo(StageExecutionStatus.FAILED)
+        );
+        assertThat(events.events.values()).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo(com.htht.multisource.application.port.out.model.ExecutionEvent.Type.FAILED);
+            assertThat(event.acceptance()).isEqualTo(com.htht.multisource.application.port.out.model.ExecutionEvent.Acceptance.APPLIED);
+        });
+    }
+
     private static TaskStage pending(long stageId, String stageKey) {
         return new TaskStage(new StageId(stageId), TASK_ID, stageKey, StageExecutionStatus.PENDING, 1);
     }
 
     private static StageExecution execution(String executionId) {
         return new StageExecution(new ExecutionId(executionId), null, LEASE_EXPIRES_AT, null, null, NOW, null);
+    }
+
+    private static ProcessingTask task(TaskLifecycleStatus lifecycleStatus) {
+        InputAsset input = new InputAsset("MAIN", 0, new AssetReference("SYS_FILE", "42"),
+            new StorageUri("rs://sys-file/42"), "sha256:input", true);
+        ProductCandidate candidate = new ProductCandidate("package-01", new ProductProfileKey("FY-3H-MERSI", "v1"),
+            ProductDataShape.SWATH_RASTER, ProductSupportStatus.SUPPORTED, List.of(input), "{}", 0.91);
+        return new ProcessingTask(TASK_ID, "task-01", new AccessSubject(7L), lifecycleStatus, QualityStatus.NOT_CHECKED,
+            "{\"mode\":\"standard\"}", new StorageUri("rs://output/7/task-01"),
+            new ProcessingPlan("plan-v1", "worker-1.2.3", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of()))),
+            new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate)), List.of(candidate));
     }
 
     private static final class InMemoryStageRepository implements TaskStageRepository {
@@ -113,6 +223,79 @@ class DispatchNextStageUseCaseTest {
                 stages.values().stream().anyMatch(candidate -> candidate.stageKey().equals(dependency)
                     && candidate.status() == StageExecutionStatus.SUCCEEDED)
             );
+        }
+    }
+
+    private record SingleTaskRepository(ProcessingTask task) implements ProcessingTaskRepository {
+        @Override
+        public Optional<ProcessingTask> findById(TaskId taskId) {
+            return task.id().equals(taskId) ? Optional.of(task) : Optional.empty();
+        }
+
+        @Override
+        public void save(ProcessingTask task) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class RecordingAssetStorage implements AssetStorage {
+        private ExecutionGrantRequest request;
+
+        @Override
+        public ExecutionGrant grant(ExecutionGrantRequest request) {
+            this.request = request;
+            return new ExecutionGrant("grant-01", LEASE_EXPIRES_AT, request.taskId(), request.stageId(), request.executionId(), request.attempt());
+        }
+
+        @Override
+        public com.htht.multisource.application.port.out.model.AssetAccessGrant grantRead(AccessSubject subject, List<InputAsset> inputs) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ExecutionGrant grant(TaskId taskId, List<InputAsset> inputs, StorageUri outputUri) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public com.htht.multisource.application.port.out.model.AssetMetadata resolve(AccessSubject subject, AssetReference reference) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class RecordingDispatcher implements TaskDispatcher {
+        private StageExecutionRequest request;
+
+        @Override
+        public DispatchReceipt dispatch(StageExecutionRequest request) {
+            this.request = request;
+            return new DispatchReceipt("worker-local", true, List.of());
+        }
+
+        @Override
+        public void cancel(ExecutionId executionId) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class FailingDispatcher implements TaskDispatcher {
+        @Override
+        public DispatchReceipt dispatch(StageExecutionRequest request) {
+            throw new IllegalStateException("Worker process exited with code 1");
+        }
+
+        @Override
+        public void cancel(ExecutionId executionId) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class InMemoryExecutionEventRepository implements com.htht.multisource.application.port.out.ExecutionEventRepository {
+        private final Map<String, com.htht.multisource.application.port.out.model.ExecutionEvent> events = new LinkedHashMap<>();
+
+        @Override
+        public boolean insertIfAbsent(com.htht.multisource.application.port.out.model.ExecutionEvent event) {
+            return events.putIfAbsent(event.stageId().value() + ":" + event.attempt() + ":" + event.eventSequence(), event) == null;
         }
     }
 }

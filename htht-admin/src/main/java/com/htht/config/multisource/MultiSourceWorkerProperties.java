@@ -13,6 +13,7 @@ public class MultiSourceWorkerProperties {
     private List<String> command = new ArrayList<>();
     private Path workRoot;
     private Duration timeout;
+    private String processorVersion;
 
     public List<String> getCommand() {
         return command;
@@ -36,6 +37,21 @@ public class MultiSourceWorkerProperties {
 
     public void setTimeout(Duration timeout) {
         this.timeout = timeout;
+    }
+
+    public String getProcessorVersion() {
+        return processorVersion;
+    }
+
+    public void setProcessorVersion(String processorVersion) {
+        this.processorVersion = processorVersion;
+    }
+
+    public String requireProcessorVersion() {
+        if (processorVersion == null || processorVersion.isBlank()) {
+            throw new IllegalStateException("multisource.worker.processor-version must be configured through MULTISOURCE_WORKER_PROCESSOR_VERSION.");
+        }
+        return processorVersion;
     }
 
     public LocalProcessWorkerProperties toLocalProcessProperties() {

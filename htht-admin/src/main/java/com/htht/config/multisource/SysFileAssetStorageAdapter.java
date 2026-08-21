@@ -4,6 +4,7 @@ import com.htht.multisource.application.port.out.AssetStorage;
 import com.htht.multisource.application.port.out.model.AssetAccessGrant;
 import com.htht.multisource.application.port.out.model.AssetMetadata;
 import com.htht.multisource.application.port.out.model.ExecutionGrant;
+import com.htht.multisource.application.port.out.model.ExecutionGrantRequest;
 import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.domain.model.AssetReference;
 import com.htht.multisource.domain.model.InputAsset;
@@ -71,10 +72,15 @@ public final class SysFileAssetStorageAdapter implements AssetStorage, LocalWork
 
     @Override
     public ExecutionGrant grant(TaskId taskId, List<InputAsset> inputs, StorageUri outputUri) {
+        throw new UnsupportedOperationException("Execution grants must bind a stage execution.");
+    }
+
+    @Override
+    public ExecutionGrant grant(ExecutionGrantRequest request) {
         String reference = UUID.randomUUID().toString();
         Instant expiresAt = Instant.now().plusSeconds(300);
-        grants.put(reference, new GrantScope(expiresAt, storageUris(inputs)));
-        return new ExecutionGrant(reference, expiresAt);
+        grants.put(reference, new GrantScope(expiresAt, storageUris(request.inputs())));
+        return new ExecutionGrant(reference, expiresAt, request.taskId(), request.stageId(), request.executionId(), request.attempt());
     }
 
     @Override

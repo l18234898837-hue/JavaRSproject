@@ -170,6 +170,7 @@ public final class TaskPersistenceMapper {
     private static String writePlan(ProcessingPlan plan) {
         ObjectNode root = OBJECT_MAPPER.createObjectNode();
         root.put("version", plan.version());
+        root.put("processorVersion", plan.processorVersion());
         ArrayNode stages = root.putArray("stages");
         for (ProcessingStage stage : plan.stages()) {
             ObjectNode node = stages.addObject();
@@ -232,7 +233,8 @@ public final class TaskPersistenceMapper {
                     stage.required("stageKey").asText(), stage.required("stageCode").asText(), dependencies
                 ));
             }
-            return new ProcessingPlan(root.required("version").asText(), stages);
+            String processorVersion = root.path("processorVersion").asText("unspecified");
+            return new ProcessingPlan(root.required("version").asText(), processorVersion, stages);
         } catch (JsonProcessingException exception) {
             throw new IllegalArgumentException("Invalid processing plan snapshot.", exception);
         }

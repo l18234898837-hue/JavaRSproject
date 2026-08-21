@@ -14,6 +14,7 @@ multisource:
     command: ${MULTISOURCE_WORKER_COMMAND}
     work-root: ${MULTISOURCE_WORK_ROOT}
     timeout: ${MULTISOURCE_WORKER_TIMEOUT}
+    processor-version: ${MULTISOURCE_WORKER_PROCESSOR_VERSION}
 
 captcha:
   # 页面 <参数设置> 可开启关闭 验证码校验

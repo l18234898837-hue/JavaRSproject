@@ -70,12 +70,16 @@ class LocalProcessWorkerGatewayTest {
     }
 
     @Test
-    void dispatcherGatewayReturnsWorkerIdWithoutPersistingTaskState() {
-        LocalProcessWorkerGateway gateway = gatewayReturning("execute-stage", "{\"workerId\":\"worker-local-01\"}");
+    void dispatcherGatewayReturnsStructuredTerminalResultWithoutPersistingTaskState() {
+        LocalProcessWorkerGateway gateway = gatewayReturning("execute-stage", """
+            {"workerId":"worker-local-01","status":"SUCCEEDED","artifacts":[]}
+            """);
 
         DispatchReceipt receipt = gateway.dispatch(stageRequest());
 
         assertThat(receipt.workerId()).isEqualTo("worker-local-01");
+        assertThat(receipt.succeeded()).isTrue();
+        assertThat(receipt.artifacts()).isEmpty();
     }
 
     @Test
@@ -185,7 +189,7 @@ class LocalProcessWorkerGatewayTest {
                     + "\"metadataSnapshot\":{},\"confidence\":0.91}]}";
                 case BUILD_PLAN -> "{\"version\":\"plan-v1\",\"stages\":["
                     + "{\"stageKey\":\"READ\",\"stageCode\":\"READ_SOURCE\",\"dependsOnStageKeys\":[]}] }";
-                case EXECUTE_STAGE -> "{\"workerId\":\"worker-local-01\"}";
+                case EXECUTE_STAGE -> "{\"workerId\":\"worker-local-01\",\"status\":\"SUCCEEDED\",\"artifacts\":[]}";
             };
             String response = "{\"schemaVersion\":\"1.0\",\"operation\":\"" + operation
                 + "\",\"requestId\":\"" + invocation.requestId() + "\",\"payload\":" + payload + "}";

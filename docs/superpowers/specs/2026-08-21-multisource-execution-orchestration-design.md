@@ -24,7 +24,7 @@ It does not change frontend code, frontend contracts outside these backend endpo
 
 `DispatchNextStageUseCase` generates an `ExecutionId`, constructs a lease-bound execution context, and passes both to `TaskStageRepository` to atomically claim a runnable stage. The claim transitions that stage to `RUNNING` in the same compare-and-set operation, then the use case creates a grant, builds a server-owned `StageExecutionRequest`, and calls `TaskDispatcher`. The current implementation uses the existing local Worker gateway synchronously, while the application boundary is event-oriented so the gateway can later be replaced by a queue or remote Worker.
 
-The current local Worker is synchronous and returns only a dispatch receipt (`workerId`), not asynchronous lifecycle callbacks. Therefore the Java dispatcher records its own terminal event with `eventSequence=1` for each attempt after the synchronous invocation returns or throws. The existing database uniqueness key `(stageId, attempt, eventSequence)` is the first-version idempotency key. A future remote Worker callback may provide additional event sequences for the same attempt, but an external Worker event ID is not part of the current contract.
+The current local Worker is synchronous and returns a structured terminal response (`workerId`, `status`, and `artifacts`), not asynchronous lifecycle callbacks. The placeholder Worker currently returns `status=SUCCEEDED` with an empty artifact list because it does not yet execute a real algorithm. Therefore the Java dispatcher records its own terminal event with `eventSequence=1` for each attempt: success after a validated synchronous response, or `FAILED` with a structured dispatch error when the gateway throws. The existing database uniqueness key `(stageId, attempt, eventSequence)` is the first-version idempotency key. A future remote Worker callback may provide additional event sequences for the same attempt, but an external Worker event ID is not part of the current contract.
 
 ## State Rules
 
@@ -46,11 +46,11 @@ The task becomes `RUNNING` when its first stage is claimed, `SUCCEEDED` when all
 
 ## DAG Progression
 
-The planner snapshot remains the source of stage order and dependencies. A stage is runnable only when all required predecessor stages are `SUCCEEDED`. On success, the transaction registers validated artifacts, marks the current stage complete, and identifies newly runnable stages. Dispatch of the next stage occurs after the state transaction commits, preventing a Worker callback from observing a partially persisted graph. No client-provided stage type or dependency may override the task plan snapshot.
+The planner snapshot remains the source of stage order and dependencies. Task creation combines the Worker-returned plan version and stages with the server deployment's configured `processorVersion`, then persists the resulting immutable plan snapshot. A stage is runnable only when all required predecessor stages are `SUCCEEDED`. On success, the transaction registers validated artifacts, marks the current stage complete, and identifies newly runnable stages. Dispatch of the next stage occurs after the state transaction commits, preventing a Worker callback from observing a partially persisted graph. No client-provided stage type, dependency, or Worker version may override the task plan snapshot.
 
 ## Execution Grant And Output Safety
 
-The server creates an execution grant containing task ID, stage ID, execution ID, attempt, allowed input logical URIs, output logical URI, and expiry. The Worker receives the grant through the existing local manifest/contract. It never receives an unrestricted client path. Output files must be regular files under the controlled Worker work root, have a declared logical URI and checksum, and pass the stage's expected artifact contract before registration.
+The server creates an execution grant containing task ID, stage ID, execution ID, attempt, allowed input logical URIs, output logical URI, and expiry. The grant reference is opaque to the Worker; its full scope remains server-side and is validated by the asset resolver. The Worker receives only the reference and expiry through the existing local manifest/contract, never an unrestricted client path. Output files must be regular files under the controlled Worker work root, have a declared logical URI and checksum, and pass the stage's expected artifact contract before registration.
 
 ## Failure, Cancellation, And Recovery
 
@@ -82,7 +82,7 @@ Tests are layered and focused:
 4. Worker gateway tests verify timeout, malformed response, output validation, and cancellation translation.
 5. Controller tests verify ownership, request validation, and response mapping without writing the development database.
 
-The first implementation checkpoint is dispatch plus event persistence and stage transitions. Artifact registration, recovery, and expanded query APIs follow as separate checkpoints, each with its own focused verification.
+The first implementation checkpoint is the in-memory dispatch boundary plus idempotent event acceptance and stage transitions. The current checkpoint does not yet persist execution state through MyBatis, register validated artifacts, or implement cancellation/recovery. Those behaviors remain separate checkpoints, each with its own focused verification.
 
 ## Explicit Non-Goals
 

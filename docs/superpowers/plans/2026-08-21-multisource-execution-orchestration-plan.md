@@ -28,6 +28,8 @@ The existing `LocalProcessWorkerGateway` blocks until `execute-stage` returns an
 
 `TaskStage` keeps its existing five logical fields and its compatibility constructor. It gains a nullable `StageExecution` value for execution ID, lease expiry, Worker ID, error code/message, started time, and finished time. `attempt` remains an `int`; `ExecutionAttempt` is removed from this plan to avoid a needless breaking change across task creation and persistence.
 
+**Confirmed implementation correction (2026-08-21):** `processorVersion` is deployment configuration (`MULTISOURCE_WORKER_PROCESSOR_VERSION`) and is frozen into the persisted `ProcessingPlan` when a task is created. `AssetStorage` receives a scoped `ExecutionGrantRequest` containing task/stage/execution IDs, attempt, inputs, and output URI. The opaque Worker-facing grant reference is bound to that scope by the Admin adapter; legacy unscoped grants are not accepted by the production adapter.
+
 ## Task 1: Freeze Domain State Transitions And Execution Identity
 
 **Files:**
@@ -74,6 +76,8 @@ The existing `LocalProcessWorkerGateway` blocks until `execute-stage` returns an
 - [ ] **Step 3: Implement dispatch.** Load the task and stage snapshots, claim the stage through the repository, create an execution grant limited to the task inputs/output and expiry, build `StageExecutionRequest` from the persisted plan snapshot, and call `TaskDispatcher` outside the persistence transaction. Persist a structured dispatch failure event when gateway invocation fails.
 - [ ] **Step 4: Implement event acceptance.** Insert the event idempotently first; only the newly inserted event may mutate stage/artifact/task state. Validate execution ID and attempt, translate Worker success/failure into domain transitions, and return the prior result for duplicates.
 - [ ] **Step 5: Run focused tests and commit.** Run `mvn -pl htht-modules/htht-multisource -am -Dtest=DispatchNextStageUseCaseTest,AcceptWorkerEventUseCaseTest test`; commit `feat: dispatch stages and apply worker events`.
+
+**Current checkpoint note (2026-08-21):** The synchronous Worker contract is implemented as `{"workerId":"worker-local","status":"SUCCEEDED","artifacts":[]}`. Java records `eventSequence=1` after a validated success and records `WORKER_DISPATCH_FAILED` when the gateway throws. The focused application tests pass. Task 3 remains open until persistence-backed claiming/event insertion and artifact registration are implemented in Tasks 4-5; the placeholder Worker intentionally produces no artifacts.
 
 ## Task 4: Align Persistence With The Existing `rs_` Schema
 

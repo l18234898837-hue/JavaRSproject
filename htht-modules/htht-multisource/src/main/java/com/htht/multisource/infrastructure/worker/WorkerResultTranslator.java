@@ -3,6 +3,7 @@ package com.htht.multisource.infrastructure.worker;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.htht.multisource.application.port.out.model.DispatchReceipt;
+import com.htht.multisource.application.port.out.model.ArtifactCandidate;
 import com.htht.multisource.application.port.out.model.InspectionResponse;
 import com.htht.multisource.domain.model.AssetReference;
 import com.htht.multisource.domain.model.InputAsset;
@@ -54,7 +55,20 @@ public final class WorkerResultTranslator {
     }
 
     public DispatchReceipt toDispatchReceipt(DecodedWorkerResponse response) {
-        return new DispatchReceipt(requiredText(response, response.payload(), "workerId"));
+        JsonNode payload = response.payload();
+        if (!"SUCCEEDED".equals(requiredText(response, payload, "status"))) {
+            throw failure(response, "status must be SUCCEEDED for a synchronous terminal response");
+        }
+        List<ArtifactCandidate> artifacts = new ArrayList<>();
+        for (JsonNode artifact : requiredArray(response, payload, "artifacts")) {
+            artifacts.add(new ArtifactCandidate(
+                new StorageUri(requiredText(response, artifact, "uri")),
+                requiredText(response, artifact, "checksum"),
+                requiredText(response, artifact, "type"),
+                requiredLong(response, artifact, "sizeBytes")
+            ));
+        }
+        return new DispatchReceipt(requiredText(response, payload, "workerId"), true, artifacts);
     }
 
     private ProductCandidate toCandidate(DecodedWorkerResponse response, JsonNode node) {
@@ -118,6 +132,14 @@ public final class WorkerResultTranslator {
             throw failure(response, field + " must be an integer");
         }
         return value.asInt();
+    }
+
+    private static long requiredLong(DecodedWorkerResponse response, JsonNode parent, String field) {
+        JsonNode value = parent.get(field);
+        if (value == null || !value.canConvertToLong() || value.asLong() < 0) {
+            throw failure(response, field + " must be a non-negative integer");
+        }
+        return value.asLong();
     }
 
     private static boolean requiredBoolean(DecodedWorkerResponse response, JsonNode parent, String field) {
