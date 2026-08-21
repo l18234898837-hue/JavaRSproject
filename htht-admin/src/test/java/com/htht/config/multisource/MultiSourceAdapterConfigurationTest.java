@@ -10,6 +10,7 @@ import com.htht.multisource.infrastructure.persistence.mapper.BatchProductMyBati
 import com.htht.multisource.infrastructure.persistence.mapper.ProcessingBatchMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.ProcessingTaskMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskInputAssetMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskEventMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskProductMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskStageMyBatisMapper;
 import com.htht.system.service.ISysFileService;
@@ -51,6 +52,7 @@ class MultiSourceAdapterConfigurationTest {
             .withBean(ProcessingTaskMyBatisMapper.class, () -> mock(ProcessingTaskMyBatisMapper.class))
             .withBean(TaskProductMyBatisMapper.class, () -> mock(TaskProductMyBatisMapper.class))
             .withBean(TaskInputAssetMyBatisMapper.class, () -> mock(TaskInputAssetMyBatisMapper.class))
+            .withBean(TaskEventMyBatisMapper.class, () -> mock(TaskEventMyBatisMapper.class))
             .withBean(ProcessingBatchMyBatisMapper.class, () -> mock(ProcessingBatchMyBatisMapper.class))
             .withBean(BatchProductMyBatisMapper.class, () -> mock(BatchProductMyBatisMapper.class))
             .withBean(TaskStageMyBatisMapper.class, () -> mock(TaskStageMyBatisMapper.class))
@@ -75,6 +77,7 @@ class MultiSourceAdapterConfigurationTest {
             .withBean(ProcessingTaskMyBatisMapper.class, () -> mock(ProcessingTaskMyBatisMapper.class))
             .withBean(TaskProductMyBatisMapper.class, () -> mock(TaskProductMyBatisMapper.class))
             .withBean(TaskInputAssetMyBatisMapper.class, () -> mock(TaskInputAssetMyBatisMapper.class))
+            .withBean(TaskEventMyBatisMapper.class, () -> mock(TaskEventMyBatisMapper.class))
             .withBean(ProcessingBatchMyBatisMapper.class, () -> mock(ProcessingBatchMyBatisMapper.class))
             .withBean(BatchProductMyBatisMapper.class, () -> mock(BatchProductMyBatisMapper.class))
             .withBean(TaskStageMyBatisMapper.class, () -> mock(TaskStageMyBatisMapper.class))

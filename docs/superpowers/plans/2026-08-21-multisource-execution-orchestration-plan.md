@@ -139,17 +139,16 @@ The existing `LocalProcessWorkerGateway` blocks until `execute-stage` returns an
 
 **Files:**
 - Create: `htht-admin/src/main/java/com/htht/web/controller/multisource/ProcessingExecutionController.java`
-- Create: `htht-admin/src/main/java/com/htht/web/controller/multisource/dto/DispatchStageRequest.java`
-- Create: `htht-admin/src/main/java/com/htht/web/controller/multisource/dto/RetryStageRequest.java`
+- Create: `htht-admin/src/main/java/com/htht/web/controller/multisource/dto/DispatchStageResponse.java`
 - Create: `htht-admin/src/main/java/com/htht/web/controller/multisource/dto/ExecutionProgressResponse.java`
 - Modify: `htht-admin/src/main/java/com/htht/config/multisource/MultiSourceAdapterConfiguration.java`
 - Test: `htht-admin/src/test/java/com/htht/web/controller/multisource/ProcessingExecutionControllerTest.java`
 - Test: `htht-admin/src/test/java/com/htht/config/multisource/MultiSourceAdapterConfigurationTest.java`
 
-- [ ] **Step 1: Write controller tests.** Verify authenticated owner can dispatch, cancel, retry, and query progress; non-owner receives the existing not-found response; requests cannot supply execution IDs, physical paths, Worker commands, output URIs, or plan snapshots.
-- [ ] **Step 2: Implement controller mapping.** Add `POST /api/multisource/processing-tasks/{taskId}/dispatch`, `POST /api/multisource/processing-tasks/{taskId}/cancel`, `POST /api/multisource/processing-stages/{stageId}/retry`, and `GET /api/multisource/processing-tasks/{taskId}/progress`. Delegate all behavior to use cases.
-- [ ] **Step 3: Assemble Spring beans.** Wire the new use cases to existing repositories, `TaskDispatcher`, asset validator, ID generator, clock, and authenticated-subject adapter. Keep `htht-multisource` free of Admin/System imports.
-- [ ] **Step 4: Run controller tests and commit.** Run `mvn -pl htht-admin -am -Dtest=ProcessingExecutionControllerTest,MultiSourceAdapterConfigurationTest test`; commit `feat: expose multisource execution endpoints`.
+- [x] **Step 1: Write controller tests.** Covered authenticated-owner dispatch authorization before invocation, owner-bound cancellation/retry, progress mapping, and omission of the internal execution ID from the dispatch response. No request DTO is created: all four operations identify work only from the path ID, so requests cannot carry execution IDs, physical paths, Worker commands, output URIs, or plan snapshots.
+- [x] **Step 2: Implement controller mapping.** Added `POST /api/multisource/processing-tasks/{taskId}/dispatch`, `POST /api/multisource/processing-tasks/{taskId}/cancel`, `POST /api/multisource/processing-stages/{stageId}/retry`, and `GET /api/multisource/processing-tasks/{taskId}/progress`. Dispatch first calls the owner-checking task-detail use case; cancellation and retry enforce ownership in their application services.
+- [x] **Step 3: Assemble Spring beans.** Admin configuration wires event persistence, clock, execution ID generation, event acceptance, dispatch, cancellation, and retry. The stage execution lease is server-owned and fixed at five minutes; the Worker process timeout remains separate deployment configuration. Retry keeps the approved three-total-attempt deployment limit. `htht-multisource` remains free of Admin/System imports.
+- [x] **Step 4: Run controller tests and commit.** Focused Admin Java regression passed on 2026-08-21: `ProcessingExecutionControllerTest` (3), `MultiSourceAdapterConfigurationTest` (2), `ProcessingTaskControllerTest` (2), and `ProcessingBatchControllerTest` (1), for 8 tests with 0 failures. No development database was contacted.
 
 ## Task 8: Verification, Documentation, And Clean-Database Check
 

@@ -76,7 +76,7 @@ The backend adds authenticated task operations for:
 - reading progress and execution events;
 - reading registered artifacts and quality results.
 
-Client requests identify tasks and optional retry reasons only. The server owns stage IDs, execution IDs, grants, input paths, output locations, worker commands, and plan snapshots. Non-owners receive the existing not-found behavior.
+The implemented endpoints are `POST /api/multisource/processing-tasks/{taskId}/dispatch`, `POST /api/multisource/processing-tasks/{taskId}/cancel`, `POST /api/multisource/processing-stages/{stageId}/retry`, and `GET /api/multisource/processing-tasks/{taskId}/progress`. They accept no request body: the server derives identity from the authenticated session and receives only the task or stage path ID. The global Sa-Token interceptor requires login for these non-excluded routes. Dispatch explicitly obtains owner-checked task detail before invoking the dispatch use case; cancellation, retry, and progress retain application-layer owner validation. Responses never expose execution IDs, Worker commands, physical paths, grants, output locations, or plan snapshots.
 
 ## Testing And Verification
 
@@ -88,7 +88,7 @@ Tests are layered and focused:
 4. Worker gateway tests verify timeout, malformed response, output validation, and cancellation translation.
 5. Controller tests verify ownership, request validation, and response mapping without writing the development database.
 
-The first implementation checkpoint is the in-memory dispatch boundary plus idempotent event acceptance and stage transitions. The persistence checkpoint now maps execution context and JSON event payloads, inserts events idempotently, updates existing stage rows with explicit full-column state, and atomically claims dependency-satisfied stages through PostgreSQL `UPDATE ... RETURNING` with `SKIP LOCKED`. The isolated PostgreSQL tests are environment-gated and were skipped because no dedicated `MULTISOURCE_IT_*` variables were configured; no development database was used. Validated artifact registration, task lifecycle summary, cancellation, retry, timeout recovery, and HTTP composition remain separate checkpoints.
+The first implementation checkpoint is the in-memory dispatch boundary plus idempotent event acceptance and stage transitions. The persistence checkpoint now maps execution context and JSON event payloads, inserts events idempotently, updates existing stage rows with explicit full-column state, and atomically claims dependency-satisfied stages through PostgreSQL `UPDATE ... RETURNING` with `SKIP LOCKED`. The isolated PostgreSQL tests are environment-gated and were skipped because no dedicated `MULTISOURCE_IT_*` variables were configured; no development database was used. Validated artifact registration, task lifecycle summary, cancellation, retry, timeout recovery, and authenticated HTTP composition are implemented checkpoints.
 
 The execution event migration `V20260821_01__add_execution_event_id.sql` adds only nullable `rs_task_event.execution_id` with a rollback comment. It does not alter `st_island_info` or `sd_observe_data`. Task 5 maps the existing `rs_artifact.size_bytes` column from the validated artifact contract; no fake value is written. Task lifecycle status is updated with a dedicated repository operation, never through the task creation `save()` path.
 

@@ -6,6 +6,9 @@ import com.htht.common.utils.IDUtil;
 import com.htht.multisource.application.port.out.ArtifactRepository;
 import com.htht.multisource.application.port.out.ArtifactValidator;
 import com.htht.multisource.application.port.out.AssetStorage;
+import com.htht.multisource.application.port.out.ExecutionClock;
+import com.htht.multisource.application.port.out.ExecutionEventRepository;
+import com.htht.multisource.application.port.out.ExecutionIdGenerator;
 import com.htht.multisource.application.port.out.PreflightSessionStore;
 import com.htht.multisource.application.port.out.ProcessingBatchIdGenerator;
 import com.htht.multisource.application.port.out.ProcessingBatchRepository;
@@ -15,19 +18,28 @@ import com.htht.multisource.application.port.out.ProductInspector;
 import com.htht.multisource.application.port.out.StageIdGenerator;
 import com.htht.multisource.application.port.out.TaskIdGenerator;
 import com.htht.multisource.application.port.out.TaskStageRepository;
+import com.htht.multisource.application.usecase.AcceptWorkerEventUseCase;
+import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.CreateProcessingBatchUseCase;
 import com.htht.multisource.application.usecase.CreateProcessingTaskUseCase;
+import com.htht.multisource.application.usecase.DispatchNextStageUseCase;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
 import com.htht.multisource.application.usecase.PreflightProductUseCase;
+import com.htht.multisource.application.usecase.RetryFailedStageUseCase;
+import com.htht.multisource.application.usecase.service.AcceptWorkerEventService;
+import com.htht.multisource.application.usecase.service.CancelProcessingTaskService;
 import com.htht.multisource.application.usecase.service.CreateProcessingBatchService;
 import com.htht.multisource.application.usecase.service.CreateProcessingTaskService;
 import com.htht.multisource.application.usecase.service.GetTaskDetailService;
 import com.htht.multisource.application.usecase.service.PreflightProductService;
+import com.htht.multisource.application.usecase.service.DispatchNextStageService;
+import com.htht.multisource.application.usecase.service.RetryFailedStageService;
 import com.htht.multisource.application.usecase.service.TaskCreationCoordinator;
 import com.htht.multisource.application.usecase.service.ArtifactRegistration;
 import com.htht.multisource.application.usecase.service.ArtifactRegistrationService;
 import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.infrastructure.persistence.MyBatisArtifactRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisExecutionEventRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisProcessingBatchRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisProcessingTaskRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskStageRepository;
@@ -39,6 +51,7 @@ import com.htht.multisource.infrastructure.persistence.mapper.BatchProductMyBati
 import com.htht.multisource.infrastructure.persistence.mapper.ProcessingBatchMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.ProcessingTaskMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskInputAssetMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskEventMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskProductMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskStageMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMapper;
@@ -58,12 +71,21 @@ import org.springframework.context.annotation.Configuration;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.function.Supplier;
 
 @Configuration
 @EnableConfigurationProperties(MultiSourceWorkerProperties.class)
 public class MultiSourceAdapterConfiguration {
+    private static final Duration EXECUTION_LEASE_DURATION = Duration.ofMinutes(5);
+    private static final int MAX_STAGE_ATTEMPTS = 3;
+
+    private final MultiSourceWorkerProperties properties;
+
+    public MultiSourceAdapterConfiguration(MultiSourceWorkerProperties properties) {
+        this.properties = properties;
+    }
 
     @Bean
     public Supplier<AccessSubject> multisourceCurrentSubject() {
@@ -113,6 +135,22 @@ public class MultiSourceAdapterConfiguration {
     public ArtifactRepository multisourceArtifactRepository(ArtifactMyBatisMapper artifactMapper,
                                                              TaskPersistenceMapper persistenceMapper) {
         return new MyBatisArtifactRepository(artifactMapper, persistenceMapper);
+    }
+
+    @Bean
+    public ExecutionEventRepository multisourceExecutionEventRepository(TaskEventMyBatisMapper eventMapper,
+                                                                         TaskPersistenceMapper persistenceMapper) {
+        return new MyBatisExecutionEventRepository(eventMapper, persistenceMapper);
+    }
+
+    @Bean
+    public ExecutionClock multisourceExecutionClock() {
+        return Instant::now;
+    }
+
+    @Bean
+    public ExecutionIdGenerator multisourceExecutionIdGenerator() {
+        return () -> new com.htht.multisource.domain.model.ExecutionId(UUID.randomUUID().toString());
     }
 
     @Bean
@@ -195,6 +233,40 @@ public class MultiSourceAdapterConfiguration {
                                                      TaskStageRepository stageRepository,
                                                      ArtifactRepository artifactRepository) {
         return new GetTaskDetailService(taskRepository, stageRepository, artifactRepository);
+    }
+
+    @Bean
+    public AcceptWorkerEventUseCase acceptWorkerEventUseCase(TaskStageRepository stageRepository,
+                                                             ExecutionEventRepository eventRepository,
+                                                             ArtifactRegistration artifactRegistration,
+                                                             ProcessingTaskRepository taskRepository) {
+        return new AcceptWorkerEventService(stageRepository, eventRepository, artifactRegistration, taskRepository);
+    }
+
+    @Bean
+    public DispatchNextStageUseCase dispatchNextStageUseCase(ProcessingTaskRepository taskRepository,
+                                                             TaskStageRepository stageRepository,
+                                                             LocalProcessWorkerGateway workerGateway,
+                                                             SysFileAssetStorageAdapter assetStorage,
+                                                             ExecutionIdGenerator executionIdGenerator,
+                                                             ExecutionClock executionClock,
+                                                             AcceptWorkerEventUseCase eventUseCase) {
+        return new DispatchNextStageService(taskRepository, stageRepository, workerGateway, assetStorage,
+            executionIdGenerator, executionClock, EXECUTION_LEASE_DURATION, eventUseCase);
+    }
+
+    @Bean
+    public CancelProcessingTaskUseCase cancelProcessingTaskUseCase(ProcessingTaskRepository taskRepository,
+                                                                    TaskStageRepository stageRepository,
+                                                                    LocalProcessWorkerGateway workerGateway,
+                                                                    ExecutionClock executionClock) {
+        return new CancelProcessingTaskService(taskRepository, stageRepository, workerGateway, executionClock);
+    }
+
+    @Bean
+    public RetryFailedStageUseCase retryFailedStageUseCase(ProcessingTaskRepository taskRepository,
+                                                           TaskStageRepository stageRepository) {
+        return new RetryFailedStageService(taskRepository, stageRepository, MAX_STAGE_ATTEMPTS);
     }
 
     @Bean
