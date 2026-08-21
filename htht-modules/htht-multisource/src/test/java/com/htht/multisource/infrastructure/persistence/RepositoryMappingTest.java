@@ -20,11 +20,15 @@ import com.htht.multisource.domain.model.StageExecutionStatus;
 import com.htht.multisource.domain.model.StageId;
 import com.htht.multisource.domain.model.TaskStage;
 import com.htht.multisource.domain.model.Artifact;
+import com.htht.multisource.domain.model.ExecutionId;
+import com.htht.multisource.domain.model.StageExecution;
+import com.htht.multisource.application.port.out.model.ExecutionEvent;
 import com.htht.multisource.infrastructure.persistence.entity.ProcessingTaskEntity;
 import com.htht.multisource.infrastructure.persistence.entity.ProcessingBatchEntity;
 import com.htht.multisource.infrastructure.persistence.entity.BatchProductEntity;
 import com.htht.multisource.infrastructure.persistence.entity.TaskInputAssetEntity;
 import com.htht.multisource.infrastructure.persistence.entity.TaskProductEntity;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskStageMyBatisMapper;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMapper;
 import org.junit.jupiter.api.Tag;
@@ -32,6 +36,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -130,6 +136,30 @@ class RepositoryMappingTest {
     }
 
     @Test
+    void stageRoundTripsItsExecutionContext() {
+        Instant startedAt = Instant.parse("2026-08-21T10:00:00Z");
+        TaskStage stage = new TaskStage(new StageId(201L), TaskId.of(101L), "READ", StageExecutionStatus.RUNNING, 1,
+            new StageExecution(new ExecutionId("exec-01"), "worker-local", startedAt.plusSeconds(300),
+                startedAt.plusSeconds(30), "rs://logs/exec-01.log", null, null, startedAt, null));
+
+        assertThat(mapper.toStage(mapper.toStageEntity(stage))).isEqualTo(stage);
+    }
+
+    @Test
+    void executionEventMapsExecutionIdentityAndJsonPayload() {
+        ExecutionEvent event = new ExecutionEvent(TaskId.of(101L), new StageId(201L), new ExecutionId("exec-01"),
+            1, 1, ExecutionEvent.Type.SUCCEEDED, "{\"workerId\":\"worker-local\"}",
+            Instant.parse("2026-08-21T10:01:00Z"), ExecutionEvent.Acceptance.APPLIED);
+
+        var entity = mapper.toEventEntity(event);
+
+        assertThat(entity.getStageId()).isEqualTo(201L);
+        assertThat(entity.getExecutionId()).isEqualTo("exec-01");
+        assertThat(entity.getEventSequence()).isEqualTo(1L);
+        assertThat(entity.getPayload()).isEqualTo("{\"workerId\":\"worker-local\"}");
+    }
+
+    @Test
     void jsonSnapshotsDeclarePostgreSqlJsonbTypeHandling() throws NoSuchFieldException {
         assertThat(jsonbField(ProcessingTaskEntity.class, "parameterSnapshot").typeHandler().getName())
             .isEqualTo("com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler");
@@ -141,6 +171,17 @@ class RepositoryMappingTest {
             .isEqualTo("com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler");
         assertThat(jsonbField(TaskProductEntity.class, "metadataSnapshot").typeHandler().getName())
             .isEqualTo("com.htht.multisource.infrastructure.persistence.typehandler.PostgreSqlJsonbTypeHandler");
+    }
+
+    @Test
+    void claimSqlLocksOneRunnableStageAndReturnsTheUpdatedRow() throws NoSuchMethodException {
+        Method claim = TaskStageMyBatisMapper.class.getMethod("claimNextRunnable",
+            long.class, String.class, String.class, Instant.class, Instant.class);
+        String sql = String.join(" ", claim.getAnnotation(org.apache.ibatis.annotations.Select.class).value());
+
+        assertThat(sql).contains("execution_status IN ('PENDING', 'RETRYING')",
+            "prerequisite.execution_status <> 'SUCCEEDED'", "FOR UPDATE OF s SKIP LOCKED", "RETURNING s.*");
+        assertThat(sql.indexOf("LIMIT 1")).isLessThan(sql.indexOf("FOR UPDATE OF s SKIP LOCKED"));
     }
 
     private static TableField jsonbField(Class<?> type, String name) throws NoSuchFieldException {

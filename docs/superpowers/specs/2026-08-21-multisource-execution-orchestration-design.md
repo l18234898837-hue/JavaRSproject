@@ -1,6 +1,6 @@
 # Multisource Execution Orchestration Design
 
-**Status:** Approved for implementation on 2026-08-21
+**Status:** Task 4 persistence checkpoint implemented on 2026-08-21; artifact validation and lifecycle recovery remain.
 
 ## Goal
 
@@ -82,7 +82,9 @@ Tests are layered and focused:
 4. Worker gateway tests verify timeout, malformed response, output validation, and cancellation translation.
 5. Controller tests verify ownership, request validation, and response mapping without writing the development database.
 
-The first implementation checkpoint is the in-memory dispatch boundary plus idempotent event acceptance and stage transitions. The current checkpoint does not yet persist execution state through MyBatis, register validated artifacts, or implement cancellation/recovery. Those behaviors remain separate checkpoints, each with its own focused verification.
+The first implementation checkpoint is the in-memory dispatch boundary plus idempotent event acceptance and stage transitions. The persistence checkpoint now maps execution context and JSON event payloads, inserts events idempotently, updates existing stage rows with explicit full-column state, and atomically claims dependency-satisfied stages through PostgreSQL `UPDATE ... RETURNING` with `SKIP LOCKED`. The isolated PostgreSQL tests are environment-gated and were skipped because no dedicated `MULTISOURCE_IT_*` variables were configured; no development database was used. Validated artifact registration, task lifecycle summary, cancellation, retry, timeout recovery, and HTTP composition remain separate checkpoints.
+
+The execution event migration `V20260821_01__add_execution_event_id.sql` adds only nullable `rs_task_event.execution_id` with a rollback comment. It does not alter `st_island_info` or `sd_observe_data`. The existing `rs_artifact.size_bytes` column remains unmapped until the domain artifact contract gains the validated size field in Task 5; no fake value is written.
 
 ## Explicit Non-Goals
 

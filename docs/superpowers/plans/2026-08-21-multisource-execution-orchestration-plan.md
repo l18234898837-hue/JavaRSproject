@@ -17,7 +17,7 @@
 - Extend `TaskStageRepository`, `ArtifactRepository`, and add execution-event/recovery ports under `htht-modules/htht-multisource/src/main/java/com/htht/multisource/application/port/out/`.
 - Create orchestration use cases under `htht-modules/htht-multisource/src/main/java/com/htht/multisource/application/usecase/`: dispatch, accept event, cancel, retry, recover timeout, and query progress.
 - Extend entities, persistence mapping, MyBatis mappers, and repositories under `htht-modules/htht-multisource/src/main/java/com/htht/multisource/infrastructure/persistence/`.
-- Add a migration only if the current schema verification proves the required execution idempotency constraint is missing: `script/sql/migrations/V20260821_01__add_execution_orchestration_constraints.sql`.
+- Add the verified execution audit migration when required: `script/sql/migrations/V20260821_01__add_execution_event_id.sql`.
 - Add authenticated execution controllers and DTOs under `htht-admin/src/main/java/com/htht/web/controller/multisource/`.
 - Extend `MultiSourceAdapterConfiguration` only after application ports and repository adapters compile.
 - Add focused tests beside each changed layer; do not add frontend tests or database writes against the development database.
@@ -95,10 +95,12 @@ The existing `LocalProcessWorkerGateway` blocks until `execute-stage` returns an
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/infrastructure/persistence/RepositoryMappingTest.java`
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/infrastructure/persistence/MigrationScriptTest.java`
 
-- [ ] **Step 1: Extend mapping tests first.** Verify stage execution ID, lease/error/timestamps, event sequence and acceptance status, artifact size, and JSON payload map without dropping existing columns.
-- [ ] **Step 2: Verify migration before writing one.** Run `mvn -pl htht-modules/htht-multisource -am -Dtest=MigrationScriptTest test` and inspect `V20260819_01__create_multisource_core_tables.sql`. If the existing unique `(stage_id, attempt, event_sequence)` constraint is sufficient for the Worker contract, add no migration. If a globally stable Worker event ID is required by the codec, add `V20260821_01__add_execution_orchestration_constraints.sql` with only the missing nullable column/index and a rollback comment.
-- [ ] **Step 3: Implement entities, mapper, and repositories.** Add row-lock/compare-and-set SQL for claiming the next runnable stage using `rs_task_stage_dependency`; use `insertIfAbsent` and map duplicate-key conflicts to an idempotent duplicate result. Preserve PostgreSQL JSONB handlers and never alter `st_island_info` or `sd_observe_data`.
-- [ ] **Step 4: Run persistence tests.** Run `mvn -pl htht-modules/htht-multisource -am -Dtest=RepositoryMappingTest,MigrationScriptTest test`; commit `feat: persist execution state and events`.
+- [x] **Step 1: Extend mapping tests first.** Stage execution identity, lease/error/timestamps, heartbeat/log fields, event sequence/acceptance, and JSON payload mappings are covered. `rs_artifact.size_bytes` is intentionally deferred to Task 5 because the current domain `Artifact` has no size field; no fabricated value is persisted.
+- [x] **Step 2: Verify migration before writing one.** The existing event key `(stage_id, attempt, event_sequence)` is sufficient for the current Java-owned terminal event. A nullable `rs_task_event.execution_id` migration was added for audit and stale-event traceability; it does not touch source tables and includes rollback guidance.
+- [x] **Step 3: Implement entities, mapper, and repositories.** Added idempotent event insertion, explicit full-column stage state updates, and one-statement PostgreSQL claim SQL using dependency filtering, `PENDING/RETRYING` states, `FOR UPDATE SKIP LOCKED`, and `RETURNING`. Existing PostgreSQL JSONB handlers remain in use; `st_island_info` and `sd_observe_data` are unchanged.
+- [x] **Step 4: Run persistence tests.** Focused persistence verification passed: `RepositoryAdapterTest`, `RepositoryMappingTest`, and `MigrationScriptTest`; the three isolated PostgreSQL tests were skipped because dedicated `MULTISOURCE_IT_*` variables were not configured. No development database was contacted.
+
+**Task 4 checkpoint evidence (2026-08-21):** The final focused Java run covered 28 tests across domain execution transitions and persistence adapters/mappings with 0 failures. The broader persistence run covered 25 tests with 22 passing and 3 environment-gated PostgreSQL tests skipped.
 
 ## Task 5: Add Artifact Validation And DAG Task Summary
 

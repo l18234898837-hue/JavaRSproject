@@ -60,4 +60,15 @@ class MigrationScriptTest {
         );
         assertThat(gf6Sql).doesNotContain("CALIBRATION_CAPABILITY", "SPECTRAL_INDEX_CAPABILITY");
     }
+
+    @Test
+    void executionEventMigrationAddsExecutionIdWithoutChangingSourceTables() throws IOException {
+        String sql = Files.readString(MIGRATIONS.resolve("V20260821_01__add_execution_event_id.sql"));
+
+        assertThat(sql).contains(
+            "ALTER TABLE rs_task_event ADD COLUMN execution_id varchar(128)",
+            "Rollback: ALTER TABLE rs_task_event DROP COLUMN execution_id"
+        );
+        assertThat(sql).doesNotContain("st_island_info", "sd_observe_data");
+    }
 }

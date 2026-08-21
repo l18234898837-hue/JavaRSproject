@@ -61,7 +61,8 @@ class PostgreSqlMigrationIntegrationTest {
         "V20260819_02__create_multisource_indexes.sql",
         "V20260819_03__seed_multisource_profiles.sql",
         "V20260820_01__add_product_metadata_snapshots.sql",
-        "V20260820_02__seed_gf6_browse_profile.sql"
+        "V20260820_02__seed_gf6_browse_profile.sql",
+        "V20260821_01__add_execution_event_id.sql"
     );
 
     @Test
@@ -234,6 +235,7 @@ class PostgreSqlMigrationIntegrationTest {
         configuration.addMapper(TaskProductMyBatisMapper.class);
         configuration.addMapper(TaskInputAssetMyBatisMapper.class);
         configuration.addMapper(TaskStageMyBatisMapper.class);
+        configuration.addMapper(com.htht.multisource.infrastructure.persistence.mapper.TaskEventMyBatisMapper.class);
         configuration.addMapper(ArtifactMyBatisMapper.class);
         return new com.baomidou.mybatisplus.core.MybatisSqlSessionFactoryBuilder().build(configuration);
     }

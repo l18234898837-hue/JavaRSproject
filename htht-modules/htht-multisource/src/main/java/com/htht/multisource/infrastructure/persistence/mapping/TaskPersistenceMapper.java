@@ -23,6 +23,8 @@ import com.htht.multisource.domain.model.TaskId;
 import com.htht.multisource.domain.model.TaskStage;
 import com.htht.multisource.domain.model.StageId;
 import com.htht.multisource.domain.model.StageExecutionStatus;
+import com.htht.multisource.domain.model.StageExecution;
+import com.htht.multisource.domain.model.ExecutionId;
 import com.htht.multisource.domain.model.TaskLifecycleStatus;
 import com.htht.multisource.infrastructure.persistence.entity.ProcessingTaskEntity;
 import com.htht.multisource.infrastructure.persistence.entity.ProcessingBatchEntity;
@@ -31,6 +33,8 @@ import com.htht.multisource.infrastructure.persistence.entity.TaskProductEntity;
 import com.htht.multisource.infrastructure.persistence.entity.TaskStageEntity;
 import com.htht.multisource.infrastructure.persistence.entity.ArtifactEntity;
 import com.htht.multisource.infrastructure.persistence.entity.BatchProductEntity;
+import com.htht.multisource.infrastructure.persistence.entity.TaskEventEntity;
+import com.htht.multisource.application.port.out.model.ExecutionEvent;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -144,12 +148,41 @@ public final class TaskPersistenceMapper {
         entity.setStageKey(stage.stageKey());
         entity.setExecutionStatus(stage.status().name());
         entity.setAttempt(stage.attempt());
+        if (stage.execution() != null) {
+            entity.setExecutionId(stage.execution().executionId().value());
+            entity.setWorkerId(stage.execution().workerId());
+            entity.setLeaseExpireAt(stage.execution().leaseExpiresAt());
+            entity.setHeartbeatAt(stage.execution().heartbeatAt());
+            entity.setLogUri(stage.execution().logUri());
+            entity.setErrorCode(stage.execution().errorCode());
+            entity.setErrorMessage(stage.execution().errorMessage());
+            entity.setStartedAt(stage.execution().startedAt());
+            entity.setFinishedAt(stage.execution().finishedAt());
+        }
         return entity;
     }
 
     public TaskStage toStage(TaskStageEntity entity) {
+        StageExecution execution = entity.getExecutionId() == null ? null : new StageExecution(
+            new ExecutionId(entity.getExecutionId()), entity.getWorkerId(), entity.getLeaseExpireAt(),
+            entity.getHeartbeatAt(), entity.getLogUri(), entity.getErrorCode(), entity.getErrorMessage(),
+            entity.getStartedAt(), entity.getFinishedAt()
+        );
         return new TaskStage(new StageId(entity.getStageId()), TaskId.of(entity.getTaskId()), entity.getStageKey(),
-            StageExecutionStatus.valueOf(entity.getExecutionStatus()), entity.getAttempt());
+            StageExecutionStatus.valueOf(entity.getExecutionStatus()), entity.getAttempt(), execution);
+    }
+
+    public TaskEventEntity toEventEntity(ExecutionEvent event) {
+        TaskEventEntity entity = new TaskEventEntity();
+        entity.setStageId(event.stageId().value());
+        entity.setExecutionId(event.executionId().value());
+        entity.setAttempt(event.attempt());
+        entity.setEventSequence(event.eventSequence());
+        entity.setEventType(event.type().name());
+        entity.setAcceptanceStatus(event.acceptance().name());
+        entity.setPayload(event.payload());
+        entity.setOccurredAt(event.occurredAt());
+        return entity;
     }
 
     public ArtifactEntity toArtifactEntity(Artifact artifact) {

@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.htht.multisource.domain.model.Artifact;
+import com.htht.multisource.domain.model.ExecutionId;
+import com.htht.multisource.domain.model.StageExecution;
 import com.htht.multisource.domain.model.StageExecutionStatus;
 import com.htht.multisource.domain.model.StageId;
 import com.htht.multisource.domain.model.TaskId;
@@ -25,11 +27,15 @@ import com.htht.multisource.infrastructure.persistence.mapper.ProcessingTaskMyBa
 import com.htht.multisource.infrastructure.persistence.mapper.TaskInputAssetMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskProductMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskStageMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskEventMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.entity.TaskEventEntity;
+import com.htht.multisource.application.port.out.model.ExecutionEvent;
 import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMapper;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.io.Serializable;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -91,6 +97,71 @@ class RepositoryAdapterTest {
     }
 
     @Test
+    void stageRepositoryUpdatesAnExistingStageInsteadOfInsertingItAgain() {
+        InMemoryTaskStageMapper stages = new InMemoryTaskStageMapper();
+        MyBatisTaskStageRepository repository = new MyBatisTaskStageRepository(stages, persistenceMapper);
+        TaskStage pending = new TaskStage(new StageId(201L), TaskId.of(101L), "READ", StageExecutionStatus.PENDING, 1);
+        TaskStage running = pending.start(new ExecutionId("exec-01"), "worker-local",
+            Instant.parse("2026-08-21T10:00:00Z"), Instant.parse("2026-08-21T10:05:00Z"));
+
+        repository.save(pending);
+        repository.save(running);
+
+        assertThat(repository.findById(pending.id())).contains(running);
+        assertThat(stages.values).hasSize(1);
+    }
+
+    @Test
+    void stageRepositoryClearsExecutionContextWhenRetrying() {
+        InMemoryTaskStageMapper stages = new InMemoryTaskStageMapper();
+        MyBatisTaskStageRepository repository = new MyBatisTaskStageRepository(stages, persistenceMapper);
+        Instant startedAt = Instant.parse("2026-08-21T10:00:00Z");
+        TaskStage running = new TaskStage(new StageId(201L), TaskId.of(101L), "READ", StageExecutionStatus.PENDING, 1)
+            .start(new ExecutionId("exec-01"), "worker-local", startedAt, startedAt.plusSeconds(300));
+        TaskStage retrying = running.fail(new ExecutionId("exec-01"), 1, "WORKER_FAILED", "failed", startedAt.plusSeconds(1))
+            .retry();
+
+        repository.save(running);
+        repository.save(retrying);
+
+        assertThat(stages.values.get(0).getExecutionId()).isNull();
+        assertThat(stages.values.get(0).getLeaseExpireAt()).isNull();
+        assertThat(stages.values.get(0).getErrorCode()).isNull();
+    }
+
+    @Test
+    void stageRepositoryReturnsTheAtomicallyClaimedStage() {
+        InMemoryTaskStageMapper stages = new InMemoryTaskStageMapper();
+        MyBatisTaskStageRepository repository = new MyBatisTaskStageRepository(stages, persistenceMapper);
+        Instant startedAt = Instant.parse("2026-08-21T10:00:00Z");
+        StageExecution execution = new StageExecution(new ExecutionId("exec-01"), "worker-local",
+            startedAt.plusSeconds(300), null, null, startedAt, null);
+        TaskStage claimed = new TaskStage(new StageId(201L), TaskId.of(101L), "READ",
+            StageExecutionStatus.PENDING, 1).start(execution.executionId(), execution.workerId(),
+            execution.startedAt(), execution.leaseExpiresAt());
+        stages.claimResult = persistenceMapper.toStageEntity(claimed);
+
+        var result = repository.claimNextRunnable(TaskId.of(101L), execution, startedAt);
+
+        assertThat(result).hasValueSatisfying(claim -> assertThat(claim.stage()).isEqualTo(claimed));
+        assertThat(stages.claimTaskId).isEqualTo(101L);
+        assertThat(stages.claimExecutionId).isEqualTo("exec-01");
+    }
+
+    @Test
+    void executionEventRepositoryTreatsDuplicateEventAsNoOp() {
+        InMemoryTaskEventMapper events = new InMemoryTaskEventMapper();
+        MyBatisExecutionEventRepository repository = new MyBatisExecutionEventRepository(events, persistenceMapper);
+        ExecutionEvent event = new ExecutionEvent(TaskId.of(101L), new StageId(201L), new ExecutionId("exec-01"),
+            1, 1, ExecutionEvent.Type.SUCCEEDED, "{}", Instant.parse("2026-08-21T10:01:00Z"),
+            ExecutionEvent.Acceptance.APPLIED);
+
+        assertThat(repository.insertIfAbsent(event)).isTrue();
+        assertThat(repository.insertIfAbsent(event)).isFalse();
+        assertThat(events.values).hasSize(1);
+    }
+
+    @Test
     void artifactRepositoryPersistsAndFindsTaskArtifacts() {
         InMemoryArtifactMapper artifacts = new InMemoryArtifactMapper();
         MyBatisArtifactRepository repository = new MyBatisArtifactRepository(artifacts, persistenceMapper);
@@ -122,7 +193,16 @@ class RepositoryAdapterTest {
         @Override public int deleteByMap(Map<String, Object> columnMap) { throw new UnsupportedOperationException(); }
         @Override public int delete(Wrapper<T> queryWrapper) { throw new UnsupportedOperationException(); }
         @Override public int deleteBatchIds(Collection<?> idList) { throw new UnsupportedOperationException(); }
-        @Override public int updateById(T entity) { throw new UnsupportedOperationException(); }
+        @Override public int updateById(T entity) {
+            Long entityId = idExtractor.apply(entity);
+            for (int index = 0; index < values.size(); index++) {
+                if (idExtractor.apply(values.get(index)).equals(entityId)) {
+                    values.set(index, entity);
+                    return 1;
+                }
+            }
+            return 0;
+        }
         @Override public int update(T entity, Wrapper<T> updateWrapper) { throw new UnsupportedOperationException(); }
         @Override public List<T> selectBatchIds(Collection<? extends Serializable> idList) { throw new UnsupportedOperationException(); }
         @Override public List<T> selectByMap(Map<String, Object> columnMap) { throw new UnsupportedOperationException(); }
@@ -153,8 +233,32 @@ class RepositoryAdapterTest {
         @Override public List<TaskInputAssetEntity> selectByTaskId(long taskId) { return values.stream().filter(value -> value.getTaskId() == taskId).toList(); }
     }
     private static final class InMemoryTaskStageMapper extends InMemoryBaseMapper<TaskStageEntity> implements TaskStageMyBatisMapper {
+        private TaskStageEntity claimResult;
+        private long claimTaskId;
+        private String claimExecutionId;
         private InMemoryTaskStageMapper() { super(TaskStageEntity::getStageId); }
         @Override public List<TaskStageEntity> selectByTaskId(long taskId) { return values.stream().filter(value -> value.getTaskId() == taskId).toList(); }
+        @Override public int updateExecutionState(TaskStageEntity entity) { return updateById(entity); }
+        @Override public TaskStageEntity claimNextRunnable(long taskId, String executionId, String workerId,
+                                                          Instant leaseExpiresAt, Instant startedAt) {
+            claimTaskId = taskId;
+            claimExecutionId = executionId;
+            return claimResult;
+        }
+    }
+    private static final class InMemoryTaskEventMapper extends InMemoryBaseMapper<TaskEventEntity> implements TaskEventMyBatisMapper {
+        private InMemoryTaskEventMapper() { super(TaskEventEntity::getEventId); }
+
+        @Override public int insertIfAbsent(TaskEventEntity entity) {
+            boolean duplicate = values.stream().anyMatch(value -> value.getStageId().equals(entity.getStageId())
+                && value.getAttempt().equals(entity.getAttempt())
+                && value.getEventSequence().equals(entity.getEventSequence()));
+            if (duplicate) {
+                return 0;
+            }
+            entity.setEventId((long) values.size() + 1);
+            return insert(entity);
+        }
     }
     private static final class InMemoryArtifactMapper extends InMemoryBaseMapper<ArtifactEntity> implements ArtifactMyBatisMapper {
         private InMemoryArtifactMapper() { super(ArtifactEntity::getArtifactId); }
