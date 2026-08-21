@@ -71,6 +71,18 @@ class TaskStageTransitionTest {
     }
 
     @Test
+    void cancelsRunningStageWithTerminalExecutionDetailsAndSkipsReadyStage() {
+        TaskStage cancelled = runningStage().cancel(FINISHED_AT);
+        TaskStage skipped = pendingStage().cancel(FINISHED_AT);
+
+        assertThat(cancelled.status()).isEqualTo(StageExecutionStatus.SKIPPED);
+        assertThat(cancelled.execution().errorCode()).isEqualTo("CANCELED_BY_USER");
+        assertThat(cancelled.execution().finishedAt()).isEqualTo(FINISHED_AT);
+        assertThat(skipped.status()).isEqualTo(StageExecutionStatus.SKIPPED);
+        assertThat(skipped.execution()).isNull();
+    }
+
+    @Test
     void rejectsTerminalAndStaleTransitions() {
         assertThatThrownBy(() -> runningStage().succeed(new ExecutionId("wrong"), 1, FINISHED_AT))
             .isInstanceOf(IllegalStateException.class);

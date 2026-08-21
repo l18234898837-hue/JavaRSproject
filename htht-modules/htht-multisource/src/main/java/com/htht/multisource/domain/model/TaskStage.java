@@ -66,6 +66,18 @@ public record TaskStage(
         return new TaskStage(id, taskId, stageKey, StageExecutionStatus.RETRYING, attempt + 1, null);
     }
 
+    public TaskStage cancel(Instant finishedAt) {
+        if (status != StageExecutionStatus.PENDING && status != StageExecutionStatus.RETRYING
+            && status != StageExecutionStatus.RECOVERY_PENDING && status != StageExecutionStatus.RUNNING) {
+            throw new IllegalStateException("Only active or runnable stages can be canceled.");
+        }
+        if (status == StageExecutionStatus.RUNNING) {
+            return new TaskStage(id, taskId, stageKey, StageExecutionStatus.SKIPPED, attempt,
+                execution.withFailure("CANCELED_BY_USER", "Processing task was canceled by its owner.", finishedAt));
+        }
+        return new TaskStage(id, taskId, stageKey, StageExecutionStatus.SKIPPED, attempt, null);
+    }
+
     private void requireCurrentExecution(ExecutionId expectedExecutionId, int expectedAttempt) {
         if (status != StageExecutionStatus.RUNNING || execution == null
             || attempt != expectedAttempt || !execution.executionId().equals(expectedExecutionId)) {

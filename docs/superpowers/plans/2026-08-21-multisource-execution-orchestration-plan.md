@@ -119,6 +119,8 @@ The existing `LocalProcessWorkerGateway` blocks until `execute-stage` returns an
 
 ## Task 6: Implement Cancel, Retry, And Timeout Recovery
 
+**Confirmed policy (2026-08-21):** Cancellation is immediate: active stages become `SKIPPED` with `CANCELED_BY_USER`, ready or recovering stages become `SKIPPED`, and the Worker is terminated after the state transaction commits. Completed and failed stages remain historical records. Retry uses a deployment-owned uniform maximum of three total attempts per stage; the initial attempt is number one.
+
 **Files:**
 - Create: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/application/usecase/service/CancelProcessingTaskService.java`
 - Modify: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/application/usecase/RetryFailedStageUseCase.java`
@@ -128,10 +130,10 @@ The existing `LocalProcessWorkerGateway` blocks until `execute-stage` returns an
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/application/usecase/RetryFailedStageUseCaseTest.java`
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/application/usecase/RecoverTimedOutStageUseCaseTest.java`
 
-- [ ] **Step 1: Write failure-path tests.** Verify cancellation blocks new claims and calls `TaskDispatcher.cancel` for the active execution; verify only `FAILED` or `RECOVERY_PENDING` stages can retry; verify maximum attempts reject further retries; verify late events cannot revive cancelled or superseded attempts.
-- [ ] **Step 2: Implement cancellation and retry.** Enforce task ownership through `AccessSubject`, persist cancellation before stopping the Worker, mark pending stages skipped, and increment attempt only during a valid retry transition.
-- [ ] **Step 3: Implement timeout recovery.** Find expired `RUNNING` stages, transition to `RECOVERY_PENDING`, record a timeout event, and allow the retry use case to move it to `RETRYING` only within the configured attempt limit.
-- [ ] **Step 4: Run focused tests and commit.** Run `mvn -pl htht-modules/htht-multisource -am -Dtest=CancelProcessingTaskUseCaseTest,RetryFailedStageUseCaseTest,RecoverTimedOutStageUseCaseTest test`; commit `feat: support multisource cancellation retry and recovery`.
+- [x] **Step 1: Write failure-path tests.** Covered owner-only cancellation with post-commit Worker cancellation, running-stage cancellation history, retry state eligibility and the three-total-attempt limit, cancelled-task retry rejection, and timeout event/state recovery.
+- [x] **Step 2: Implement cancellation and retry.** `CancelProcessingTaskService` persists `CANCELING` then `CANCELED`, skips active/runnable stages, and invokes the dispatcher after transaction commit. `RetryFailedStageService` enforces ownership, permitted task lifecycle states, valid stage transitions, and the deployment-owned maximum of three total attempts.
+- [x] **Step 3: Implement timeout recovery.** `RecoverTimedOutStageService` finds expired `RUNNING` stages, idempotently inserts `TIMED_OUT`, changes stages to `RECOVERY_PENDING`, and updates each affected task summary to `RECOVERY_PENDING` once per task.
+- [x] **Step 4: Run focused tests and commit.** Focused Java verification passed on 2026-08-21: `CancelProcessingTaskUseCaseTest`, `RetryFailedStageUseCaseTest`, `RecoverTimedOutStageUseCaseTest`, and `TaskStageTransitionTest` ran 15 tests with 0 failures. No development database was contacted.
 
 ## Task 7: Expose Authenticated Execution APIs
 

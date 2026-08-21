@@ -18,6 +18,13 @@ public interface TaskStageMyBatisMapper extends BaseMapper<TaskStageEntity> {
             .orderByAsc(TaskStageEntity::getStageId));
     }
 
+    default List<TaskStageEntity> selectExpiredRunning(Instant now) {
+        return selectList(new LambdaQueryWrapper<TaskStageEntity>()
+            .eq(TaskStageEntity::getExecutionStatus, "RUNNING")
+            .lt(TaskStageEntity::getLeaseExpireAt, now)
+            .orderByAsc(TaskStageEntity::getLeaseExpireAt));
+    }
+
     @Select("WITH candidate AS ("
         + " SELECT s.stage_id FROM rs_task_stage s"
         + " WHERE s.task_id = #{taskId}"

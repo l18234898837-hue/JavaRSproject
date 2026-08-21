@@ -35,6 +35,11 @@ public final class MyBatisTaskStageRepository implements TaskStageRepository {
     }
 
     @Override
+    public List<TaskStage> findExpiredRunning(java.time.Instant now) {
+        return stageMapper.selectExpiredRunning(now).stream().map(persistenceMapper::toStage).toList();
+    }
+
+    @Override
     public void save(TaskStage stage) {
         TaskStageEntity entity = persistenceMapper.toStageEntity(stage);
         if (stageMapper.updateExecutionState(entity) == 0 && stageMapper.insert(entity) != 1) {

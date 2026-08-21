@@ -18,6 +18,10 @@ public interface TaskStageRepository {
 
     void save(TaskStage stage);
 
+    default List<TaskStage> findExpiredRunning(Instant now) {
+        throw new UnsupportedOperationException("Expired stage lookup is not implemented.");
+    }
+
     default Optional<StageClaim> claimNextRunnable(TaskId taskId, StageExecution execution, Instant now) {
         throw new UnsupportedOperationException("Atomic stage claiming is not implemented.");
     }

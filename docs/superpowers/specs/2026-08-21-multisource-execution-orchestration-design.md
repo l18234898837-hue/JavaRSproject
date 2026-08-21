@@ -1,6 +1,6 @@
 # Multisource Execution Orchestration Design
 
-**Status:** Task 5 artifact validation, registration, and task lifecycle summary implemented on 2026-08-21; lifecycle recovery remains.
+**Status:** Tasks 5-6 artifact validation, lifecycle summary, cancellation, retry, and timeout recovery implemented on 2026-08-21.
 
 ## Goal
 
@@ -58,7 +58,9 @@ Each execution uses the deterministic controlled directory `workRoot/<executionI
 
 ## Failure, Cancellation, And Recovery
 
-Worker protocol errors, non-zero exits, invalid responses, missing outputs, checksum mismatches, and expired grants fail the current attempt with a structured reason. Timeout moves a running stage to `RECOVERY_PENDING`; a recovery operation may retry it according to the configured maximum attempts. Cancellation records the request, asks the dispatcher to stop the active execution, and prevents new stages from being claimed. A late Worker event cannot resurrect a cancelled or superseded attempt.
+Worker protocol errors, non-zero exits, invalid responses, missing outputs, checksum mismatches, and expired grants fail the current attempt with a structured reason. Timeout idempotently records `TIMED_OUT`, moves a running stage to `RECOVERY_PENDING`, and changes each affected task summary to `RECOVERY_PENDING` once; a recovery operation may retry it according to the configured maximum attempts. The first implementation uses a deployment-owned uniform maximum of three total attempts per stage, including the initial attempt. Retrying is rejected for tasks that are cancelling, cancelled, succeeded, or failed.
+
+Cancellation is immediate and terminal for the local synchronous Worker: in one transaction the server verifies ownership, marks the task `CANCELING`, marks `PENDING`, `RETRYING`, and `RECOVERY_PENDING` stages `SKIPPED`, marks `RUNNING` stages `SKIPPED` with `CANCELED_BY_USER` execution detail, then marks the task `CANCELED`. After commit it calls `TaskDispatcher.cancel` for the captured running execution IDs. Completed and already failed stages retain their history. A later Worker event is recorded as ignored because its stage is no longer `RUNNING`, so it cannot revive cancelled work.
 
 ## Persistence And Concurrency
 
