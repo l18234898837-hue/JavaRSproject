@@ -22,9 +22,9 @@ It does not change frontend code, frontend contracts outside these backend endpo
 
 ## Architecture
 
-`DispatchNextStageUseCase` selects a runnable stage through `TaskStageRepository`, atomically claims it, creates an `ExecutionId` and grant, builds a server-owned `StageExecutionRequest`, and calls `TaskDispatcher`. The current implementation uses the existing local Worker gateway synchronously, while the application boundary is event-oriented so the gateway can later be replaced by a queue or remote Worker.
+`DispatchNextStageUseCase` generates an `ExecutionId`, constructs a lease-bound execution context, and passes both to `TaskStageRepository` to atomically claim a runnable stage. The claim transitions that stage to `RUNNING` in the same compare-and-set operation, then the use case creates a grant, builds a server-owned `StageExecutionRequest`, and calls `TaskDispatcher`. The current implementation uses the existing local Worker gateway synchronously, while the application boundary is event-oriented so the gateway can later be replaced by a queue or remote Worker.
 
-Worker results are normalized into an application event. An event is accepted once using a unique idempotency key composed of `executionId`, `attempt`, and Worker event ID. Duplicate delivery returns the previously applied outcome and cannot advance the DAG twice. Events for a stale attempt, unknown grant, or terminal stage are rejected or recorded as ignored according to the event type.
+The current local Worker is synchronous and returns only a dispatch receipt (`workerId`), not asynchronous lifecycle callbacks. Therefore the Java dispatcher records its own terminal event with `eventSequence=1` for each attempt after the synchronous invocation returns or throws. The existing database uniqueness key `(stageId, attempt, eventSequence)` is the first-version idempotency key. A future remote Worker callback may provide additional event sequences for the same attempt, but an external Worker event ID is not part of the current contract.
 
 ## State Rules
 
@@ -40,7 +40,7 @@ PENDING -> SKIPPED            (dependency or task cancellation)
 RUNNING -> SKIPPED            (cancellation acknowledged)
 ```
 
-An attempt increments only when a stage is explicitly retried after a terminal failure or recovered timeout. A dispatch claim does not increment the attempt. Only the current `executionId` and attempt may mutate a `RUNNING` stage. A stage can be marked `SUCCEEDED` once; later duplicate success events are no-ops.
+An attempt increments only when a stage is explicitly retried after a terminal failure or recovered timeout. A dispatch claim does not increment the attempt. `TaskStage` retains its existing identity, key, status, and primitive `attempt`, and gains an optional immutable `StageExecution` context containing execution ID, lease, Worker ID, failure detail, and start/finish times. The Worker ID is nullable during the short interval between the atomic claim and the synchronous Worker receipt; it is not an identity or a concurrency key. Only the current `executionId` and attempt may mutate a `RUNNING` stage. A stage can be marked `SUCCEEDED` once; later duplicate success events are no-ops.
 
 The task becomes `RUNNING` when its first stage is claimed, `SUCCEEDED` when all required stages succeed, `FAILED` when a non-retryable required stage fails, `CANCELLED` when cancellation has skipped or stopped all remaining work, and remains `CREATED` only before any dispatch. Quality status remains `PENDING` until the quality stage/result is registered.
 
