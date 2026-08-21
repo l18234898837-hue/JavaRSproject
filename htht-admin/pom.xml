@@ -81,6 +81,7 @@
         <dependency>
             <groupId>com.htht</groupId>
             <artifactId>htht-multisource</artifactId>
+            <version>${htht.version}</version>
         </dependency>
 
 

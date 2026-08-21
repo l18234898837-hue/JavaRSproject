@@ -72,7 +72,7 @@ spring:
           type: ${spring.datasource.type}
           driverClassName: org.postgresql.Driver
           # 本项目使用独立的 PostgreSQL 17 实例，避免与其它项目的 5432 端口冲突。
-          url: jdbc:postgresql://127.0.0.1:5433/htht_rs_dev
+          url: jdbc:postgresql://127.0.0.1:5433/satellite_data_server_dev
           username: htht_rs_dev
           password: 845420
 #        sqlserver:
