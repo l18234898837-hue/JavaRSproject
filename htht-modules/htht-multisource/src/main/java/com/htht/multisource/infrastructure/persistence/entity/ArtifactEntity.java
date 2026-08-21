@@ -13,6 +13,7 @@ public class ArtifactEntity {
     private String artifactType;
     private String storageUri;
     private String checksum;
+    private Long sizeBytes;
     public Long getArtifactId() { return artifactId; }
     public void setArtifactId(Long artifactId) { this.artifactId = artifactId; }
     public Long getTaskId() { return taskId; }
@@ -25,4 +26,6 @@ public class ArtifactEntity {
     public void setStorageUri(String storageUri) { this.storageUri = storageUri; }
     public String getChecksum() { return checksum; }
     public void setChecksum(String checksum) { this.checksum = checksum; }
+    public Long getSizeBytes() { return sizeBytes; }
+    public void setSizeBytes(Long sizeBytes) { this.sizeBytes = sizeBytes; }
 }

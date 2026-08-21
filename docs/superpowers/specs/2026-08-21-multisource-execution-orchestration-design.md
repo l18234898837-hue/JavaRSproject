@@ -1,6 +1,6 @@
 # Multisource Execution Orchestration Design
 
-**Status:** Task 4 persistence checkpoint implemented on 2026-08-21; artifact validation and lifecycle recovery remain.
+**Status:** Task 5 artifact validation, registration, and task lifecycle summary implemented on 2026-08-21; lifecycle recovery remains.
 
 ## Goal
 
@@ -52,6 +52,10 @@ The planner snapshot remains the source of stage order and dependencies. Task cr
 
 The server creates an execution grant containing task ID, stage ID, execution ID, attempt, allowed input logical URIs, output logical URI, and expiry. The grant reference is opaque to the Worker; its full scope remains server-side and is validated by the asset resolver. The Worker receives only the reference and expiry through the existing local manifest/contract, never an unrestricted client path. Output files must be regular files under the controlled Worker work root, have a declared logical URI and checksum, and pass the stage's expected artifact contract before registration.
 
+For the synchronous Worker path, `DispatchReceipt.artifacts` is passed to the event-acceptance application service as typed `ArtifactCandidate` values. The audit event payload remains JSON, but it is not reparsed to register outputs. This keeps Worker protocol decoding in the Worker adapter, keeps output validation in `ArtifactValidator`, and gives future callback adapters the same typed internal boundary after they decode their callback payload.
+
+Each execution uses the deterministic controlled directory `workRoot/<executionId>/output`; the protocol `requestId` remains only a correlation value. A returned artifact URI must be a descendant of the task's server-owned output URI. Its relative URI path is resolved under that execution output directory, after normalization and containment checks. The validator accepts only an existing readable regular file there, verifies its byte count and SHA-256 value against the candidate, and never accepts a physical path supplied by a Worker or client.
+
 ## Failure, Cancellation, And Recovery
 
 Worker protocol errors, non-zero exits, invalid responses, missing outputs, checksum mismatches, and expired grants fail the current attempt with a structured reason. Timeout moves a running stage to `RECOVERY_PENDING`; a recovery operation may retry it according to the configured maximum attempts. Cancellation records the request, asks the dispatcher to stop the active execution, and prevents new stages from being claimed. A late Worker event cannot resurrect a cancelled or superseded attempt.
@@ -84,7 +88,15 @@ Tests are layered and focused:
 
 The first implementation checkpoint is the in-memory dispatch boundary plus idempotent event acceptance and stage transitions. The persistence checkpoint now maps execution context and JSON event payloads, inserts events idempotently, updates existing stage rows with explicit full-column state, and atomically claims dependency-satisfied stages through PostgreSQL `UPDATE ... RETURNING` with `SKIP LOCKED`. The isolated PostgreSQL tests are environment-gated and were skipped because no dedicated `MULTISOURCE_IT_*` variables were configured; no development database was used. Validated artifact registration, task lifecycle summary, cancellation, retry, timeout recovery, and HTTP composition remain separate checkpoints.
 
-The execution event migration `V20260821_01__add_execution_event_id.sql` adds only nullable `rs_task_event.execution_id` with a rollback comment. It does not alter `st_island_info` or `sd_observe_data`. The existing `rs_artifact.size_bytes` column remains unmapped until the domain artifact contract gains the validated size field in Task 5; no fake value is written.
+The execution event migration `V20260821_01__add_execution_event_id.sql` adds only nullable `rs_task_event.execution_id` with a rollback comment. It does not alter `st_island_info` or `sd_observe_data`. Task 5 maps the existing `rs_artifact.size_bytes` column from the validated artifact contract; no fake value is written. Task lifecycle status is updated with a dedicated repository operation, never through the task creation `save()` path.
+
+## Task 5 Checkpoint
+
+Artifact candidates are accepted only through the typed `DispatchReceipt.artifacts()` boundary. The local validator checks the task snapshot output URI, the execution-owned `workRoot/<executionId>/output` directory, normalized path containment, readable regular-file status, byte size, and strict `sha256:<64 hex>` content checksum before persistence. The registration service validates the entire candidate batch before saving any artifact and de-duplicates candidates by stage, URI, and checksum.
+
+After a stage claim the task becomes `RUNNING`; after a terminal synchronous event, the application recomputes the task status from persisted stage states and applies it with the dedicated update operation. The task output URI is read from `ProcessingTaskRepository`, not inferred from a task ID or event payload. Spring configuration exposes the production local artifact validator and registration service using the configured Worker work root.
+
+Focused verification on 2026-08-21: 31 Java tests passed for artifact registration, lifecycle summary, event acceptance, stage dispatch, repository mapping, artifact validation, and execution-owned output directories. A broader `htht-admin` compile was attempted but stopped before `htht-admin` at the existing `satellite-orbit` dependency-resolution failure for unavailable private artifacts `com.htcloud:ht-compress`, `com.htcloud:okhttp`, and `com.htcloud:common` version `1.0.0`; no database migration or development-database operation was performed.
 
 ## Explicit Non-Goals
 

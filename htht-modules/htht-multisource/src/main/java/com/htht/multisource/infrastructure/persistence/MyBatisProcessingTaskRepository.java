@@ -5,6 +5,7 @@ import com.htht.multisource.application.port.out.ProcessingTaskRepository;
 import com.htht.multisource.domain.model.ProductCandidate;
 import com.htht.multisource.domain.model.TaskId;
 import com.htht.multisource.domain.model.ProcessingTask;
+import com.htht.multisource.domain.model.TaskLifecycleStatus;
 import com.htht.multisource.infrastructure.persistence.entity.ProcessingTaskEntity;
 import com.htht.multisource.infrastructure.persistence.mapper.ProcessingTaskMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskInputAssetMyBatisMapper;
@@ -54,5 +55,12 @@ public final class MyBatisProcessingTaskRepository implements ProcessingTaskRepo
         taskMapper.insert(persistenceMapper.toEntity(task));
         persistenceMapper.toProductEntities(task).forEach(productMapper::insert);
         persistenceMapper.toInputAssetEntities(task).forEach(inputAssetMapper::insert);
+    }
+
+    @Override
+    public void updateLifecycleStatus(TaskId taskId, TaskLifecycleStatus status) {
+        if (taskMapper.updateLifecycleStatus(taskId.value(), status.name()) != 1) {
+            throw new IllegalStateException("Processing task lifecycle status could not be updated: " + taskId.value());
+        }
     }
 }

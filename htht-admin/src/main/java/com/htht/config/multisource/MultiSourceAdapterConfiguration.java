@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.htht.common.helper.LoginHelper;
 import com.htht.common.utils.IDUtil;
 import com.htht.multisource.application.port.out.ArtifactRepository;
+import com.htht.multisource.application.port.out.ArtifactValidator;
 import com.htht.multisource.application.port.out.AssetStorage;
 import com.htht.multisource.application.port.out.PreflightSessionStore;
 import com.htht.multisource.application.port.out.ProcessingBatchIdGenerator;
@@ -23,6 +24,8 @@ import com.htht.multisource.application.usecase.service.CreateProcessingTaskServ
 import com.htht.multisource.application.usecase.service.GetTaskDetailService;
 import com.htht.multisource.application.usecase.service.PreflightProductService;
 import com.htht.multisource.application.usecase.service.TaskCreationCoordinator;
+import com.htht.multisource.application.usecase.service.ArtifactRegistration;
+import com.htht.multisource.application.usecase.service.ArtifactRegistrationService;
 import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.infrastructure.persistence.MyBatisArtifactRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisProcessingBatchRepository;
@@ -42,6 +45,7 @@ import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMa
 import com.htht.multisource.infrastructure.session.InMemoryPreflightSessionStore;
 import com.htht.multisource.infrastructure.worker.LocalProcessWorkerGateway;
 import com.htht.multisource.infrastructure.worker.LocalWorkerAssetManifestWriter;
+import com.htht.multisource.infrastructure.worker.LocalWorkerArtifactValidator;
 import com.htht.multisource.infrastructure.worker.LocalWorkerProcessLauncher;
 import com.htht.multisource.infrastructure.worker.WorkerContractCodec;
 import com.htht.multisource.infrastructure.worker.WorkerResultTranslator;
@@ -109,6 +113,17 @@ public class MultiSourceAdapterConfiguration {
     public ArtifactRepository multisourceArtifactRepository(ArtifactMyBatisMapper artifactMapper,
                                                              TaskPersistenceMapper persistenceMapper) {
         return new MyBatisArtifactRepository(artifactMapper, persistenceMapper);
+    }
+
+    @Bean
+    public ArtifactValidator multisourceArtifactValidator(MultiSourceWorkerProperties properties) {
+        return new LocalWorkerArtifactValidator(properties.toLocalProcessProperties().workRoot());
+    }
+
+    @Bean
+    public ArtifactRegistration multisourceArtifactRegistration(ArtifactValidator validator,
+                                                                 ArtifactRepository artifactRepository) {
+        return new ArtifactRegistrationService(validator, artifactRepository);
     }
 
     @Bean

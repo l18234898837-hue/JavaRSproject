@@ -68,6 +68,7 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
         var executionId = executionIdGenerator.nextId();
         var execution = new StageExecution(executionId, null, now.plus(leaseDuration), null, null, now, null);
         return stageRepository.claimNextRunnable(taskId, execution, now).map(claim -> {
+            taskRepository.updateLifecycleStatus(taskId, TaskLifecycleStatus.RUNNING);
             ProcessingStage planStage = task.plan().stages().stream()
                 .filter(stage -> stage.stageKey().equals(claim.stage().stageKey()))
                 .findFirst()
@@ -97,7 +98,7 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
                 task.id(), claim.stage().id(), executionId, claim.stage().attempt(), 1,
                 ExecutionEvent.Type.SUCCEEDED, "{\"workerId\":\"" + escapeJson(receipt.workerId()) + "\"}",
                 clock.now(), ExecutionEvent.Acceptance.APPLIED
-            ));
+            ), receipt.artifacts());
             return new DispatchResult(claim.stage().id().value(), executionId.value());
         });
     }

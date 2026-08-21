@@ -1,6 +1,7 @@
 package com.htht.multisource.application.usecase;
 
 import com.htht.multisource.application.port.out.ExecutionEventRepository;
+import com.htht.multisource.application.port.out.ProcessingTaskRepository;
 import com.htht.multisource.application.port.out.TaskStageRepository;
 import com.htht.multisource.application.port.out.model.ExecutionEvent;
 import com.htht.multisource.application.usecase.service.AcceptWorkerEventService;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -40,6 +42,24 @@ class AcceptWorkerEventUseCaseTest {
         assertThat(events.events.values()).singleElement().satisfies(event ->
             assertThat(event.acceptance()).isEqualTo(ExecutionEvent.Acceptance.APPLIED)
         );
+    }
+
+    @Test
+    void registersTypedArtifactsBeforeMarkingStageSucceeded() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(runningStage());
+        InMemoryEventRepository events = new InMemoryEventRepository();
+        RecordingArtifactRegistration registration = new RecordingArtifactRegistration();
+        AcceptWorkerEventUseCase useCase = new AcceptWorkerEventService(stages, events, registration,
+            new SingleTaskRepository(new com.htht.multisource.domain.model.StorageUri("rs://output/7/task-01")));
+        var artifact = new com.htht.multisource.application.port.out.model.ArtifactCandidate(
+            new com.htht.multisource.domain.model.StorageUri("rs://output/7/task-01/result.tif"),
+            "sha256:result", "OUTPUT", 42
+        );
+
+        assertThat(useCase.accept(event(new ExecutionId("exec-01"), ExecutionEvent.Type.SUCCEEDED, 1), List.of(artifact)))
+            .isEqualTo(AcceptWorkerEventUseCase.Result.APPLIED);
+        assertThat(registration.candidates).containsExactly(artifact);
+        assertThat(stages.stage.status()).isEqualTo(StageExecutionStatus.SUCCEEDED);
     }
 
     @Test
@@ -106,6 +126,41 @@ class AcceptWorkerEventUseCaseTest {
         @Override
         public boolean insertIfAbsent(ExecutionEvent event) {
             return events.putIfAbsent(event.stageId().value() + ":" + event.attempt() + ":" + event.eventSequence(), event) == null;
+        }
+    }
+
+    private static final class SingleTaskRepository implements ProcessingTaskRepository {
+        private final com.htht.multisource.domain.model.StorageUri outputUri;
+
+        private SingleTaskRepository(com.htht.multisource.domain.model.StorageUri outputUri) {
+            this.outputUri = outputUri;
+        }
+
+        @Override
+        public Optional<com.htht.multisource.domain.model.ProcessingTask> findById(TaskId taskId) {
+            var template = ApplicationUseCaseTestFixtures.task(taskId,
+                new com.htht.multisource.domain.model.AccessSubject(7L));
+            return Optional.of(new com.htht.multisource.domain.model.ProcessingTask(
+                template.id(), template.name(), template.creator(), template.lifecycleStatus(), template.qualityStatus(),
+                template.parameterSnapshot(), outputUri, template.plan(), template.batch(), template.candidates()
+            ));
+        }
+
+        @Override
+        public void save(com.htht.multisource.domain.model.ProcessingTask task) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class RecordingArtifactRegistration
+        implements com.htht.multisource.application.usecase.service.ArtifactRegistration {
+        private List<com.htht.multisource.application.port.out.model.ArtifactCandidate> candidates = List.of();
+
+        @Override
+        public void register(TaskId taskId, StageId stageId, com.htht.multisource.domain.model.StorageUri outputUri,
+                             ExecutionId executionId,
+                             List<com.htht.multisource.application.port.out.model.ArtifactCandidate> candidates) {
+            this.candidates = candidates;
         }
     }
 }

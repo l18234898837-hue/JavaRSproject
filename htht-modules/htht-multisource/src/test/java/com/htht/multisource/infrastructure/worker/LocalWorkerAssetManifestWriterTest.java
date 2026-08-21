@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.htht.multisource.domain.model.AssetReference;
 import com.htht.multisource.domain.model.InputAsset;
 import com.htht.multisource.domain.model.StorageUri;
+import com.htht.multisource.domain.model.StageId;
+import com.htht.multisource.domain.model.TaskId;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -86,7 +88,7 @@ class LocalWorkerAssetManifestWriterTest {
         assertThat(manifestFile).isRegularFile();
         JsonNode manifest = new ObjectMapper().readTree(Files.readString(manifestFile));
         assertThat(manifest.path("output").path("path").asText())
-            .isEqualTo(tempRoot.resolve("work/stage-01/output").toString());
+            .isEqualTo(tempRoot.resolve("work/exec-01/output").toString());
         assertThat(manifest.toString()).doesNotContain("escape.tif");
     }
 
@@ -106,7 +108,8 @@ class LocalWorkerAssetManifestWriterTest {
     }
 
     private static ExecutionGrant executionGrant() {
-        return new ExecutionGrant("write-01", NOW.plusSeconds(60));
+        return new ExecutionGrant("write-01", NOW.plusSeconds(60), TaskId.of(101L), new StageId(201L),
+            new com.htht.multisource.domain.model.ExecutionId("exec-01"), 1);
     }
 
     private static InputAsset asset(String role, int ordinal, String uri) {

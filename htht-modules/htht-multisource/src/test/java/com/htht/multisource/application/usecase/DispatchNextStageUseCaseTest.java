@@ -90,10 +90,15 @@ class DispatchNextStageUseCaseTest {
         );
         RecordingDispatcher dispatcher = new RecordingDispatcher();
         RecordingAssetStorage storage = new RecordingAssetStorage();
+        RecordingEventUseCase events = new RecordingEventUseCase(
+            new AcceptWorkerEventService(stages, new InMemoryExecutionEventRepository(),
+                (taskId, stageId, outputUri, executionId, artifacts) -> { },
+                new SingleTaskRepository(task(TaskLifecycleStatus.CREATED)))
+        );
         DispatchNextStageUseCase useCase = new DispatchNextStageService(
             new SingleTaskRepository(task(TaskLifecycleStatus.CREATED)), stages, dispatcher, storage,
             () -> new ExecutionId("exec-01"), () -> NOW, java.time.Duration.ofMinutes(5),
-            new AcceptWorkerEventService(stages, new InMemoryExecutionEventRepository())
+            events
         );
 
         var result = useCase.dispatch(TASK_ID);
@@ -114,6 +119,9 @@ class DispatchNextStageUseCaseTest {
             assertThat(request.processorVersion()).isEqualTo("worker-1.2.3");
             assertThat(request.executionId()).isEqualTo(new ExecutionId("exec-01"));
         });
+        assertThat(events.artifacts).singleElement().satisfies(artifact ->
+            assertThat(artifact.uri().value()).isEqualTo("rs://output/7/task-01/result.tif")
+        );
     }
 
     @Test
@@ -265,16 +273,38 @@ class DispatchNextStageUseCaseTest {
 
     private static final class RecordingDispatcher implements TaskDispatcher {
         private StageExecutionRequest request;
-
         @Override
         public DispatchReceipt dispatch(StageExecutionRequest request) {
             this.request = request;
-            return new DispatchReceipt("worker-local", true, List.of());
+            return new DispatchReceipt("worker-local", true, List.of(new com.htht.multisource.application.port.out.model.ArtifactCandidate(
+                new StorageUri("rs://output/7/task-01/result.tif"), "sha256:result", "OUTPUT", 42
+            )));
         }
 
         @Override
         public void cancel(ExecutionId executionId) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class RecordingEventUseCase implements AcceptWorkerEventUseCase {
+        private final AcceptWorkerEventUseCase delegate;
+        private List<com.htht.multisource.application.port.out.model.ArtifactCandidate> artifacts = List.of();
+
+        private RecordingEventUseCase(AcceptWorkerEventUseCase delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public Result accept(com.htht.multisource.application.port.out.model.ExecutionEvent event) {
+            return delegate.accept(event);
+        }
+
+        @Override
+        public Result accept(com.htht.multisource.application.port.out.model.ExecutionEvent event,
+                             List<com.htht.multisource.application.port.out.model.ArtifactCandidate> artifacts) {
+            this.artifacts = artifacts;
+            return delegate.accept(event, artifacts);
         }
     }
 

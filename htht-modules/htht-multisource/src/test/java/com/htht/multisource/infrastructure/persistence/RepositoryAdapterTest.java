@@ -85,6 +85,27 @@ class RepositoryAdapterTest {
     }
 
     @Test
+    void taskRepositoryUpdatesLifecycleStatusWithoutInsertingTaskAgain() {
+        InMemoryProcessingTaskMapper tasks = new InMemoryProcessingTaskMapper();
+        InMemoryProcessingBatchMapper batches = new InMemoryProcessingBatchMapper();
+        InMemoryBatchProductMapper batchProducts = new InMemoryBatchProductMapper();
+        MyBatisProcessingBatchRepository batchRepository = new MyBatisProcessingBatchRepository(
+            batches, batchProducts, persistenceMapper
+        );
+        var task = RepositoryFixtures.taskWithTwoCandidatesUsingMainZero();
+        batchRepository.save(task.batch());
+        MyBatisProcessingTaskRepository repository = new MyBatisProcessingTaskRepository(
+            tasks, new InMemoryTaskProductMapper(), new InMemoryTaskInputAssetMapper(), batchRepository, persistenceMapper
+        );
+        repository.save(task);
+
+        repository.updateLifecycleStatus(task.id(), com.htht.multisource.domain.model.TaskLifecycleStatus.SUCCEEDED);
+
+        assertThat(tasks.values).hasSize(1);
+        assertThat(tasks.values.get(0).getLifecycleStatus()).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
     void stageRepositoryPersistsAndFindsTaskStages() {
         InMemoryTaskStageMapper stages = new InMemoryTaskStageMapper();
         MyBatisTaskStageRepository repository = new MyBatisTaskStageRepository(stages, persistenceMapper);
@@ -223,6 +244,14 @@ class RepositoryAdapterTest {
     }
     private static final class InMemoryProcessingTaskMapper extends InMemoryBaseMapper<ProcessingTaskEntity> implements ProcessingTaskMyBatisMapper {
         private InMemoryProcessingTaskMapper() { super(ProcessingTaskEntity::getTaskId); }
+        @Override public int updateLifecycleStatus(long taskId, String status) {
+            ProcessingTaskEntity entity = selectById(taskId);
+            if (entity == null) {
+                return 0;
+            }
+            entity.setLifecycleStatus(status);
+            return 1;
+        }
     }
     private static final class InMemoryTaskProductMapper extends InMemoryBaseMapper<TaskProductEntity> implements TaskProductMyBatisMapper {
         private InMemoryTaskProductMapper() { super(TaskProductEntity::getTaskProductId); }

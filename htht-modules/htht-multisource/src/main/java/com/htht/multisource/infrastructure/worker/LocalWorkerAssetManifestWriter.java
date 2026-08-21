@@ -47,7 +47,10 @@ public final class LocalWorkerAssetManifestWriter {
 
     public Path write(String requestId, ExecutionGrant grant, List<InputAsset> assets, StorageUri outputUri) {
         Objects.requireNonNull(outputUri, "outputUri");
-        return writeInternal(requestId, grant.grantReference(), grant.expiresAt(), assets);
+        if (grant.executionId() == null) {
+            throw failure(requestId, "execution grant is not scoped");
+        }
+        return writeInternal(requestId, grant.executionId().value(), grant.grantReference(), grant.expiresAt(), assets);
     }
 
     public Path write(String requestId, ExecutionGrant grant, List<InputAsset> assets) {
@@ -55,6 +58,11 @@ public final class LocalWorkerAssetManifestWriter {
     }
 
     private Path writeInternal(String requestId, String grantReference, Instant expiresAt, List<InputAsset> assets) {
+        return writeInternal(requestId, requestId, grantReference, expiresAt, assets);
+    }
+
+    private Path writeInternal(String requestId, String directoryKey, String grantReference,
+                               Instant expiresAt, List<InputAsset> assets) {
         if (requestId == null || !requestId.matches("[A-Za-z0-9][A-Za-z0-9._-]*")) {
             throw failure(requestId, "requestId is invalid");
         }
@@ -79,7 +87,10 @@ public final class LocalWorkerAssetManifestWriter {
                 real, asset.checksum());
         }).toList();
 
-        Path invocationDirectory = workRoot.resolve(requestId).normalize();
+        if (directoryKey == null || !directoryKey.matches("[A-Za-z0-9][A-Za-z0-9._-]*")) {
+            throw failure(requestId, "execution directory key is invalid");
+        }
+        Path invocationDirectory = workRoot.resolve(directoryKey).normalize();
         Path outputPath = invocationDirectory.resolve("output").normalize();
         if (!outputPath.startsWith(workRoot) || !outputPath.startsWith(invocationDirectory)) {
             throw failure(requestId, "output directory escapes work root");

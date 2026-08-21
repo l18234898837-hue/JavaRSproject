@@ -192,12 +192,13 @@ public final class TaskPersistenceMapper {
         entity.setArtifactType(artifact.type());
         entity.setStorageUri(artifact.uri().value());
         entity.setChecksum(artifact.checksum());
+        entity.setSizeBytes(artifact.sizeBytes());
         return entity;
     }
 
     public Artifact toArtifact(ArtifactEntity entity) {
         return new Artifact(TaskId.of(entity.getTaskId()), new StageId(entity.getStageId()), entity.getArtifactType(),
-            new StorageUri(entity.getStorageUri()), entity.getChecksum());
+            new StorageUri(entity.getStorageUri()), entity.getChecksum(), entity.getSizeBytes());
     }
 
     private static String writePlan(ProcessingPlan plan) {

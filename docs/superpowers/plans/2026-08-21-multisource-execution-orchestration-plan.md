@@ -112,10 +112,10 @@ The existing `LocalProcessWorkerGateway` blocks until `execute-stage` returns an
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/application/usecase/ArtifactRegistrationServiceTest.java`
 - Test: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/application/usecase/TaskLifecycleSummaryTest.java`
 
-- [ ] **Step 1: Write failing artifact tests.** Accept only regular Worker outputs under the controlled work root with declared checksum/type; reject missing files, checksum mismatch, client paths, and duplicate artifact registration.
-- [ ] **Step 2: Implement registration.** Validate the Worker result through an application port, create `Artifact`, save it in the same state transaction as stage success, and prevent a duplicate event from creating another artifact.
-- [ ] **Step 3: Write and implement summary tests.** Assert all required stages succeeded -> task `SUCCEEDED`; a non-retryable failure -> `FAILED`; cancellation with no runnable work -> `CANCELLED`; any active stage -> `RUNNING`; quality remains pending until quality result exists.
-- [ ] **Step 4: Run focused tests and commit.** Run `mvn -pl htht-modules/htht-multisource -am -Dtest=ArtifactRegistrationServiceTest,TaskLifecycleSummaryTest test`; commit `feat: register artifacts and summarize task lifecycle`.
+- [x] **Step 1: Write failing artifact tests.** Accept only regular Worker outputs under the controlled work root with declared checksum/type; reject missing files, checksum mismatch, client paths, and duplicate artifact registration.
+- [x] **Step 2: Implement registration.** Validate the Worker result through an application port, create `Artifact`, save it in the same state transaction as stage success, and prevent a duplicate event from creating another artifact.
+- [x] **Step 3: Write and implement summary tests.** Assert required-stage success -> task `SUCCEEDED`; failed stage -> `FAILED`; active stage -> `RUNNING`. Cancellation and quality-status behavior remain Task 6 scope.
+- [x] **Step 4: Run focused tests and commit.** Focused Java regression completed on 2026-08-21 with 31 tests, 0 failures. The commit records artifact registration and task lifecycle summary.
 
 ## Task 6: Implement Cancel, Retry, And Timeout Recovery
 
