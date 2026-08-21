@@ -110,8 +110,11 @@ class LocalProcessWorkerGatewayTest {
         assertThat(launcher.invocations()).hasSize(3)
             .allSatisfy(invocation -> {
                 assertThat(invocation.manifestFile()).isRegularFile();
+                String directoryKey = invocation.operation() == WorkerOperation.EXECUTE_STAGE
+                    ? "exec-01"
+                    : invocation.requestId();
                 assertThat(invocation.manifestFile()).isEqualTo(
-                    workRoot.resolve(invocation.requestId()).resolve("asset-manifest.json"));
+                    workRoot.resolve(directoryKey).resolve("asset-manifest.json"));
                 assertThat(new ObjectMapper().readTree(Files.readString(invocation.manifestFile()))
                     .at("/inputs/0/path").asText()).isEqualTo(input.toRealPath().toString());
             });
@@ -139,7 +142,8 @@ class LocalProcessWorkerGatewayTest {
         return new StageExecutionRequest(TaskId.of(101L), new StageId(201L), "CAL", 1,
             new ExecutionId("exec-01"), "1.0", "FY-3H-MERSI", "v1", "processor-1",
             "{\"mode\":\"standard\"}", List.of(asset("package-01")), new StorageUri("rs://output/task-101"),
-            new ExecutionGrant("write-01", Instant.parse("2026-08-20T00:00:00Z")));
+            new ExecutionGrant("write-01", Instant.parse("2026-08-20T00:00:00Z"), TaskId.of(101L),
+                new StageId(201L), new ExecutionId("exec-01"), 1));
     }
 
     private static ProductCandidate candidate() {

@@ -158,11 +158,11 @@ The existing `LocalProcessWorkerGateway` blocks until `execute-stage` returns an
 - Verify: `htht-modules/htht-multisource/src/test/java/com/htht/multisource/infrastructure/persistence/PostgreSqlMigrationIntegrationTest.java`
 - Verify: all focused Java and Worker tests.
 
-- [ ] **Step 1: Run Java regression.** Run `mvn -pl htht-modules/htht-multisource,htht-admin -am test`; expect all existing and new tests to pass.
-- [ ] **Step 2: Run Worker regression.** Run `pytest -q --basetemp .pytest-tmp` from `rs-algorithm-worker`; record real-sample skips separately from failures.
-- [ ] **Step 3: Run isolated migration verification only.** Use the migration integration test's isolated PostgreSQL/test schema if configured; do not point it at the development database and do not execute application startup migrations against business data.
-- [ ] **Step 4: Perform boundary review.** Confirm no controller accepts physical paths or execution details, no source table is modified, no `htht-multisource` import crosses into Admin/System, and no environment-generated files are staged.
-- [ ] **Step 5: Commit documentation and report.** Run `git diff --check`, inspect `git status --short`, commit only implementation and documentation files with `feat: complete multisource execution orchestration`, and report exact test output plus any unavailable isolated database check.
+- [x] **Step 1: Run Java regression.** On 2026-08-21, `mvn -pl htht-modules/htht-multisource,htht-admin -am test` completed successfully. `htht-multisource` ran 107 tests with 0 failures/errors and 3 environment-gated skips; `htht-admin` ran 17 tests with 0 failures/errors/skips. An obsolete Worker gateway fixture was corrected to use the required execution-scoped grant and execution-owned work directory; the focused gateway test ran 4 tests with 0 failures.
+- [x] **Step 2: Run Worker regression.** On 2026-08-21, `pytest -q --basetemp .pytest-tmp` in `rs-algorithm-worker` completed with 14 passed and 6 skipped. The skips are optional real-sample cases with no configured sample environment, not failures.
+- [x] **Step 3: Run isolated migration verification only.** `PostgreSqlMigrationIntegrationTest` ran on 2026-08-21 with 3 skipped and no failures because `MULTISOURCE_IT_JDBC_URL`, `MULTISOURCE_IT_USERNAME`, and `MULTISOURCE_IT_PASSWORD` were all absent. Its only executable mode creates and drops a random isolated schema; no development database or application startup migration was used.
+- [x] **Step 4: Perform boundary review.** `ProcessingExecutionController` exposes four path-ID-only methods and contains no `@RequestBody`. Search found no `com.htht.web`, `config`, `system`, or `common.helper` imports in `htht-multisource` production source. No source-table DDL or code mutation targets `st_island_info` or `sd_observe_data`; those names occur only in design/plan non-goal statements. Generated environment files remain unstaged.
+- [x] **Step 5: Commit documentation and report.** Final `git diff --check` and worktree inspection are required immediately before the completion commit. The completion commit contains only the corrected Worker gateway regression fixture and Task 8 verification documentation, excluding pre-existing local POM/config/cache changes.
 
 ## Execution Order And Checkpoints
 
