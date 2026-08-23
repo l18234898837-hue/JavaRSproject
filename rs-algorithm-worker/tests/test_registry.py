@@ -95,6 +95,32 @@ def test_registry_writes_report_only_for_the_selected_recognized_gf_package(gf_m
 
 
 @pytest.mark.real_sample
+@pytest.mark.parametrize("output_uri", [
+    r"C:\\worker\\output",
+    "/var/worker/output",
+    "",
+    "file:///var/worker/output",
+    "https://example.test/output",
+    "rs://output/../escape",
+])
+def test_registry_rejects_non_logical_output_uris(gf_manifest, tmp_path, output_uri):
+    candidate = inspect_manifest(gf_manifest)[0]
+    manifest = deepcopy(gf_manifest)
+    manifest["output"] = {"path": str(tmp_path / "output")}
+
+    with pytest.raises(ValueError, match="logical output URI"):
+        dispatch({
+            "operation": "execute-stage",
+            "payload": {
+                "packageId": candidate["packageId"],
+                "stageKey": "WRITE_BROWSE_REPORT",
+                "parameterSnapshot": json.dumps({"schemaVersion": "1", "operation": "DEFAULT_PROCESS"}),
+                "outputUri": output_uri,
+            },
+        }, manifest)
+
+
+@pytest.mark.real_sample
 def test_registry_does_not_infer_another_gf_package_for_stage_execution(gf_manifest, tmp_path):
     manifest = deepcopy(gf_manifest)
     manifest["output"] = {"path": str(tmp_path / "output")}

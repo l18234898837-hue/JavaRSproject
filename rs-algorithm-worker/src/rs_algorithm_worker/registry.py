@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from .product_adapters import fy3h_mersi, fy4b_agri, gf6_wfv_browse, hy1c_czi, hy2d_altimeter
+
+
+LOGICAL_OUTPUT_URI = re.compile(r"rs://output/[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*/?")
 
 
 def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
@@ -112,8 +116,8 @@ def _execute_gf_browse_stage(payload: dict[str, Any], manifest: dict[str, Any]) 
 
     output = manifest.get("output")
     output_dir = output.get("path") if isinstance(output, dict) else None
-    output_uri = payload.get("outputUri")
-    if not isinstance(output_dir, str) or not isinstance(output_uri, str) or not output_uri:
+    output_uri = _logical_output_uri(payload.get("outputUri"))
+    if not isinstance(output_dir, str):
         raise ValueError("GF-6 browse report output is required")
     report = gf6_wfv_browse.execute_visual_plan(candidate, output_dir)
     content = report.read_bytes()
@@ -124,3 +128,12 @@ def _execute_gf_browse_stage(payload: dict[str, Any], manifest: dict[str, Any]) 
         "checksum": "sha256:" + hashlib.sha256(content).hexdigest(),
     }]
     return result
+
+
+def _logical_output_uri(value: Any) -> str:
+    if not isinstance(value, str) or not LOGICAL_OUTPUT_URI.fullmatch(value):
+        raise ValueError("GF-6 browse report requires a logical output URI")
+    segments = value.removeprefix("rs://output/").rstrip("/").split("/")
+    if any(segment in {".", ".."} for segment in segments):
+        raise ValueError("GF-6 browse report requires a logical output URI")
+    return value.rstrip("/")
