@@ -1,0 +1,178 @@
+# Multisource Persistence Foundation Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Execute task-by-task with `superpowers:subagent-driven-development` or `superpowers:executing-plans`.
+
+**Goal:** Persist Slice A state through PostgreSQL migrations and MyBatis adapters, proved in a disposable development schema.
+
+**Architecture:** Domain records own durable creation snapshots. Infrastructure implements outbound ports against `rs_` tables. Tests create a random schema, set `search_path`, migrate, assert, and drop it.
+
+**Tech Stack:** Java 17, JUnit 5, AssertJ, MyBatis-Plus, PostgreSQL JDBC, Maven.
+
+**Design:** `docs/superpowers/specs/2026-08-19-multisource-persistence-foundation-design.md`
+
+---
+
+### Task 1: Add Durable Creation Snapshots
+
+**Files:** Modify `domain/model/ProcessingTask.java`, `domain/model/InputAsset.java`, `application/usecase/service/TaskCreationCoordinator.java`, related domain/application fixtures and tests.
+
+- [x] **Step 1: Write failing tests**
+
+```java
+assertThat(task.name()).isEqualTo("task-01");
+assertThat(task.parameterSnapshot()).isEqualTo("{\"mode\":\"standard\"}");
+assertThat(task.outputUri()).isEqualTo(new StorageUri("rs://output/task-01"));
+assertThat(asset.storageUriSnapshot()).isEqualTo(new StorageUri("rs://input/granule.hdf"));
+```
+
+- [x] **Step 2: Run red test**
+
+```powershell
+mvn -pl htht-modules\htht-multisource -am -Dtest=ProcessingTaskTest,CreateProcessingTaskUseCaseTest -DfailIfNoTests=false test
+```
+
+Expected: snapshot accessors do not compile.
+
+- [x] **Step 3: Implement minimum record changes**
+
+```java
+public record ProcessingTask(TaskId id, String name, AccessSubject creator,
+    TaskLifecycleStatus lifecycleStatus, QualityStatus qualityStatus,
+    String parameterSnapshot, StorageUri outputUri, ProcessingPlan plan,
+    ProcessingBatch batch, List<ProductCandidate> candidates) { }
+
+public record InputAsset(String role, int ordinal, AssetReference reference,
+    StorageUri storageUriSnapshot, String checksum, boolean required) { }
+```
+
+Reject blank task name/snapshot and null URI fields. Pass command name, snapshot, and URI through the coordinator; batch children use the batch name.
+
+- [x] **Step 4: Run green test and commit**
+
+Run Step 2, expect zero failures/errors, then commit `feat: retain multisource task persistence snapshots`.
+
+### Task 2: Add Auditable Migrations
+
+**Files:** Create `script/sql/migrations/V20260819_01__create_multisource_core_tables.sql`, `V20260819_02__create_multisource_indexes.sql`, `V20260819_03__seed_multisource_profiles.sql`, and `src/test/java/com/htht/multisource/infrastructure/persistence/MigrationScriptTest.java`.
+
+- [x] **Step 1: Write failing script test**
+
+```java
+assertThat(coreSql).contains("CREATE TABLE rs_processing_batch", "CREATE TABLE rs_task_event");
+assertThat(coreSql).contains("UNIQUE (stage_id, attempt, event_sequence)");
+assertThat(coreSql).doesNotContain("bus_data_info", "sd_algorithm_run_record", "st_algorithm_record");
+```
+
+- [x] **Step 2: Run red test**
+
+```powershell
+mvn -pl htht-modules\htht-multisource -am -Dtest=MigrationScriptTest -DfailIfNoTests=false test
+```
+
+Expected: scripts are absent.
+
+- [x] **Step 3: Create scripts**
+
+Create only `rs_schema_migration`, `rs_processing_batch`, `rs_batch_product`, `rs_processing_task`, `rs_task_input_asset`, `rs_task_product`, `rs_task_stage`, `rs_task_stage_dependency`, `rs_task_event`, `rs_artifact`, `rs_quality_result`, `rs_product_profile`, `rs_processing_capability`, `rs_profile_capability`. Use internal foreign keys, JSONB snapshots, timestamptz execution fields, event uniqueness `(stage_id, attempt, event_sequence)`, and no legacy table references. `rs_batch_product` retains selected candidate and input-asset snapshots independently of child tasks. `rs_task_input_asset` records the owning `package_id` and uses `(task_id, package_id, role, ordinal)` uniqueness, so candidates can share input roles and ordinals. `rs_task_stage` retains execution state only; resolve the stage type from the owning task's `plan_snapshot`. Seed only the four approved `SUPPORTED` v1 profiles.
+
+- [x] **Step 4: Run green test and commit**
+
+Run Step 2, expect zero failures/errors, then commit `feat: add multisource PostgreSQL migrations`.
+
+### Task 3: Implement Persistence Adapters
+
+**Files:** Modify `htht-modules/htht-multisource/pom.xml`; create entities, mappers, and repository adapters for batch, task, task product, input asset, stage, and artifact under `src/main/java/com/htht/multisource/infrastructure/persistence`; create `RepositoryMappingTest.java`.
+
+- [x] **Step 1: Write failing mapping test**
+
+```java
+ProcessingTaskEntity entity = mapper.toEntity(task);
+assertThat(entity.getName()).isEqualTo("task-01");
+assertThat(entity.getParameterSnapshot()).isEqualTo("{\"mode\":\"standard\"}");
+assertThat(mapper.toTask(entity, batch, candidates)).isEqualTo(task);
+```
+
+- [x] **Step 2: Run red test**
+
+```powershell
+mvn -pl htht-modules\htht-multisource -am -Dtest=RepositoryMappingTest -DfailIfNoTests=false test
+```
+
+Expected: persistence types do not compile.
+
+- [x] **Step 3: Add adapters**
+
+Add test-scope `org.postgresql:postgresql`. Use `@TableName`, input IDs, and `BaseMapper<Entity>`. Repositories implement only matching outbound ports. Task save writes task, candidates, then assets; lookup rebuilds the immutable task. ID adapters wrap an injected positive `LongSupplier`.
+
+- [x] **Step 4: Run green test and commit**
+
+Run Step 2, expect zero failures/errors, then commit `feat: add multisource MyBatis persistence adapters`.
+
+### Task 3a: Harden PostgreSQL Persistence Adapters
+
+**Files:** Modify persistence entities and mapper interfaces; create a JSONB type handler and Spring configuration; modify creation services; extend `RepositoryAdapterTest.java` and the PostgreSQL integration test.
+
+- [x] **Step 1: Write failing tests for JSONB binding, stable query ordering, and transactional creation rollback.**
+
+- [x] **Step 2: Run the focused tests and confirm they fail for the missing type handler, ordering, and transactional wiring.**
+
+- [x] **Step 3: Add the PostgreSQL JSONB type handler, entity field annotations, ordered mapper queries, and application-service transaction boundaries. Spring bean configuration remains pending until concrete planner and asset-storage adapters exist.**
+
+- [x] **Step 4: Run focused unit tests and the disposable-schema migration integration test; the random schema is absent after the real development-database run.**
+
+- [x] **Step 5: Commit the hardening changes separately.**
+
+### Task 4: Verify a Disposable Development Schema
+
+**Files:** Create `src/test/java/com/htht/multisource/infrastructure/persistence/PostgreSqlMigrationIntegrationTest.java`.
+
+- [x] **Step 1: Write the opt-in integration test**
+
+```java
+String schema = "rs_ms_it_" + UUID.randomUUID().toString().replace("-", "");
+try (Connection admin = DriverManager.getConnection(url, username, password)) {
+    createSchema(admin, schema);
+    try (Connection connection = connectWithSearchPath(schema)) {
+        runMigrations(connection);
+        assertCoreTablesAndSeeds(connection);
+        assertRepositoryRoundTrip(connection);
+    } finally {
+        dropSchema(admin, schema);
+    }
+    assertSchemaAbsent(admin, schema);
+}
+```
+
+- [x] **Step 2: Verify skip behavior**
+
+```powershell
+mvn -pl htht-modules\htht-multisource -am -Dtest=PostgreSqlMigrationIntegrationTest -DfailIfNoTests=false test
+```
+
+Expected: skip only when all three `MULTISOURCE_IT_*` variables are absent.
+
+- [x] **Step 3: Verify development database migrations, repository round-trip, transaction rollback, stable ordering, and cleanup.**
+
+```powershell
+$env:MULTISOURCE_IT_JDBC_URL='jdbc:postgresql://127.0.0.1:5433/htht_rs_dev'
+$env:MULTISOURCE_IT_USERNAME='<development user>'
+$env:MULTISOURCE_IT_PASSWORD='<development password>'
+mvn -pl htht-modules\htht-multisource -am -Dtest=MigrationScriptTest,RepositoryMappingTest,PostgreSqlMigrationIntegrationTest -DfailIfNoTests=false clean test
+```
+
+Expected: zero failures/errors and the random schema is absent after the test. Commit `test: verify multisource persistence foundation`.
+
+### Task 5: Sync Documentation and Regress Slice A
+
+**Files:** Modify `docs/superpowers/plans/2026-08-18-multisource-implementation-plan.md` and this plan.
+
+- [x] **Step 1: Link this detailed plan from broad Task 4 and mark completed steps.**
+
+- [x] **Step 2: Run the final regression**
+
+```powershell
+mvn -pl htht-modules\htht-multisource -am -Dtest=PreflightProductUseCaseTest,CreateProcessingTaskUseCaseTest,GetTaskDetailUseCaseTest -DfailIfNoTests=false clean test
+```
+
+Actual: 23 focused tests, zero failures/errors. The opt-in PostgreSQL suite separately passed 3 tests
+(migration/cleanup, MyBatis repository round-trip, and rollback cleanup) against random schemas.

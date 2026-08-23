@@ -6,13 +6,16 @@ public record InputAsset(
     String role,
     int ordinal,
     AssetReference reference,
+    StorageUri storageUriSnapshot,
     String checksum,
     boolean required
 ) {
     public InputAsset {
         Objects.requireNonNull(role, "role");
         Objects.requireNonNull(reference, "reference");
-        if (role.isBlank() || ordinal < 0) {
+        Objects.requireNonNull(storageUriSnapshot, "storageUriSnapshot");
+        Objects.requireNonNull(checksum, "checksum");
+        if (role.isBlank() || checksum.isBlank() || ordinal < 0) {
             throw new IllegalArgumentException("Input asset role and ordinal are invalid.");
         }
     }

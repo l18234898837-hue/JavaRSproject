@@ -1,19 +1,24 @@
 package com.htht.multisource.application.usecase;
 
-import com.htht.multisource.domain.model.InputAsset;
 import com.htht.multisource.domain.model.AccessSubject;
+import com.htht.multisource.domain.model.ProductCandidate;
 import com.htht.multisource.domain.model.StorageUri;
 
-import java.util.List;
+import java.util.Objects;
 
 public record CreateProcessingTaskCommand(
     String name,
     AccessSubject subject,
-    List<InputAsset> inputs,
+    ProductCandidate candidate,
     String parameterSnapshot,
     StorageUri outputUri
 ) {
     public CreateProcessingTaskCommand {
-        inputs = List.copyOf(inputs);
+        if (name == null || name.isBlank() || parameterSnapshot == null || parameterSnapshot.isBlank()) {
+            throw new IllegalArgumentException("Task create command is incomplete.");
+        }
+        Objects.requireNonNull(subject, "subject");
+        Objects.requireNonNull(candidate, "candidate");
+        Objects.requireNonNull(outputUri, "outputUri");
     }
 }
