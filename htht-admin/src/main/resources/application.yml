@@ -73,6 +73,12 @@ user:
 spring:
   application:
     name: ${htht.name}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    validate-on-migrate: true
+    clean-disabled: true
   # 资源信息
   messages:
     # 国际化资源文件路径
