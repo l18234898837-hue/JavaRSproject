@@ -963,7 +963,14 @@ Worker 环境正确
 
 1. 创建 PostgreSQL 数据库。
 2. 执行 `script/sql/pgsql.sql`，建立基础业务表和初始数据。
-3. 使用本文件后面的新库专用命令启动后端，并传入 `--spring.flyway.baseline-on-migrate=true --spring.flyway.baseline-version=0`。这只适用于刚导入基础 dump 的新库，作用是自动登记 version `0` baseline 后执行全部增量迁移。
+3. 使用新库专用命令启动后端。这只适用于刚导入基础 dump 的新库，作用是自动登记 version `0` baseline 后执行全部增量迁移：
+
+```powershell
+java -jar htht-admin\target\htht-admin.jar `
+  --spring.profiles.active=dev `
+  --spring.flyway.baseline-on-migrate=true `
+  --spring.flyway.baseline-version=0
+```
 4. 启动日志显示迁移完成后，检查：
 
 ```sql

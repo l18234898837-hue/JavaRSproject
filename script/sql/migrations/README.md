@@ -35,7 +35,7 @@ ORDER BY installed_rank;
 
 已有库不要开启 `baseline-on-migrate`，也不要把基础 dump 重新导入。先备份数据库，确认当前库已经包含 `20260824.01` 所代表的结构，然后执行 `baseline-existing-postgres.sql` 中的 SQL，将当前状态登记为 Flyway baseline。之后使用默认配置启动应用，只有版本高于 `20260824.01` 的新迁移会执行。
 
-baseline SQL 是幂等的：重复执行会因唯一键冲突而失败，因此执行前应先查询 `flyway_schema_history`；已经存在 baseline 时不再重复执行。
+baseline SQL 对已经存在相同成功 baseline 的数据库是 no-op；如果历史表已经存在其他版本记录，执行前必须先检查并由部署人员决定正确 baseline 版本，不能直接覆盖历史。
 
 ## 迁移规范
 
