@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 
-public final class CancelProcessingTaskService implements CancelProcessingTaskUseCase {
+public class CancelProcessingTaskService implements CancelProcessingTaskUseCase {
     private final ProcessingTaskRepository taskRepository;
     private final TaskStageRepository stageRepository;
     private final TaskDispatcher dispatcher;

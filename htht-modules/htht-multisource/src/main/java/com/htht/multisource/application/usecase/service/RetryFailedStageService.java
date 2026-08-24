@@ -11,7 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 
-public final class RetryFailedStageService implements RetryFailedStageUseCase {
+public class RetryFailedStageService implements RetryFailedStageUseCase {
     private final ProcessingTaskRepository taskRepository;
     private final TaskStageRepository stageRepository;
     private final int maxAttempts;

@@ -100,8 +100,8 @@ public class MultiSourceAdapterConfiguration {
 
     @Bean
     public SysFileAssetStorageAdapter multisourceAssetStorage(ISysFileService sysFileService,
-                                                               @Value("${file.upload-path}") Path uploadRoot) {
-        return new SysFileAssetStorageAdapter(sysFileService, uploadRoot);
+                                                               @Value("${file.upload-path}") String uploadPath) {
+        return new SysFileAssetStorageAdapter(sysFileService, resolveUploadRoot(uploadPath));
     }
 
     @Bean
@@ -182,9 +182,10 @@ public class MultiSourceAdapterConfiguration {
     @Bean
     public LocalProcessWorkerGateway multisourceWorkerGateway(MultiSourceWorkerProperties properties,
                                                                SysFileAssetStorageAdapter assetStorage,
-                                                               @Value("${file.upload-path}") Path uploadRoot) {
+                                                               @Value("${file.upload-path}") String uploadPath) {
         ObjectMapper objectMapper = new ObjectMapper();
         var workerProperties = properties.toLocalProcessProperties();
+        Path uploadRoot = resolveUploadRoot(uploadPath);
         var manifestWriter = new LocalWorkerAssetManifestWriter(workerProperties.workRoot(), uploadRoot, assetStorage, Clock.systemUTC());
         return new LocalProcessWorkerGateway(
             new WorkerContractCodec(objectMapper), new WorkerResultTranslator(objectMapper),
@@ -272,5 +273,17 @@ public class MultiSourceAdapterConfiguration {
     @Bean
     public ServerOutputUriAllocator multisourceOutputUriAllocator() {
         return new ServerOutputUriAllocator(() -> UUID.randomUUID().toString());
+    }
+
+    /**
+     * Resolve the configured upload directory explicitly instead of relying on
+     * Spring's String-to-Path converter, which treats Windows drive paths as
+     * relative paths in a servlet web application.
+     */
+    static Path resolveUploadRoot(String uploadPath) {
+        if (uploadPath == null || uploadPath.isBlank()) {
+            throw new IllegalStateException("file.upload-path must be configured.");
+        }
+        return Path.of(uploadPath.trim()).toAbsolutePath().normalize();
     }
 }

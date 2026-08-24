@@ -188,7 +188,8 @@ sms:
 
 --- #文件上传路径
 file:
-  upload-path: D:/filestorage
+  # Windows 本地开发使用绝对路径，统一使用正斜杠，避免被解析为 Undertow 临时目录下的相对路径
+  upload-path: "D:/Lwy_project_space/RSImageProcess/otherfile/filestorage"
 
 
 --- # 实时切片配置
@@ -233,7 +234,12 @@ python:
 
 orekit:
   data:
-    zip: D:\server\orekit\zip
-    path: D:\server\orekit\orekit-data-master
+    # 使用 satellite-orbit 模块随项目提供的数据包解压目录，避免开发环境访问失效的远程地址
+    zip: D:/Lwy_project_space/RSImageProcess/JavaRSproject/htht-modules/satellite-orbit/src/main/resources/orekit-data-master.rar
+    path: D:/Lwy_project_space/RSImageProcess/otherfile/orekit/orekit-data-master
     url: https://gitlab.orekit.org/orekit/orekit-data/-/archive/master/orekit-data-master.zip
+
+task:
+  # 开发库已存在 Quartz 表，避免每次启动重复执行建表脚本并产生“表已存在”错误
+  initDataBase: false
 

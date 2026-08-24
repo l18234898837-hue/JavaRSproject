@@ -13,7 +13,7 @@ import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 
-public final class RecoverTimedOutStageService implements RecoverTimedOutStageUseCase {
+public class RecoverTimedOutStageService implements RecoverTimedOutStageUseCase {
     private final TaskStageRepository stageRepository;
     private final ExecutionEventRepository eventRepository;
     private final ProcessingTaskRepository taskRepository;

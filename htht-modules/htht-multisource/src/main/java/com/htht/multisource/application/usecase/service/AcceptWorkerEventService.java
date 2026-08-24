@@ -14,7 +14,7 @@ import com.htht.multisource.domain.model.StorageUri;
 import com.htht.multisource.domain.model.TaskId;
 import org.springframework.transaction.annotation.Transactional;
 
-public final class AcceptWorkerEventService implements AcceptWorkerEventUseCase {
+public class AcceptWorkerEventService implements AcceptWorkerEventUseCase {
 
     private final TaskStageRepository stageRepository;
     private final ExecutionEventRepository eventRepository;
