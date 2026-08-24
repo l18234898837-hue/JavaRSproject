@@ -1,6 +1,7 @@
 package com.htht.web.controller.multisource;
 
 import com.htht.common.core.domain.R;
+import com.htht.config.multisource.LocalWorkerResultArchiveService;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.DispatchNextStageUseCase;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
@@ -11,6 +12,8 @@ import com.htht.multisource.domain.model.TaskId;
 import com.htht.web.controller.multisource.dto.DispatchStageResponse;
 import com.htht.web.controller.multisource.dto.ExecutionProgressResponse;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,6 +32,21 @@ public class ProcessingExecutionController {
     private final DispatchNextStageUseCase dispatchUseCase;
     private final CancelProcessingTaskUseCase cancelUseCase;
     private final RetryFailedStageUseCase retryUseCase;
+    private final LocalWorkerResultArchiveService resultArchiveService;
+
+    @Autowired
+    public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
+                                         DispatchNextStageUseCase dispatchUseCase,
+                                         CancelProcessingTaskUseCase cancelUseCase,
+                                         RetryFailedStageUseCase retryUseCase,
+                                         LocalWorkerResultArchiveService resultArchiveService) {
+        this.currentSubject = Objects.requireNonNull(currentSubject, "currentSubject");
+        this.detailUseCase = Objects.requireNonNull(detailUseCase, "detailUseCase");
+        this.dispatchUseCase = Objects.requireNonNull(dispatchUseCase, "dispatchUseCase");
+        this.cancelUseCase = Objects.requireNonNull(cancelUseCase, "cancelUseCase");
+        this.retryUseCase = Objects.requireNonNull(retryUseCase, "retryUseCase");
+        this.resultArchiveService = Objects.requireNonNull(resultArchiveService, "resultArchiveService");
+    }
 
     public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
                                          DispatchNextStageUseCase dispatchUseCase,
@@ -39,6 +57,7 @@ public class ProcessingExecutionController {
         this.dispatchUseCase = Objects.requireNonNull(dispatchUseCase, "dispatchUseCase");
         this.cancelUseCase = Objects.requireNonNull(cancelUseCase, "cancelUseCase");
         this.retryUseCase = Objects.requireNonNull(retryUseCase, "retryUseCase");
+        this.resultArchiveService = null;
     }
 
     @PostMapping("/processing-tasks/{taskId}/dispatch")
@@ -76,5 +95,18 @@ public class ProcessingExecutionController {
                 artifact.stageId().value(), artifact.type(), artifact.uri().value(), artifact.checksum()
             )).toList()
         )));
+    }
+
+    @GetMapping(value = "/processing-tasks/{taskId}/result.zip", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public void download(@PathVariable long taskId, javax.servlet.http.HttpServletResponse response) throws java.io.IOException {
+        AccessSubject subject = currentSubject.get();
+        var detail = detailUseCase.get(TaskId.of(taskId), subject);
+        if (!"SUCCEEDED".equals(detail.lifecycleStatus().name())) {
+            throw new IllegalStateException("Processing task has not completed successfully.");
+        }
+        if (resultArchiveService == null) {
+            throw new IllegalStateException("Result archive service is not configured.");
+        }
+        resultArchiveService.write(detail, subject, response);
     }
 }
