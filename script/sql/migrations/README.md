@@ -14,7 +14,16 @@
 psql -h 127.0.0.1 -U <user> -d <database> -f script/sql/pgsql.sql
 ```
 
-然后启动 `htht-admin`。Flyway 会自动创建 `flyway_schema_history` 并执行所有 `V*.sql` 迁移。检查结果：
+然后使用新库专用参数启动 `htht-admin`。由于基础 dump 已经让 schema 非空，Flyway 会先自动写入 version `0` 的 baseline，再执行所有 `V*.sql` 迁移：
+
+```powershell
+java -jar htht-admin\target\htht-admin.jar `
+  --spring.profiles.active=dev `
+  --spring.flyway.baseline-on-migrate=true `
+  --spring.flyway.baseline-version=0
+```
+
+检查结果：
 
 ```sql
 SELECT installed_rank, version, description, type, success
@@ -24,7 +33,7 @@ ORDER BY installed_rank;
 
 ## 已有数据库显式 Baseline
 
-已有库不要开启 `baseline-on-migrate`，也不要把基础 dump 重新导入。先备份数据库，确认当前库已经包含 `20260824.01` 所代表的结构，然后执行 `baseline-existing-postgres.sql` 中的 SQL，将当前状态登记为 Flyway baseline。之后启动应用，只有版本高于 `20260824.01` 的新迁移会执行。
+已有库不要开启 `baseline-on-migrate`，也不要把基础 dump 重新导入。先备份数据库，确认当前库已经包含 `20260824.01` 所代表的结构，然后执行 `baseline-existing-postgres.sql` 中的 SQL，将当前状态登记为 Flyway baseline。之后使用默认配置启动应用，只有版本高于 `20260824.01` 的新迁移会执行。
 
 baseline SQL 是幂等的：重复执行会因唯一键冲突而失败，因此执行前应先查询 `flyway_schema_history`；已经存在 baseline 时不再重复执行。
 

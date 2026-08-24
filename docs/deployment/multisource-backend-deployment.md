@@ -963,7 +963,7 @@ Worker 环境正确
 
 1. 创建 PostgreSQL 数据库。
 2. 执行 `script/sql/pgsql.sql`，建立基础业务表和初始数据。
-3. 使用本文件后面的命令启动后端。
+3. 使用本文件后面的新库专用命令启动后端，并传入 `--spring.flyway.baseline-on-migrate=true --spring.flyway.baseline-version=0`。这只适用于刚导入基础 dump 的新库，作用是自动登记 version `0` baseline 后执行全部增量迁移。
 4. 启动日志显示迁移完成后，检查：
 
 ```sql
@@ -979,7 +979,7 @@ ORDER BY installed_rank;
 3. 在目标数据库执行 `script/sql/migrations/baseline-existing-postgres.sql` 一次。
 4. 启动新版本后端；后续新版本迁移会自动执行。
 
-应用配置保持 `spring.flyway.baseline-on-migrate=false`。这意味着没有登记过的非空数据库会直接启动失败，必须由部署人员显式 baseline，避免误把错误数据库当成已升级数据库。
+应用默认配置保持 `spring.flyway.baseline-on-migrate=false`。没有登记过的非空数据库会直接启动失败，必须由部署人员显式 baseline，避免误把错误数据库当成已升级数据库。只有新库首次导入基础 dump 时，才通过启动参数临时开启 version `0` baseline。
 
 ### 迁移失败处理
 
