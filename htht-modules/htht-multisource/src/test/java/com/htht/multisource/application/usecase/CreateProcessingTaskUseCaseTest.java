@@ -17,10 +17,13 @@ import com.htht.multisource.application.usecase.model.BatchCreationResult;
 import com.htht.multisource.application.usecase.service.CreateProcessingBatchService;
 import com.htht.multisource.application.usecase.service.CreateProcessingTaskService;
 import com.htht.multisource.application.usecase.service.TaskCreationCoordinator;
+import com.htht.multisource.infrastructure.worker.WorkerOperation;
+import com.htht.multisource.infrastructure.worker.WorkerProtocolException;
 import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.domain.model.AssetReference;
 import com.htht.multisource.domain.model.InputAsset;
 import com.htht.multisource.domain.model.ProcessingBatch;
+import com.htht.multisource.domain.model.ProcessingBatchStatus;
 import com.htht.multisource.domain.model.ProcessingPlan;
 import com.htht.multisource.domain.model.ProcessingTask;
 import com.htht.multisource.domain.model.ProductCandidate;
@@ -37,6 +40,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.htht.multisource.application.usecase.ApplicationUseCaseTestFixtures.candidate;
 import static com.htht.multisource.application.usecase.ApplicationUseCaseTestFixtures.samplePlan;
@@ -137,6 +141,37 @@ class CreateProcessingTaskUseCaseTest {
 
         assertThat(fakes.planner.requests()).isEmpty();
         assertThat(fakes.batches.saved()).isEmpty();
+    }
+
+    @Test
+    void refreshesReadGrantOnceWhenPlanningManifestExpires() {
+        InMemoryTaskRepository tasks = new InMemoryTaskRepository();
+        InMemoryStageRepository stages = new InMemoryStageRepository();
+        CountingCreationAssetStorage storage = new CountingCreationAssetStorage();
+        AtomicInteger plans = new AtomicInteger();
+        ProcessingPlan plan = samplePlan();
+        ProcessingPlanner planner = request -> {
+            if (plans.getAndIncrement() == 0) {
+                throw new WorkerProtocolException(
+                    "req-plan", WorkerOperation.BUILD_PLAN,
+                    "INVALID_ASSET_MANIFEST", "manifest is expired", true
+                );
+            }
+            return plan;
+        };
+        TaskCreationCoordinator coordinator = new TaskCreationCoordinator(
+            tasks, stages, planner, storage, new IncrementingTaskIdGenerator(),
+            new IncrementingStageIdGenerator(), "worker-test-1.0.0"
+        );
+
+        coordinator.create(
+            new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED,
+                List.of(candidate("fy3h-granule-01", ProductSupportStatus.SUPPORTED))),
+            "task-01", subject(), candidate("fy3h-granule-01", ProductSupportStatus.SUPPORTED),
+            "{\"mode\":\"standard\"}", new StorageUri("rs://output/task-01")
+        );
+
+        assertThat(storage.grantCount).isEqualTo(2);
     }
 
     private static final class Fakes {
@@ -245,7 +280,7 @@ class CreateProcessingTaskUseCaseTest {
         }
     }
 
-    private static final class CreationAssetStorage implements AssetStorage {
+    private static class CreationAssetStorage implements AssetStorage {
         @Override
         public AssetAccessGrant grantRead(AccessSubject subject, List<InputAsset> inputs) {
             return new AssetAccessGrant("read-" + subject.userId(), Instant.parse("2026-08-20T00:00:00Z"));
@@ -259,6 +294,16 @@ class CreateProcessingTaskUseCaseTest {
         @Override
         public AssetMetadata resolve(AccessSubject subject, AssetReference reference) {
             throw new UnsupportedOperationException("Asset resolution is outside creation tests.");
+        }
+    }
+
+    private static final class CountingCreationAssetStorage extends CreationAssetStorage {
+        private int grantCount;
+
+        @Override
+        public AssetAccessGrant grantRead(AccessSubject subject, List<InputAsset> inputs) {
+            grantCount++;
+            return new AssetAccessGrant("read-" + grantCount, Instant.parse("2026-08-20T00:00:00Z"));
         }
     }
 

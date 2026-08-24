@@ -8,6 +8,7 @@ import com.htht.multisource.application.usecase.PreflightProductUseCase;
 import com.htht.multisource.application.usecase.model.PreflightResult;
 import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.domain.model.InputAsset;
+import com.htht.multisource.infrastructure.worker.WorkerProtocolException;
 
 import java.util.List;
 import java.util.Objects;
@@ -26,9 +27,18 @@ public final class PreflightProductService implements PreflightProductUseCase {
     public PreflightResult preflight(AccessSubject subject, List<InputAsset> inputs) {
         Objects.requireNonNull(subject, "subject");
         List<InputAsset> copiedInputs = List.copyOf(Objects.requireNonNull(inputs, "inputs"));
-        InspectionResponse response = inspector.inspect(
-            new InspectionRequest(subject, copiedInputs, assetStorage.grantRead(subject, copiedInputs))
-        );
+        InspectionResponse response = inspectWithFreshGrant(subject, copiedInputs);
         return new PreflightResult(response.rulePackageVersion(), response.candidates());
+    }
+
+    private InspectionResponse inspectWithFreshGrant(AccessSubject subject, List<InputAsset> inputs) {
+        try {
+            return inspector.inspect(new InspectionRequest(subject, inputs, assetStorage.grantRead(subject, inputs)));
+        } catch (WorkerProtocolException error) {
+            if (!error.isManifestExpired()) {
+                throw error;
+            }
+            return inspector.inspect(new InspectionRequest(subject, inputs, assetStorage.grantRead(subject, inputs)));
+        }
     }
 }

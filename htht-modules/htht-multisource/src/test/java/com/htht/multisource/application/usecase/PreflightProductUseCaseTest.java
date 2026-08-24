@@ -7,6 +7,8 @@ import com.htht.multisource.application.port.out.model.ExecutionGrant;
 import com.htht.multisource.application.port.out.model.InspectionResponse;
 import com.htht.multisource.application.usecase.model.PreflightResult;
 import com.htht.multisource.application.usecase.service.PreflightProductService;
+import com.htht.multisource.infrastructure.worker.WorkerOperation;
+import com.htht.multisource.infrastructure.worker.WorkerProtocolException;
 import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.domain.model.AssetReference;
 import com.htht.multisource.domain.model.InputAsset;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.htht.multisource.application.usecase.ApplicationUseCaseTestFixtures.candidate;
 import static com.htht.multisource.application.usecase.ApplicationUseCaseTestFixtures.subject;
@@ -51,7 +54,28 @@ class PreflightProductUseCaseTest {
             .isInstanceOf(UnsupportedOperationException.class);
     }
 
-    private static final class FakeAssetStorage implements AssetStorage {
+    @Test
+    void refreshesReadGrantOnceWhenManifestExpires() {
+        ProductCandidate fixture = candidate("fy3h-granule-01", ProductSupportStatus.SUPPORTED);
+        AtomicInteger inspections = new AtomicInteger();
+        CountingAssetStorage storage = new CountingAssetStorage();
+        PreflightProductService service = new PreflightProductService(request -> {
+            if (inspections.getAndIncrement() == 0) {
+                throw new WorkerProtocolException(
+                    "req-preflight", WorkerOperation.INSPECT,
+                    "INVALID_ASSET_MANIFEST", "manifest is expired", true
+                );
+            }
+            return new InspectionResponse("rules-2026.08", List.of(fixture));
+        }, storage);
+
+        PreflightResult result = service.preflight(subject(), List.of(fixture.files().get(0)));
+
+        assertThat(result.candidates()).containsExactly(fixture);
+        assertThat(storage.grantCount).isEqualTo(2);
+    }
+
+    private static class FakeAssetStorage implements AssetStorage {
 
         @Override
         public AssetAccessGrant grantRead(AccessSubject subject, List<InputAsset> inputs) {
@@ -66,6 +90,16 @@ class PreflightProductUseCaseTest {
         @Override
         public AssetMetadata resolve(AccessSubject subject, AssetReference reference) {
             throw new UnsupportedOperationException("Asset resolution is outside preflight tests.");
+        }
+    }
+
+    private static final class CountingAssetStorage extends FakeAssetStorage {
+        private int grantCount;
+
+        @Override
+        public AssetAccessGrant grantRead(AccessSubject subject, List<InputAsset> inputs) {
+            grantCount++;
+            return new AssetAccessGrant("read-" + grantCount, Instant.parse("2026-08-20T00:00:00Z"));
         }
     }
 }

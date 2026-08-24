@@ -22,6 +22,8 @@ import java.time.Instant;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
+import com.htht.multisource.infrastructure.worker.WorkerProtocolException;
 
 public final class DispatchNextStageService implements DispatchNextStageUseCase {
 
@@ -74,17 +76,18 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("Claimed stage is absent from task plan snapshot."));
             var candidate = task.candidates().get(0);
-            var grant = assetStorage.grant(new ExecutionGrantRequest(
-                task.id(), claim.stage().id(), executionId, claim.stage().attempt(), candidate.files(), task.outputUri()
-            ));
-            var request = new StageExecutionRequest(
-                    task.id(), claim.stage().id(), planStage.stageKey(), claim.stage().attempt(), executionId,
-                    "1.0", candidate.profileKey().productCode(), candidate.profileKey().profileVersion(),
-                    task.plan().processorVersion(), task.parameterSnapshot(), candidate.files(), task.outputUri(), grant
-            );
             DispatchReceipt receipt;
             try {
-                receipt = dispatcher.dispatch(request);
+                receipt = dispatchWithRefresh(() -> {
+                    var grant = assetStorage.grant(new ExecutionGrantRequest(
+                        task.id(), claim.stage().id(), executionId, claim.stage().attempt(), candidate.files(), task.outputUri()
+                    ));
+                    return new StageExecutionRequest(
+                        task.id(), claim.stage().id(), planStage.stageKey(), claim.stage().attempt(), executionId,
+                        "1.0", candidate.profileKey().productCode(), candidate.profileKey().profileVersion(),
+                        task.plan().processorVersion(), task.parameterSnapshot(), candidate.files(), task.outputUri(), grant
+                    );
+                });
             } catch (RuntimeException failure) {
                 eventUseCase.accept(new ExecutionEvent(
                     task.id(), claim.stage().id(), executionId, claim.stage().attempt(), 1,
@@ -101,6 +104,17 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
             ), receipt.artifacts());
             return new DispatchResult(claim.stage().id().value(), executionId.value());
         });
+    }
+
+    private DispatchReceipt dispatchWithRefresh(Supplier<StageExecutionRequest> requestFactory) {
+        try {
+            return dispatcher.dispatch(requestFactory.get());
+        } catch (WorkerProtocolException error) {
+            if (!error.isManifestExpired()) {
+                throw error;
+            }
+            return dispatcher.dispatch(requestFactory.get());
+        }
     }
 
     private static String escapeJson(String value) {

@@ -14,6 +14,8 @@ import com.htht.multisource.application.port.out.model.StageExecutionRequest;
 import com.htht.multisource.application.usecase.service.DispatchNextStageService;
 import com.htht.multisource.application.usecase.service.AcceptWorkerEventService;
 import com.htht.multisource.domain.model.AccessSubject;
+import com.htht.multisource.infrastructure.worker.WorkerOperation;
+import com.htht.multisource.infrastructure.worker.WorkerProtocolException;
 import com.htht.multisource.domain.model.AssetReference;
 import com.htht.multisource.domain.model.ExecutionId;
 import com.htht.multisource.domain.model.InputAsset;
@@ -164,6 +166,28 @@ class DispatchNextStageUseCaseTest {
         });
     }
 
+    @Test
+    void refreshesExecutionGrantOnceWhenManifestExpires() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "READ")), Map.of("READ", List.of())
+        );
+        RefreshingDispatcher dispatcher = new RefreshingDispatcher();
+        RecordingAssetStorage storage = new RecordingAssetStorage();
+        InMemoryExecutionEventRepository eventRepository = new InMemoryExecutionEventRepository();
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            new SingleTaskRepository(task(TaskLifecycleStatus.CREATED)), stages, dispatcher, storage,
+            () -> new ExecutionId("exec-01"), () -> NOW, java.time.Duration.ofMinutes(5),
+            new AcceptWorkerEventService(stages, eventRepository)
+        );
+
+        assertThat(useCase.dispatch(TASK_ID)).contains(new DispatchNextStageUseCase.DispatchResult(201L, "exec-01"));
+        assertThat(storage.grantCalls).isEqualTo(2);
+        assertThat(dispatcher.calls).isEqualTo(2);
+        assertThat(eventRepository.events.values()).allSatisfy(event ->
+            assertThat(event.type()).isNotEqualTo(com.htht.multisource.application.port.out.model.ExecutionEvent.Type.FAILED)
+        );
+    }
+
     private static TaskStage pending(long stageId, String stageKey) {
         return new TaskStage(new StageId(stageId), TASK_ID, stageKey, StageExecutionStatus.PENDING, 1);
     }
@@ -248,9 +272,11 @@ class DispatchNextStageUseCaseTest {
 
     private static final class RecordingAssetStorage implements AssetStorage {
         private ExecutionGrantRequest request;
+        private int grantCalls;
 
         @Override
         public ExecutionGrant grant(ExecutionGrantRequest request) {
+            grantCalls++;
             this.request = request;
             return new ExecutionGrant("grant-01", LEASE_EXPIRES_AT, request.taskId(), request.stageId(), request.executionId(), request.attempt());
         }
@@ -267,6 +293,27 @@ class DispatchNextStageUseCaseTest {
 
         @Override
         public com.htht.multisource.application.port.out.model.AssetMetadata resolve(AccessSubject subject, AssetReference reference) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class RefreshingDispatcher implements TaskDispatcher {
+        private int calls;
+
+        @Override
+        public DispatchReceipt dispatch(StageExecutionRequest request) {
+            calls++;
+            if (calls == 1) {
+                throw new WorkerProtocolException(
+                    "exec-01", WorkerOperation.EXECUTE_STAGE,
+                    "INVALID_ASSET_MANIFEST", "manifest is expired", true
+                );
+            }
+            return new DispatchReceipt("worker-local", true, List.of());
+        }
+
+        @Override
+        public void cancel(ExecutionId executionId) {
             throw new UnsupportedOperationException();
         }
     }

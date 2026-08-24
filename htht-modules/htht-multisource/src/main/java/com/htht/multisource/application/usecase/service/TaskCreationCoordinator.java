@@ -20,6 +20,7 @@ import com.htht.multisource.domain.model.StageExecutionStatus;
 import com.htht.multisource.domain.model.StorageUri;
 import com.htht.multisource.domain.model.TaskId;
 import com.htht.multisource.domain.model.TaskLifecycleStatus;
+import com.htht.multisource.infrastructure.worker.WorkerProtocolException;
 import com.htht.multisource.domain.model.TaskStage;
 
 import java.util.List;
@@ -78,8 +79,7 @@ public final class TaskCreationCoordinator {
         }
 
         TaskId taskId = taskIdGenerator.nextId();
-        AssetAccessGrant readGrant = assetStorage.grantRead(subject, candidate.files());
-        ProcessingPlan workerPlan = planner.buildPlan(new PlanRequest(taskId, candidate, parameterSnapshot, readGrant));
+        ProcessingPlan workerPlan = buildPlanWithFreshGrant(taskId, subject, candidate, parameterSnapshot);
         ProcessingPlan plan = new ProcessingPlan(workerPlan.version(), processorVersion, workerPlan.stages());
         ProcessingTask task = new ProcessingTask(
             taskId, name, subject, TaskLifecycleStatus.CREATED, QualityStatus.NOT_CHECKED,
@@ -92,5 +92,22 @@ public final class TaskCreationCoordinator {
             ));
         }
         return taskId;
+    }
+
+    private ProcessingPlan buildPlanWithFreshGrant(
+        TaskId taskId, AccessSubject subject, ProductCandidate candidate, String parameterSnapshot
+    ) {
+        try {
+            return planner.buildPlan(new PlanRequest(
+                taskId, candidate, parameterSnapshot, assetStorage.grantRead(subject, candidate.files())
+            ));
+        } catch (WorkerProtocolException error) {
+            if (!error.isManifestExpired()) {
+                throw error;
+            }
+            return planner.buildPlan(new PlanRequest(
+                taskId, candidate, parameterSnapshot, assetStorage.grantRead(subject, candidate.files())
+            ));
+        }
     }
 }
