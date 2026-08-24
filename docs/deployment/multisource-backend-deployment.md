@@ -955,3 +955,48 @@ Worker 环境正确
 输入和输出目录权限正确
 只有这些条件全部满足后，才能认定后端部署完成。
 ```
+## Flyway 数据库迁移
+
+后端现在使用 PostgreSQL + Flyway 管理增量迁移。Flyway 迁移源码位于 `script/sql/migrations/`，构建时会复制到 `htht-admin` 的 `classpath:db/migration`。
+
+### 新数据库
+
+1. 创建 PostgreSQL 数据库。
+2. 执行 `script/sql/pgsql.sql`，建立基础业务表和初始数据。
+3. 使用新库专用命令启动后端。这只适用于刚导入基础 dump 的新库，作用是自动登记 version `0` baseline 后执行全部增量迁移：
+
+```powershell
+java -jar htht-admin\target\htht-admin.jar `
+  --spring.profiles.active=dev `
+  --spring.flyway.baseline-on-migrate=true `
+  --spring.flyway.baseline-version=0
+```
+4. 启动日志显示迁移完成后，检查：
+
+```sql
+SELECT installed_rank, version, description, success
+FROM flyway_schema_history
+ORDER BY installed_rank;
+```
+
+### 已有数据库
+
+1. 先执行 PostgreSQL 备份。
+2. 确认当前数据库结构已经包含仓库最新版本 `20260824.01` 的内容。
+3. 在目标数据库执行 `script/sql/migrations/baseline-existing-postgres.sql` 一次。
+4. 启动新版本后端；后续新版本迁移会自动执行。
+
+应用默认配置保持 `spring.flyway.baseline-on-migrate=false`。没有登记过的非空数据库会直接启动失败，必须由部署人员显式 baseline，避免误把错误数据库当成已升级数据库。只有新库首次导入基础 dump 时，才通过启动参数临时开启 version `0` baseline。
+
+### 迁移失败处理
+
+- `validate-on-migrate` 发现 checksum 不一致时，禁止直接编辑已执行的迁移文件；恢复原文件或核对历史后，用新版本迁移修复。
+- 迁移失败会阻止应用启动。修复数据库或迁移 SQL 后重新启动，Flyway 会重试失败版本。
+- `clean-disabled=true`，生产环境禁止使用 `flyway clean`。
+- 查看迁移状态：
+
+```sql
+SELECT installed_rank, version, description, type, checksum, success, installed_on
+FROM flyway_schema_history
+ORDER BY installed_rank;
+```
