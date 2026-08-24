@@ -1000,3 +1000,9 @@ SELECT installed_rank, version, description, type, checksum, success, installed_
 FROM flyway_schema_history
 ORDER BY installed_rank;
 ```
+
+## Worker 授权和过期恢复
+
+每次 Worker 操作都会在调用前生成新的文件授权。预检、任务建计划和阶段执行不会复用其他操作的授权，也不会把 Worker grant 持久化到预检会话中。
+
+当 Worker 明确返回 `INVALID_ASSET_MANIFEST` 且消息为 `manifest is expired` 时，当前操作会刷新授权并自动重试一次。其他 Worker 错误不会自动重试；第二次尝试仍失败时，接口只向用户返回稳定的业务提示，详细错误和 `requestId` 保留在后端日志中。前端主流程只需点击一次“开始处理”，系统会自动完成预检、建任务和启动。
