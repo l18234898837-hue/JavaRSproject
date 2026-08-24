@@ -5,6 +5,8 @@ public final class WorkerProtocolException extends RuntimeException {
     private final String code;
     private final boolean retryable;
     private final String workerMessage;
+    private final String requestId;
+    private final WorkerOperation operation;
 
     public WorkerProtocolException(String requestId, WorkerOperation operation, String message) {
         this(requestId, operation, null, message, false, null);
@@ -28,6 +30,8 @@ public final class WorkerProtocolException extends RuntimeException {
         this.code = code;
         this.retryable = retryable;
         this.workerMessage = message;
+        this.requestId = requestId;
+        this.operation = operation;
     }
 
     public String code() {
@@ -40,5 +44,13 @@ public final class WorkerProtocolException extends RuntimeException {
 
     public boolean isManifestExpired() {
         return "INVALID_ASSET_MANIFEST".equals(code) && "manifest is expired".equals(workerMessage);
+    }
+
+    public String requestId() {
+        return requestId;
+    }
+
+    public WorkerOperation operation() {
+        return operation;
     }
 }
