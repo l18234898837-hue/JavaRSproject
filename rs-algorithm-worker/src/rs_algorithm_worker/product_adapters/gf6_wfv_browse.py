@@ -23,22 +23,68 @@ FORBIDDEN = {
 }
 
 PUBLIC_PARAMETERS = {"schemaVersion": "1", "operation": "DEFAULT_PROCESS"}
+ROLE_SUFFIXES = {
+    "BROWSE_IMAGE": ".jpg",
+    "GEOREFERENCE": ".jgw",
+    "METADATA": ".json",
+}
+REQUIRED_SUFFIXES = set(ROLE_SUFFIXES.values())
 
 
 def inspect_manifest(manifest):
+    inputs = manifest.get("inputs")
     paths = input_paths(manifest)
-    groups = {}
-    for path in paths:
-        groups.setdefault(path.stem, {})[path.suffix.lower()] = path
+    groups = _group_inputs(inputs)
     candidates = []
-    for stem, files in sorted(groups.items()):
-        required = {".jpg", ".jgw", ".json"}
-        if set(files) != required:
+    for group_key, entries in sorted(groups.items(), key=lambda item: str(item[0])):
+        files = _files_for_group(entries)
+        if set(files) != REQUIRED_SUFFIXES:
             raise ValueError("GF-6 WFV browse package requires JPEG, JGW, and JSON")
-        candidates.append(_inspect_package(stem, files))
+        candidates.append(_inspect_package(str(group_key), files))
     if not candidates:
         raise ValueError("GF-6 WFV browse evidence is empty")
     return candidates
+
+
+def _group_inputs(inputs):
+    if not isinstance(inputs, list) or not inputs:
+        raise ValueError("manifest inputs are required")
+    if any("groupId" in item for item in inputs if isinstance(item, dict)):
+        if not all(isinstance(item.get("groupId"), str) and item["groupId"] for item in inputs):
+            raise ValueError("GF-6 product groupId must be present for every input")
+        return _group_by(inputs, lambda item: item["groupId"])
+    if all(item.get("role") in ROLE_SUFFIXES for item in inputs if isinstance(item, dict)):
+        return _group_by(inputs, lambda item: item.get("ordinal", 0))
+    return _group_by(inputs, lambda item: Path(item["path"]).stem)
+
+
+def _group_by(inputs, key_fn):
+    groups = {}
+    for item in inputs:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            raise ValueError("manifest input path is required")
+        groups.setdefault(key_fn(item), []).append(item)
+    return groups
+
+
+def _files_for_group(entries):
+    use_roles = any(item.get("role") in ROLE_SUFFIXES for item in entries)
+    files = {}
+    for item in entries:
+        path = Path(item["path"])
+        suffix = path.suffix.lower()
+        if use_roles:
+            role = item.get("role")
+            expected_suffix = ROLE_SUFFIXES.get(role)
+            if expected_suffix is None:
+                raise ValueError("GF-6 browse package contains an unsupported input role")
+            if suffix != expected_suffix:
+                raise ValueError(f"GF-6 {role} file extension is invalid")
+            suffix = expected_suffix
+        if suffix in files:
+            raise ValueError("GF-6 browse package contains duplicate input roles")
+        files[suffix] = path
+    return files
 
 
 def build_plan(product: dict, parameters: dict | None = None) -> dict:

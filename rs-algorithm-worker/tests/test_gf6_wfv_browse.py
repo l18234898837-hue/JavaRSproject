@@ -100,3 +100,32 @@ def test_rejects_invalid_metadata_json(tmp_path):
     with pytest.raises(ValueError, match="metadata evidence"):
         inspect_manifest({"inputs": [{"path": str(path), "role": "MAIN", "ordinal": index}
                                       for index, path in enumerate((image, jgw, metadata))]})
+
+
+def test_inspect_pairs_role_inputs_when_storage_names_differ(tmp_path):
+    image = tmp_path / "89c26829.jpg"
+    Image.new("RGB", (2, 2), (10, 20, 30)).save(image)
+    jgw = tmp_path / "86833e0b.jgw"
+    jgw.write_text("1\n0\n0\n-1\n107.785024\n13.005316\n", encoding="utf-8")
+    metadata = tmp_path / "83829c53.json"
+    metadata.write_text(json.dumps({
+        "productid": "1420733151",
+        "satelliteid": "GF6",
+        "sensorid": "WFV",
+        "sublevel": "LEVEL1A",
+        "metadataid": "GF6-WFV-LEVEL1A-1420733151",
+        "geom": "POLYGON((107.785024 13.005316,108 13,108 12,107 12,107.785024 13.005316))",
+        "starttime": "2026-08-09 10:24:57",
+        "endtime": "2026-08-09 10:25:37",
+        "cloudpercent": "27",
+    }), encoding="utf-8")
+
+    manifest = {"inputs": [
+        {"path": str(image), "role": "BROWSE_IMAGE", "ordinal": 0},
+        {"path": str(jgw), "role": "GEOREFERENCE", "ordinal": 0},
+        {"path": str(metadata), "role": "METADATA", "ordinal": 0},
+    ]}
+
+    candidates = inspect_manifest(manifest)
+
+    assert [item["packageId"] for item in candidates] == ["GF6-WFV-LEVEL1A-1420733151"]
