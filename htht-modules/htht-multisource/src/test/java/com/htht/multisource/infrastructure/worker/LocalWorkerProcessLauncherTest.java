@@ -85,6 +85,18 @@ class LocalWorkerProcessLauncherTest {
     }
 
     @Test
+    void returnsWorkerResponseWhenProcessExitsWithProtocolError() {
+        LocalWorkerProcessLauncher launcher = launcher("invalid-manifest", Duration.ofSeconds(2));
+
+        WorkerInvocationResult result = launcher.launch(new WorkerInvocation(
+            "req-invalid-manifest", WorkerOperation.INSPECT, "{\"schemaVersion\":\"1.0\",\"requestId\":\"req-invalid-manifest\"}"
+        ));
+
+        assertThat(result.exitCode()).isEqualTo(2);
+        assertThat(result.responseJson()).contains("INVALID_ASSET_MANIFEST");
+    }
+
+    @Test
     void terminatesTimedOutProcessAndRetainsDiagnosticDirectory() {
         LocalWorkerProcessLauncher launcher = launcher("sleep", Duration.ofMillis(100));
 

@@ -27,6 +27,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 @Tag("dev")
 class WorkerContractCodecTest {
@@ -87,10 +88,29 @@ class WorkerContractCodecTest {
              "error":{"code":"UNSUPPORTED_PRODUCT","message":"No supported profile.","retryable":false}}
             """;
 
-        assertThatThrownBy(() -> codec.decodeResponse("req-01", WorkerOperation.INSPECT, response))
-            .isInstanceOf(WorkerProtocolException.class)
+        Throwable thrown = catchThrowable(() -> codec.decodeResponse("req-01", WorkerOperation.INSPECT, response));
+        assertThat(thrown).isInstanceOf(WorkerProtocolException.class)
             .hasMessageContaining("UNSUPPORTED_PRODUCT")
             .hasMessageContaining("retryable=false");
+        WorkerProtocolException exception = (WorkerProtocolException) thrown;
+
+        assertThat(exception.code()).isEqualTo("UNSUPPORTED_PRODUCT");
+        assertThat(exception.retryable()).isFalse();
+        assertThat(exception.isManifestExpired()).isFalse();
+    }
+
+    @Test
+    void identifiesExpiredManifestError() {
+        String response = """
+            {"schemaVersion":"1.0","operation":"inspect","requestId":"req-01",
+             "error":{"code":"INVALID_ASSET_MANIFEST","message":"manifest is expired","retryable":true}}
+            """;
+
+        Throwable thrown = catchThrowable(() -> codec.decodeResponse("req-01", WorkerOperation.INSPECT, response));
+        assertThat(thrown).isInstanceOf(WorkerProtocolException.class);
+        WorkerProtocolException exception = (WorkerProtocolException) thrown;
+
+        assertThat(exception.isManifestExpired()).isTrue();
     }
 
     @Test

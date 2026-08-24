@@ -104,8 +104,9 @@ public final class WorkerContractCodec {
                 throw new WorkerProtocolException(
                     requestId,
                     expectedOperation,
-                    "Worker error " + error.path("code").asText() + ": " + error.path("message").asText()
-                        + " (retryable=" + error.path("retryable").asBoolean() + ")"
+                    error.path("code").asText(),
+                    error.path("message").asText(),
+                    error.path("retryable").asBoolean()
                 );
             }
             JsonNode payload = root.get("payload");

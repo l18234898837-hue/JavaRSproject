@@ -27,6 +27,11 @@ public final class FixtureWorker {
         }
         String requestJson = Files.readString(request);
         String requestId = requestJson.replaceFirst(".*\\\"requestId\\\":\\\"([^\\\"]+)\\\".*", "$1");
+        if ("invalid-manifest".equals(mode)) {
+            Files.writeString(response, "{\"schemaVersion\":\"1.0\",\"operation\":\"inspect\",\"requestId\":\""
+                + requestId + "\",\"error\":{\"code\":\"INVALID_ASSET_MANIFEST\",\"message\":\"manifest is expired\",\"retryable\":true}}");
+            System.exit(2);
+        }
         Files.writeString(response, "{\"schemaVersion\":\"1.0\",\"operation\":\"inspect\",\"requestId\":\"" + requestId + "\",\"payload\":{}}");
     }
 

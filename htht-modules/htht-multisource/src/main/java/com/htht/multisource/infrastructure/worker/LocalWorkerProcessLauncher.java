@@ -48,11 +48,8 @@ public final class LocalWorkerProcessLauncher implements WorkerProcessLauncher {
                     throw protocolFailure(invocation, "process timed out", null);
                 }
                 int exitCode = process.exitValue();
-                if (exitCode != 0) {
-                    throw protocolFailure(invocation, "process exited with code " + exitCode, null);
-                }
                 if (!Files.isRegularFile(responseFile)) {
-                    throw protocolFailure(invocation, "response file was not written", null);
+                    throw protocolFailure(invocation, "response file was not written (exit code " + exitCode + ")", null);
                 }
                 return new WorkerInvocationResult(
                     invocation.requestId(), exitCode, Files.readString(responseFile, StandardCharsets.UTF_8)
