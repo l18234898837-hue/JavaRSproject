@@ -28,6 +28,19 @@ def test_scientific_operation_is_rejected(tmp_path):
         build_plan(candidate, {"operation": "RADIOMETRIC_CALIBRATION"})
 
 
+def test_browse_plan_requires_the_exact_public_parameter_snapshot():
+    candidate = {
+        "packageId": "GF6-WFV-LEVEL1A-test",
+        "profileKey": {"productCode": "GF-6-WFV-BROWSE", "profileVersion": "v1"},
+        "supportStatus": "SUPPORTED",
+        "dataShape": "RASTER_GRID",
+        "files": [],
+    }
+    with pytest.raises(ValueError, match="UNSUPPORTED_BROWSE_OPERATION"):
+        build_plan(candidate, {"schemaVersion": "1", "operation": "BROWSE_VISUAL_FEATURES"})
+    assert build_plan(candidate, {"schemaVersion": "1", "operation": "DEFAULT_PROCESS"})["version"] == "plan-v1"
+
+
 def test_browse_plan_writes_deterministic_report(tmp_path):
     image = tmp_path / "browse.jpg"
     Image.new("RGB", (2, 2), (10, 20, 30)).save(image)
@@ -39,7 +52,20 @@ def test_browse_plan_writes_deterministic_report(tmp_path):
         "files": [{"role": "BROWSE_IMAGE", "path": str(image)}],
     }
     report = execute_visual_plan(candidate, tmp_path / "output")
-    assert json.loads(report.read_text(encoding="utf-8"))["packageId"] == candidate["packageId"]
+    content = report.read_bytes()
+    assert content.endswith(b"\n")
+    value = json.loads(content)
+    assert value["packageId"] == candidate["packageId"]
+    assert value["georeferencingMethod"] == "AFFINE_WORLD_FILE_APPROXIMATE"
+    assert value["image"] == {
+        "height": 2,
+        "rgbStats": {
+            "blue": {"max": 30, "mean": 30.0, "min": 30},
+            "green": {"max": 20, "mean": 20.0, "min": 20},
+            "red": {"max": 10, "mean": 10.0, "min": 10},
+        },
+        "width": 2,
+    }
 
 
 def _minimal_group(tmp_path):

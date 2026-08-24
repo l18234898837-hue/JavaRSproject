@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from pathlib import Path
 from typing import Any
 
 from .product_adapters import fy3h_mersi, fy4b_agri, gf6_wfv_browse, hy1c_czi, hy2d_altimeter
+
+
+LOGICAL_OUTPUT_URI = re.compile(r"rs://output/[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*/?")
 
 
 def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
@@ -16,12 +22,20 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
         return {"rulePackageVersion": "rules-2026.08",
                 "candidates": [_to_response_candidate(item, manifest) for item in candidates]}
     if operation == "build-plan":
+        adapter = _adapter_for_manifest(manifest)
+        if adapter is gf6_wfv_browse:
+            payload = _payload(request)
+            candidate = _recognized_gf_candidate(manifest, payload.get("candidate", {}).get("packageId"))
+            return adapter.build_plan(candidate, _parameter_snapshot(payload))
         return {"version": "plan-v1", "stages": [{
             "stageKey": "VALIDATE_SOURCE",
             "stageCode": "VALIDATE_SOURCE",
             "dependsOnStageKeys": [],
         }]}
     if operation == "execute-stage":
+        adapter = _adapter_for_manifest(manifest)
+        if adapter is gf6_wfv_browse:
+            return _execute_gf_browse_stage(_payload(request), manifest)
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": []}
     raise ValueError(f"unsupported operation: {operation}")
 
@@ -55,3 +69,71 @@ def _to_response_candidate(item, manifest):
             "required": True,
         })
     return {key: value for key, value in item.items() if key != "files"} | {"files": files}
+
+
+def _payload(request: dict[str, Any]) -> dict[str, Any]:
+    payload = request.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError("request payload is required")
+    return payload
+
+
+def _parameter_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    snapshot = payload.get("parameterSnapshot")
+    if isinstance(snapshot, dict):
+        return snapshot
+    if not isinstance(snapshot, str):
+        raise ValueError("UNSUPPORTED_BROWSE_OPERATION: invalid parameter snapshot")
+    try:
+        value = json.loads(snapshot)
+    except json.JSONDecodeError as error:
+        raise ValueError("UNSUPPORTED_BROWSE_OPERATION: invalid parameter snapshot") from error
+    if not isinstance(value, dict):
+        raise ValueError("UNSUPPORTED_BROWSE_OPERATION: invalid parameter snapshot")
+    return value
+
+
+def _recognized_gf_candidate(manifest: dict[str, Any], package_id: Any) -> dict[str, Any]:
+    if not isinstance(package_id, str) or not package_id:
+        raise ValueError("recognized GF-6 packageId is required")
+    candidates = gf6_wfv_browse.inspect_manifest(manifest)
+    for candidate in candidates:
+        if candidate["packageId"] == package_id:
+            return candidate
+    raise ValueError("recognized GF-6 packageId is required")
+
+
+def _execute_gf_browse_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    candidate = _recognized_gf_candidate(manifest, payload.get("packageId"))
+    plan = gf6_wfv_browse.build_plan(candidate, _parameter_snapshot(payload))
+    stage_key = payload.get("stageKey")
+    stages = {stage["stageKey"] for stage in plan["stages"]}
+    if stage_key not in stages:
+        raise ValueError("unsupported GF-6 browse stage")
+    result = {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": []}
+    if stage_key != "WRITE_BROWSE_REPORT":
+        return result
+
+    output = manifest.get("output")
+    output_dir = output.get("path") if isinstance(output, dict) else None
+    output_uri = _logical_output_uri(payload.get("outputUri"))
+    if not isinstance(output_dir, str):
+        raise ValueError("GF-6 browse report output is required")
+    report = gf6_wfv_browse.execute_visual_plan(candidate, output_dir)
+    content = report.read_bytes()
+    result["artifacts"] = [{
+        "uri": output_uri.rstrip("/") + "/browse-report.json",
+        "type": "BROWSE_REPORT_JSON",
+        "sizeBytes": len(content),
+        "checksum": "sha256:" + hashlib.sha256(content).hexdigest(),
+    }]
+    return result
+
+
+def _logical_output_uri(value: Any) -> str:
+    if not isinstance(value, str) or not LOGICAL_OUTPUT_URI.fullmatch(value):
+        raise ValueError("GF-6 browse report requires a logical output URI")
+    segments = value.removeprefix("rs://output/").rstrip("/").split("/")
+    if any(segment in {".", ".."} for segment in segments):
+        raise ValueError("GF-6 browse report requires a logical output URI")
+    return value.rstrip("/")

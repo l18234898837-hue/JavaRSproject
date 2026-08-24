@@ -6,7 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageStat
 
 from .base import input_paths
 
@@ -21,6 +21,8 @@ FORBIDDEN = {
     "SCIENTIFIC_QUALITY_MASK",
     "QUALITY_MASK_INTERPRETATION",
 }
+
+PUBLIC_PARAMETERS = {"schemaVersion": "1", "operation": "DEFAULT_PROCESS"}
 
 
 def inspect_manifest(manifest):
@@ -40,12 +42,9 @@ def inspect_manifest(manifest):
 
 
 def build_plan(product: dict, parameters: dict | None = None) -> dict:
-    parameters = parameters or {}
-    operation = str(parameters.get("operation", "BROWSE_VISUAL_FEATURES")).upper()
-    if operation in FORBIDDEN:
-        raise ValueError(f"UNSUPPORTED_BROWSE_OPERATION: {operation}")
-    if operation != "BROWSE_VISUAL_FEATURES":
-        raise ValueError(f"UNSUPPORTED_BROWSE_OPERATION: {operation}")
+    if parameters != PUBLIC_PARAMETERS:
+        operation = parameters.get("operation") if isinstance(parameters, dict) else None
+        raise ValueError(f"UNSUPPORTED_BROWSE_OPERATION: {operation or 'invalid parameter snapshot'}")
     if product.get("profileKey") != {"productCode": "GF-6-WFV-BROWSE", "profileVersion": "v1"}:
         raise ValueError("GF-6 browse profile is required")
     return {"version": "plan-v1", "stages": [
@@ -57,7 +56,6 @@ def build_plan(product: dict, parameters: dict | None = None) -> dict:
 
 
 def execute_visual_plan(product: dict, output_dir: str | os.PathLike[str]) -> Path:
-    build_plan(product)
     files = [Path(item["path"]) for item in product.get("files", []) if item.get("role") == "BROWSE_IMAGE"]
     if len(files) != 1:
         raise ValueError("GF-6 browse image is required")
@@ -65,15 +63,26 @@ def execute_visual_plan(product: dict, output_dir: str | os.PathLike[str]) -> Pa
         width, height = image.size
         if width <= 0 or height <= 0 or image.mode != "RGB":
             raise ValueError("GF-6 browse image must be a positive RGB JPEG")
+        rgb_stats = _rgb_stats(image)
     output = Path(output_dir).resolve()
     output.mkdir(parents=True, exist_ok=True)
     report = output / "browse-report.json"
-    value = {"packageId": product["packageId"], "profile": "GF-6-WFV-BROWSE/v1",
-             "operation": "BROWSE_VISUAL_FEATURES", "width": width, "height": height}
+    metadata = product.get("metadataSnapshot", {})
+    value = {
+        "georeferencingMethod": "AFFINE_WORLD_FILE_APPROXIMATE",
+        "image": {"width": width, "height": height, "rgbStats": rgb_stats},
+        "packageId": product["packageId"],
+        "productMetadata": {
+            "cloudPercent": metadata.get("cloudPercent"),
+            "productLevel": metadata.get("productLevel"),
+        },
+        "profile": "GF-6-WFV-BROWSE/v1",
+    }
     fd, temporary_name = tempfile.mkstemp(prefix=".browse-report.", suffix=".tmp", dir=output)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as temporary:
             json.dump(value, temporary, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+            temporary.write("\n")
             temporary.flush()
             os.fsync(temporary.fileno())
         os.replace(temporary_name, report)
@@ -81,6 +90,19 @@ def execute_visual_plan(product: dict, output_dir: str | os.PathLike[str]) -> Pa
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
     return report
+
+
+def _rgb_stats(image: Image.Image) -> dict[str, dict[str, int | float]]:
+    statistics = ImageStat.Stat(image)
+    pixels = image.width * image.height
+    return {
+        name: {
+            "min": int(statistics.extrema[index][0]),
+            "max": int(statistics.extrema[index][1]),
+            "mean": statistics.sum[index] / pixels,
+        }
+        for index, name in enumerate(("red", "green", "blue"))
+    }
 
 
 def _inspect_package(stem: str, files: dict[str, Path]) -> dict:
