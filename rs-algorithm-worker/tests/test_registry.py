@@ -135,3 +135,23 @@ def test_registry_does_not_infer_another_gf_package_for_stage_execution(gf_manif
                 "outputUri": "rs://output/task-101",
             },
         }, manifest)
+
+
+@pytest.mark.real_sample
+def test_registry_infers_the_only_gf_package_for_stage_execution(gf_manifest, tmp_path):
+    candidate = inspect_manifest(gf_manifest)[0]
+    selected_paths = {str(item["path"]) for item in candidate["files"]}
+    manifest = deepcopy(gf_manifest)
+    manifest["inputs"] = [item for item in manifest["inputs"] if item["path"] in selected_paths]
+    manifest["output"] = {"path": str(tmp_path / "output")}
+
+    response = dispatch({
+        "operation": "execute-stage",
+        "payload": {
+            "stageKey": "VALIDATE_BROWSE",
+            "parameterSnapshot": json.dumps({"schemaVersion": "1", "operation": "DEFAULT_PROCESS"}),
+            "outputUri": "rs://output/task-101",
+        },
+    }, manifest)
+
+    assert response["status"] == "SUCCEEDED"

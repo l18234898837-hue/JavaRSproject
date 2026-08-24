@@ -104,7 +104,14 @@ def _recognized_gf_candidate(manifest: dict[str, Any], package_id: Any) -> dict[
 
 
 def _execute_gf_browse_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
-    candidate = _recognized_gf_candidate(manifest, payload.get("packageId"))
+    package_id = payload.get("packageId")
+    if isinstance(package_id, str) and package_id:
+        candidate = _recognized_gf_candidate(manifest, package_id)
+    else:
+        candidates = gf6_wfv_browse.inspect_manifest(manifest)
+        if len(candidates) != 1:
+            raise ValueError("recognized GF-6 packageId is required")
+        candidate = candidates[0]
     plan = gf6_wfv_browse.build_plan(candidate, _parameter_snapshot(payload))
     stage_key = payload.get("stageKey")
     stages = {stage["stageKey"] for stage in plan["stages"]}

@@ -96,6 +96,10 @@ def _request_uris(request: dict[str, Any]) -> list[str]:
         candidate = payload.get("candidate")
         _require_object(candidate, "candidate")
         inputs = candidate.get("files")
+        if not isinstance(inputs, list):
+            product_package = candidate.get("productPackage")
+            if isinstance(product_package, dict):
+                inputs = product_package.get("files")
     else:
         raise ProtocolError("unsupported operation")
     if not isinstance(inputs, list) or not inputs:

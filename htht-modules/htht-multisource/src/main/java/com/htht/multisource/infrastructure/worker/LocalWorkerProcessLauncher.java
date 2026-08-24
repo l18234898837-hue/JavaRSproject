@@ -28,9 +28,9 @@ public final class LocalWorkerProcessLauncher implements WorkerProcessLauncher {
         Path requestFile = invocationDirectory.resolve("request.json");
         Path responseFile = invocationDirectory.resolve("response.json");
         Path manifestFile = invocation.manifestFile();
-        if (manifestFile != null && (!manifestFile.normalize().startsWith(invocationDirectory)
+        if (manifestFile != null && (!manifestFile.normalize().startsWith(properties.workRoot())
             || !Files.isRegularFile(manifestFile))) {
-            throw protocolFailure(invocation, "asset manifest is outside invocation directory or missing", null);
+            throw protocolFailure(invocation, "asset manifest is outside work root or missing", null);
         }
         Path outputDirectory = invocationDirectory.resolve("output");
         Path stdoutFile = invocationDirectory.resolve("stdout.log");

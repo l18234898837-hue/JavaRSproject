@@ -122,8 +122,8 @@ def test_inspect_pairs_role_inputs_when_storage_names_differ(tmp_path):
 
     manifest = {"inputs": [
         {"path": str(image), "role": "BROWSE_IMAGE", "ordinal": 0},
-        {"path": str(jgw), "role": "GEOREFERENCE", "ordinal": 0},
-        {"path": str(metadata), "role": "METADATA", "ordinal": 0},
+        {"path": str(jgw), "role": "GEOREFERENCE", "ordinal": 1},
+        {"path": str(metadata), "role": "METADATA", "ordinal": 2},
     ]}
 
     candidates = inspect_manifest(manifest)

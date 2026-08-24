@@ -46,6 +46,9 @@ public class PlusDataPermissionInterceptor extends JsqlParserSupport implements 
         }
         // 解析 sql 分配对应方法
         PluginUtils.MPBoundSql mpBs = PluginUtils.mpBoundSql(boundSql);
+        if (containsSkipLocked(mpBs.sql())) {
+            return;
+        }
         mpBs.sql(parserSingle(mpBs.sql(), ms.getId()));
     }
 
@@ -59,8 +62,15 @@ public class PlusDataPermissionInterceptor extends JsqlParserSupport implements 
                 return;
             }
             PluginUtils.MPBoundSql mpBs = mpSh.mPBoundSql();
+            if (containsSkipLocked(mpBs.sql())) {
+                return;
+            }
             mpBs.sql(parserMulti(mpBs.sql(), ms.getId()));
         }
+    }
+
+    private static boolean containsSkipLocked(String sql) {
+        return sql != null && sql.toUpperCase(java.util.Locale.ROOT).contains("SKIP LOCKED");
     }
 
     @Override

@@ -2,6 +2,7 @@ package com.htht.multisource.infrastructure.persistence.mapper;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.htht.multisource.infrastructure.persistence.entity.TaskStageEntity;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -25,6 +26,7 @@ public interface TaskStageMyBatisMapper extends BaseMapper<TaskStageEntity> {
             .orderByAsc(TaskStageEntity::getLeaseExpireAt));
     }
 
+    @InterceptorIgnore(dataPermission = "true")
     @Select("WITH candidate AS ("
         + " SELECT s.stage_id FROM rs_task_stage s"
         + " WHERE s.task_id = #{taskId}"

@@ -72,3 +72,18 @@ def test_accepts_authorized_asset_root_outside_invocation_directory(tmp_path):
     manifest_value = manifest(root=str(invocation / "output"))
     manifest_value["inputs"][0]["path"] = str(asset)
     validate_invocation(request(), manifest_value, manifest_path=invocation / "asset-manifest.json")
+
+
+def test_build_plan_reads_inputs_from_product_package(tmp_path):
+    value = request()
+    value["operation"] = "build-plan"
+    value["payload"] = {
+        "candidate": {
+            "productPackage": {
+                "files": [{"storageUriSnapshot": {"value": "rs://input/a.jpg"}}]
+            }
+        },
+        "parameterSnapshot": "{}",
+    }
+
+    validate_invocation(value, manifest(root=str(tmp_path)))

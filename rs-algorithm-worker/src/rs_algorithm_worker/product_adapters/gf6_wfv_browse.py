@@ -53,7 +53,10 @@ def _group_inputs(inputs):
         if not all(isinstance(item.get("groupId"), str) and item["groupId"] for item in inputs):
             raise ValueError("GF-6 product groupId must be present for every input")
         return _group_by(inputs, lambda item: item["groupId"])
-    if all(item.get("role") in ROLE_SUFFIXES for item in inputs if isinstance(item, dict)):
+    roles = [item.get("role") for item in inputs if isinstance(item, dict)]
+    if all(role in ROLE_SUFFIXES for role in roles):
+        if len(roles) == len(ROLE_SUFFIXES) and set(roles) == set(ROLE_SUFFIXES):
+            return _group_by(inputs, lambda item: 0)
         return _group_by(inputs, lambda item: item.get("ordinal", 0))
     return _group_by(inputs, lambda item: Path(item["path"]).stem)
 
