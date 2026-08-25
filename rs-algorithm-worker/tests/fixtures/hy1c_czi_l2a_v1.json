@@ -1,0 +1,30 @@
+{
+  "mappingVersion": "HY-1C-CZI-L2A-v1",
+  "sourceDocument": {"title": "HY-1CD数据格式说明（L2-L3）", "sections": ["4.1", "Appendix"], "pages": [20, 25, 41, 42]},
+  "sampleProductId": "H1C_OPER_CZI_L2A_20260715T024305_20260715T024401_41109_10",
+  "requiredGlobalAttributes": {"Satellite Name": "HY-1C", "Sensor Name": "CZI", "Number of Bands": 4},
+  "bands": [
+    {"id": "B460", "wavelengthNm": 460, "path": "/Geophysical Data/Rrc460", "unit": "1/sr", "scaleAttribute": "Slope", "offsetAttribute": "Offset", "fillValueAttribute": "FillValue", "validMinAttribute": "ValidMin", "validMaxAttribute": "ValidMax"},
+    {"id": "B560", "wavelengthNm": 560, "path": "/Geophysical Data/Rrc560", "unit": "1/sr", "scaleAttribute": "Slope", "offsetAttribute": "Offset", "fillValueAttribute": "FillValue", "validMinAttribute": "ValidMin", "validMaxAttribute": "ValidMax"},
+    {"id": "B650", "wavelengthNm": 650, "path": "/Geophysical Data/Rrc650", "unit": "1/sr", "scaleAttribute": "Slope", "offsetAttribute": "Offset", "fillValueAttribute": "FillValue", "validMinAttribute": "ValidMin", "validMaxAttribute": "ValidMax"},
+    {"id": "B825", "wavelengthNm": 825, "path": "/Geophysical Data/Rrc825", "unit": "1/sr", "scaleAttribute": "Slope", "offsetAttribute": "Offset", "fillValueAttribute": "FillValue", "validMinAttribute": "ValidMin", "validMaxAttribute": "ValidMax"}
+  ],
+  "wavelengthPath": "/Sensor Band parameters/Wavelength",
+  "longitude": {"path": "/Navigation Data/Longitude", "scaleAttribute": "Slope", "offsetAttribute": "Offset", "validMinAttribute": "ValidMin", "validMaxAttribute": "ValidMax"},
+  "latitude": {"path": "/Navigation Data/Latitude", "scaleAttribute": "Slope", "offsetAttribute": "Offset", "validMinAttribute": "ValidMin", "validMaxAttribute": "ValidMax"},
+  "quality": {
+    "path": "/Geophysical Data/l2_flags",
+    "flagNamesAttribute": "Flag Names",
+    "flagBits": [
+      {"name":"ATMFAIL","bit":0},{"name":"LAND","bit":1},{"name":"BADANC","bit":2},{"name":"HISUNGLINT","bit":3},
+      {"name":"HILT","bit":4},{"name":"HISENZ","bit":5},{"name":"SPARE","bit":6},{"name":"NEGLW","bit":7},
+      {"name":"STLIGHT","bit":8},{"name":"CLOUD","bit":9},{"name":"SPARE","bit":10},{"name":"TURBID","bit":11},
+      {"name":"HISOLZ","bit":12},{"name":"HITAUA","bit":13},{"name":"LOWLW","bit":14},{"name":"CHLFAIL","bit":15},
+      {"name":"SPARE","bit":16},{"name":"ABSAER","bit":17},{"name":"SPARE","bit":18},{"name":"MAXAERITER","bit":19},
+      {"name":"MODSUNGLINT","bit":20},{"name":"CHLRANGE","bit":21},{"name":"ATMWARN","bit":22},{"name":"DARKPIXEL","bit":23},
+      {"name":"SEAICE","bit":24},{"name":"NAVFAIL","bit":25},{"name":"FILTER","bit":26},{"name":"BADSST","bit":27},
+      {"name":"BADSSTALG","bit":28},{"name":"SPARE","bit":29},{"name":"SPARE","bit":30},{"name":"SPARE","bit":31}
+    ],
+    "policies": {"default": ["ATMFAIL", "LAND", "HISUNGLINT", "HILT", "CLOUD", "SEAICE", "NAVFAIL"]}
+  }
+}

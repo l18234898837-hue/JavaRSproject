@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.htht.multisource.application.port.out.model.DispatchReceipt;
 import com.htht.multisource.application.port.out.model.ArtifactCandidate;
 import com.htht.multisource.application.port.out.model.InspectionResponse;
+import com.htht.multisource.application.port.out.model.StageInput;
+import com.htht.multisource.application.port.out.model.StageOutput;
 import com.htht.multisource.domain.model.AssetReference;
 import com.htht.multisource.domain.model.InputAsset;
 import com.htht.multisource.domain.model.ProcessingPlan;
@@ -39,19 +41,62 @@ public final class WorkerResultTranslator {
 
     public ProcessingPlan toPlan(DecodedWorkerResponse response) {
         JsonNode payload = response.payload();
+        String version = requiredText(response, payload, "version");
         List<ProcessingStage> stages = new ArrayList<>();
         for (JsonNode stage : requiredArray(response, payload, "stages")) {
             List<String> dependencies = new ArrayList<>();
             for (JsonNode dependency : requiredArray(response, stage, "dependsOnStageKeys")) {
                 dependencies.add(dependency.asText());
             }
+            List<StageInput> inputs = "plan-v2".equals(version)
+                ? parseInputs(response, stage)
+                : List.of();
+            List<StageOutput> outputs = "plan-v2".equals(version)
+                ? parseOutputs(response, stage)
+                : List.of();
+            String parameterSnapshot = "plan-v2".equals(version)
+                ? requiredText(response, stage, "parameterSnapshot")
+                : "{}";
             stages.add(new ProcessingStage(
                 requiredText(response, stage, "stageKey"),
                 requiredText(response, stage, "stageCode"),
-                dependencies
+                dependencies, inputs, outputs, parameterSnapshot
             ));
         }
-        return new ProcessingPlan(requiredText(response, payload, "version"), stages);
+        return new ProcessingPlan(version, stages);
+    }
+
+    private static List<StageInput> parseInputs(DecodedWorkerResponse response, JsonNode stage) {
+        List<StageInput> inputs = new ArrayList<>();
+        for (JsonNode input : requiredArray(response, stage, "inputs")) {
+            try {
+                inputs.add(new StageInput(
+                    requiredText(response, input, "key"),
+                    StageInput.Source.valueOf(requiredText(response, input, "source")),
+                    requiredText(response, input, "artifactType"),
+                    requiredBoolean(response, input, "required")
+                ));
+            } catch (IllegalArgumentException exception) {
+                throw failure(response, "stage input has unsupported source");
+            }
+        }
+        return inputs;
+    }
+
+    private static List<StageOutput> parseOutputs(DecodedWorkerResponse response, JsonNode stage) {
+        List<StageOutput> outputs = new ArrayList<>();
+        for (JsonNode output : requiredArray(response, stage, "outputs")) {
+            try {
+                outputs.add(new StageOutput(
+                    requiredText(response, output, "artifactType"),
+                    requiredText(response, output, "relativePath"),
+                    StageOutput.Retention.valueOf(requiredText(response, output, "retention"))
+                ));
+            } catch (IllegalArgumentException exception) {
+                throw failure(response, "stage output has unsupported retention or path");
+            }
+        }
+        return outputs;
     }
 
     public DispatchReceipt toDispatchReceipt(DecodedWorkerResponse response) {

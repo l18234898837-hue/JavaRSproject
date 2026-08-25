@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.htht.multisource.domain.model.AccessSubject;
+import com.htht.multisource.application.port.out.model.StageInput;
+import com.htht.multisource.application.port.out.model.StageOutput;
 import com.htht.multisource.domain.model.Artifact;
 import com.htht.multisource.domain.model.AssetReference;
 import com.htht.multisource.domain.model.InputAsset;
@@ -212,6 +214,22 @@ public final class TaskPersistenceMapper {
             node.put("stageCode", stage.stageCode());
             ArrayNode dependencies = node.putArray("dependsOnStageKeys");
             stage.dependsOnStageKeys().forEach(dependencies::add);
+            ArrayNode inputs = node.putArray("inputs");
+            for (StageInput input : stage.inputs()) {
+                ObjectNode inputNode = inputs.addObject();
+                inputNode.put("key", input.key());
+                inputNode.put("source", input.source().name());
+                inputNode.put("artifactType", input.artifactType());
+                inputNode.put("required", input.required());
+            }
+            ArrayNode outputs = node.putArray("outputs");
+            for (StageOutput output : stage.outputs()) {
+                ObjectNode outputNode = outputs.addObject();
+                outputNode.put("artifactType", output.artifactType());
+                outputNode.put("relativePath", output.relativePath());
+                outputNode.put("retention", output.retention().name());
+            }
+            node.put("parameterSnapshot", stage.parameterSnapshot());
         }
         try {
             return OBJECT_MAPPER.writeValueAsString(root);
@@ -263,8 +281,21 @@ public final class TaskPersistenceMapper {
                 for (JsonNode dependency : stage.required("dependsOnStageKeys")) {
                     dependencies.add(dependency.asText());
                 }
+                List<StageInput> inputs = new ArrayList<>();
+                for (JsonNode input : stage.path("inputs")) {
+                    inputs.add(new StageInput(input.required("key").asText(),
+                        StageInput.Source.valueOf(input.required("source").asText()),
+                        input.required("artifactType").asText(), input.required("required").asBoolean()));
+                }
+                List<StageOutput> outputs = new ArrayList<>();
+                for (JsonNode output : stage.path("outputs")) {
+                    outputs.add(new StageOutput(output.required("artifactType").asText(),
+                        output.required("relativePath").asText(),
+                        StageOutput.Retention.valueOf(output.required("retention").asText())));
+                }
                 stages.add(new ProcessingStage(
-                    stage.required("stageKey").asText(), stage.required("stageCode").asText(), dependencies
+                    stage.required("stageKey").asText(), stage.required("stageCode").asText(), dependencies,
+                    inputs, outputs, stage.path("parameterSnapshot").asText("{}")
                 ));
             }
             String processorVersion = root.path("processorVersion").asText("unspecified");

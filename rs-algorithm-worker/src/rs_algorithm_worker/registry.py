@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .product_adapters import fy3h_mersi, fy4b_agri, gf6_wfv_browse, hy1c_czi, hy2d_altimeter
+from .product_adapters import fy3h_mersi, fy4b_agri, gf6_wfv_browse, hy1c_czi, hy1c_czi_l2a, hy2d_altimeter
 
 
 LOGICAL_OUTPUT_URI = re.compile(r"rs://output/[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*/?")
@@ -22,9 +22,15 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
         return {"rulePackageVersion": "rules-2026.08",
                 "candidates": [_to_response_candidate(item, manifest) for item in candidates]}
     if operation == "build-plan":
+        payload = _payload(request)
+        selected = payload.get("candidate")
+        if _is_l2a_candidate(selected):
+            candidate = hy1c_czi_l2a.inspect_l2a_manifest(manifest)
+            if candidate["packageId"] != selected.get("packageId"):
+                raise ValueError("recognized HY-1C CZI L2A packageId is required")
+            return hy1c_czi_l2a.build_l2a_plan(candidate, _parameter_snapshot(payload))
         adapter = _adapter_for_manifest(manifest)
         if adapter is gf6_wfv_browse:
-            payload = _payload(request)
             candidate = _recognized_gf_candidate(manifest, payload.get("candidate", {}).get("packageId"))
             return adapter.build_plan(candidate, _parameter_snapshot(payload))
         return {"version": "plan-v1", "stages": [{
@@ -52,6 +58,12 @@ def _adapter_for_manifest(manifest):
     if any("fy4b" in path or "agri" in path for path in paths):
         return fy4b_agri
     return fy3h_mersi
+
+
+def _is_l2a_candidate(candidate: Any) -> bool:
+    return isinstance(candidate, dict) and candidate.get("profileKey") == {
+        "productCode": "HY-1C-CZI", "profileVersion": "L2A-v1"
+    }
 
 
 def _to_response_candidate(item, manifest):

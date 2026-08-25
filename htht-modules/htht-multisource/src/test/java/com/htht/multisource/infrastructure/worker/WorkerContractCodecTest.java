@@ -7,6 +7,8 @@ import com.htht.multisource.application.port.out.model.AssetAccessGrant;
 import com.htht.multisource.application.port.out.model.InspectionRequest;
 import com.htht.multisource.application.port.out.model.PlanRequest;
 import com.htht.multisource.application.port.out.model.StageExecutionRequest;
+import com.htht.multisource.application.port.out.model.StageInput;
+import com.htht.multisource.application.port.out.model.StageOutput;
 import com.htht.multisource.domain.model.AssetReference;
 import com.htht.multisource.domain.model.ExecutionId;
 import com.htht.multisource.domain.model.InputAsset;
@@ -79,6 +81,42 @@ class WorkerContractCodecTest {
         assertThat(root.path("payload").path("taskId").asLong()).isEqualTo(101L);
         assertThat(root.path("payload").path("candidate").path("packageId").asText())
             .isEqualTo("package-01");
+    }
+
+    @Test
+    void decodesPlanV2StageContracts() {
+        String response = """
+            {"schemaVersion":"1.0","operation":"build-plan","requestId":"req-plan","payload":{
+              "version":"plan-v2","stages":[
+              {
+                "stageKey":"DECODE","stageCode":"DECODE_SCALE_AND_NODATA","dependsOnStageKeys":[],
+                "inputs":[{"key":"main","source":"RAW_INPUT","artifactType":"MAIN","required":true}],
+                "outputs":[{"artifactType":"DECODED_CZI_RASTER","relativePath":"decoded/raster.npz","retention":"INTERMEDIATE"}],
+                "parameterSnapshot":"{}"
+              }, {
+                "stageKey":"APPLY_L2_FLAGS","stageCode":"APPLY_L2_FLAGS","dependsOnStageKeys":["DECODE"],
+                "inputs":[
+                  {"key":"decoded","source":"UPSTREAM_ARTIFACT","artifactType":"DECODED_CZI_RASTER","required":true},
+                  {"key":"main","source":"RAW_INPUT","artifactType":"MAIN","required":true}
+                ],
+                "outputs":[{"artifactType":"QUALITY_MASKED_CZI_RASTER","relativePath":"quality/masked.npz","retention":"INTERMEDIATE"}],
+                "parameterSnapshot":"{\\"quality\\":{\\"policy\\":\\"default\\"}}"
+              }]
+            }}
+            """;
+
+        var plan = new WorkerResultTranslator(objectMapper).toPlan(
+            codec.decodeResponse("req-plan", WorkerOperation.BUILD_PLAN, response)
+        );
+
+        assertThat(plan.stages().get(1).inputs()).containsExactly(
+            new StageInput("decoded", StageInput.Source.UPSTREAM_ARTIFACT, "DECODED_CZI_RASTER", true),
+            new StageInput("main", StageInput.Source.RAW_INPUT, "MAIN", true)
+        );
+        assertThat(plan.stages().get(1).outputs()).containsExactly(
+            new StageOutput("QUALITY_MASKED_CZI_RASTER", "quality/masked.npz", StageOutput.Retention.INTERMEDIATE)
+        );
+        assertThat(plan.stages().get(1).parameterSnapshot()).contains("quality");
     }
 
     @Test
