@@ -3,7 +3,10 @@ import numpy as np
 import pytest
 
 from rs_algorithm_worker.models import BandMetadata, RasterData
+from rs_algorithm_worker.operators.align import align_to_reference
 from rs_algorithm_worker.operators.crop import crop_grid
+from rs_algorithm_worker.operators.reproject import reproject_raster
+from rasterio.enums import Resampling
 
 
 def _raster() -> RasterData:
@@ -44,3 +47,50 @@ def test_crop_grid_preserves_band_first_shape():
     result = crop_grid(source, roi=(120, 30, 122, 32))
 
     assert result.values.shape == (2, 2, 2)
+
+
+def test_reproject_raster_changes_crs_and_retains_band_metadata():
+    result = reproject_raster(_raster(), destination_crs="EPSG:3857", resolution=100_000.0)
+
+    assert result.crs == "EPSG:3857"
+    assert result.values.ndim == 2
+    assert result.band_metadata == _raster().band_metadata
+    assert result.transform is not None
+
+
+def test_align_to_reference_uses_exact_reference_grid():
+    reference = RasterData(
+        values=np.zeros((3, 3), dtype=np.float32),
+        crs="EPSG:4326",
+        transform=Affine(0.5, 0, 120, 0, -0.5, 32),
+        nodata=-9999.0,
+        band_metadata=(BandMetadata("reference"),),
+    )
+
+    result = align_to_reference(_raster(), reference, resampling=Resampling.nearest)
+
+    assert result.values.shape == (3, 3)
+    assert result.crs == reference.crs
+    assert result.transform == reference.transform
+
+
+def test_alignment_preserves_declared_nodata_for_uncovered_cells():
+    source = RasterData(
+        values=np.ones((2, 2), dtype=np.float32),
+        crs="EPSG:4326",
+        transform=Affine(1, 0, 120, 0, -1, 32),
+        nodata=-9999.0,
+        band_metadata=(BandMetadata("B1"),),
+    )
+    reference = RasterData(
+        values=np.zeros((4, 4), dtype=np.float32),
+        crs="EPSG:4326",
+        transform=Affine(1, 0, 118, 0, -1, 35),
+        nodata=-9999.0,
+        band_metadata=(BandMetadata("reference"),),
+    )
+
+    result = align_to_reference(source, reference)
+
+    assert result.nodata == -9999.0
+    assert (result.values == -9999.0).any()
