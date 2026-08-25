@@ -70,6 +70,7 @@ class MultiSourceAdapterConfigurationTest {
                 "file.upload-path=" + uploadRoot,
                 "multisource.worker.command=python,worker.py",
                 "multisource.worker.work-root=" + uploadRoot.resolve("worker"),
+                "multisource.worker.artifact-root=" + uploadRoot.resolve("artifacts"),
                 "multisource.worker.timeout=10m",
                 "multisource.worker.processor-version=worker-test-1.0.0"
             )

@@ -12,6 +12,7 @@ import java.util.List;
 public class MultiSourceWorkerProperties {
     private List<String> command = new ArrayList<>();
     private Path workRoot;
+    private Path artifactRoot;
     private Duration timeout;
     private String processorVersion;
 
@@ -29,6 +30,21 @@ public class MultiSourceWorkerProperties {
 
     public void setWorkRoot(Path workRoot) {
         this.workRoot = workRoot;
+    }
+
+    public Path getArtifactRoot() {
+        return artifactRoot;
+    }
+
+    public void setArtifactRoot(Path artifactRoot) {
+        this.artifactRoot = artifactRoot;
+    }
+
+    public Path requireArtifactRoot() {
+        if (artifactRoot == null) {
+            throw new IllegalStateException("multisource.worker.artifact-root must be configured through MULTISOURCE_ARTIFACT_ROOT.");
+        }
+        return artifactRoot;
     }
 
     public Duration getTimeout() {

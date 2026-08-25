@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.htht.common.helper.LoginHelper;
 import com.htht.common.utils.IDUtil;
 import com.htht.multisource.application.port.out.ArtifactRepository;
+import com.htht.multisource.application.port.out.TaskArtifactStore;
 import com.htht.multisource.application.port.out.ArtifactValidator;
 import com.htht.multisource.application.port.out.AssetStorage;
 import com.htht.multisource.application.port.out.ExecutionClock;
@@ -160,8 +161,15 @@ public class MultiSourceAdapterConfiguration {
 
     @Bean
     public ArtifactRegistration multisourceArtifactRegistration(ArtifactValidator validator,
-                                                                 ArtifactRepository artifactRepository) {
-        return new ArtifactRegistrationService(validator, artifactRepository);
+                                                                ArtifactRepository artifactRepository,
+                                                                TaskArtifactStore artifactStore) {
+        return new ArtifactRegistrationService(validator, artifactRepository, artifactStore);
+    }
+
+    @Bean
+    public TaskArtifactStore taskArtifactStore(MultiSourceWorkerProperties properties) {
+        return new LocalTaskArtifactStore(properties.toLocalProcessProperties().workRoot(),
+            properties.requireArtifactRoot());
     }
 
     @Bean
