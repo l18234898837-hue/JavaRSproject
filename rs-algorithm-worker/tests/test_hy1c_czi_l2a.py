@@ -1,4 +1,6 @@
 import pytest
+import h5py
+import numpy as np
 
 from rs_algorithm_worker.l2a_profile import parse_l2a_parameters
 from rs_algorithm_worker.product_adapters.hy1c_czi_l2a import (
@@ -8,6 +10,7 @@ from rs_algorithm_worker.product_adapters.hy1c_czi_l2a import (
     validate_source_against_mapping,
 )
 from rs_algorithm_worker.registry import dispatch
+from rs_algorithm_worker.l2a_pipeline import execute_l2a_stage
 
 
 def test_reviewed_l2a_mapping_declares_bands_navigation_and_quality():
@@ -84,3 +87,41 @@ def test_registry_routes_selected_l2a_candidate_to_the_l2a_plan(hy1c_l2a_manifes
 
     assert response["version"] == "plan-v2"
     assert response["stages"][0]["stageKey"] == "VALIDATE_SOURCE"
+
+
+@pytest.fixture
+def synthetic_l2a_h5(tmp_path):
+    path = tmp_path / "synthetic-l2a.h5"
+    with h5py.File(path, "w") as handle:
+        handle.attrs["Satellite Name"] = "HY-1C"
+        handle.attrs["Sensor Name"] = "CZI"
+        handle.attrs["Number of Bands"] = 4
+        geo = handle.create_group("Geophysical Data")
+        for wavelength in (460, 560, 650, 825):
+            dataset = geo.create_dataset(f"Rrc{wavelength}", data=np.array([[np.nan, 0.02], [0.2, 0.03]], dtype=np.float32))
+            dataset.attrs.update({"Slope": 1.0, "Offset": 0.0, "FillValue": np.nan, "ValidMin": -0.015, "ValidMax": 0.115})
+        flags = geo.create_dataset("l2_flags", data=np.array([[1, 0], [0, 0]], dtype=np.uint32))
+        flags.attrs["Flag Names"] = b"ATMFAIL,LAND,BADANC,HISUNGLINT,HILT,HISENZ,SPARE,NEGLW,STLIGHT,CLOUD,SPARE,TURBID,HISOLZ,HITAUA,LOWLW,CHLFAIL,SPARE,ABSAER,SPARE,MAXAERITER,MODSUNGLINT,CHLRANGE,ATMWARN,DARKPIXEL,SEAICE,NAVFAIL,FILTER,BADSST,BADSSTALG,SPARE,SPARE,SPARE"
+        nav = handle.create_group("Navigation Data")
+        for name, values in (("Longitude", [[1200000, 1200100], [1200000, 1200100]]), ("Latitude", [[300100, 300100], [300000, 300000]])):
+            dataset = nav.create_dataset(name, data=np.array(values, dtype=np.int32))
+            dataset.attrs.update({"Slope": 0.0001, "Offset": 0.0, "ValidMin": -180.0 if name == "Longitude" else -90.0, "ValidMax": 180.0 if name == "Longitude" else 90.0})
+        sensor = handle.create_group("Sensor Band parameters")
+        sensor.create_dataset("Wavelength", data=np.array([[460], [560], [650], [825]], dtype=np.int32))
+    return path
+
+
+def test_decode_masks_fill_and_out_of_range_values(synthetic_l2a_h5, tmp_path):
+    result = execute_l2a_stage("DECODE_SCALE_AND_NODATA", [synthetic_l2a_h5], {}, tmp_path)
+
+    assert np.isnan(result.raster.values[:, 0, 0]).all()
+    assert np.isnan(result.raster.values[:, 1, 0]).all()
+    assert np.isfinite(result.raster.values[:, 0, 1]).all()
+
+
+def test_quality_stage_applies_reviewed_bad_bits(synthetic_l2a_h5, tmp_path):
+    decoded = execute_l2a_stage("DECODE_SCALE_AND_NODATA", [synthetic_l2a_h5], {}, tmp_path)
+    result = execute_l2a_stage("APPLY_L2_FLAGS", [decoded, synthetic_l2a_h5], {}, tmp_path)
+
+    assert not result.valid_mask[0, 0]
+    assert result.valid_mask[0, 1]
