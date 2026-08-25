@@ -72,6 +72,25 @@ def test_unknown_binary_quality_codes_are_recorded_without_rejection() -> None:
                                    ("UNKNOWN_RANGE_QUALITY_FLAG",), ())
 
 
+def test_nonfinite_quality_flags_are_audited_without_rejection() -> None:
+    result = apply_quality_policy(_track(
+        surface_type=np.array([np.nan, 0.0, 0.0, 0.0]),
+        rain_flag=np.array([0.0, np.inf, 0.0, 0.0]),
+        ice_flag=np.array([0.0, 0.0, np.nan, 0.0]),
+        qual_alt_1hz_range_ku=np.array([0.0, 0.0, 0.0, -np.inf]),
+        orb_state_flag=np.array([np.inf, 3.0, 3.0, 3.0]),
+    ))
+
+    assert result.status.tolist() == [True, True, True, True]
+    assert result.reason_codes == (
+        ("NONFINITE_SURFACE_TYPE", "NONFINITE_ORBIT_STATE_FLAG"),
+        ("NONFINITE_RAIN_FLAG",),
+        ("NONFINITE_ICE_FLAG",),
+        ("NONFINITE_RANGE_QUALITY_FLAG",),
+    )
+    assert result.summary["reasonCounts"]["NONFINITE_ORBIT_STATE_FLAG"] == 1
+
+
 def test_unknown_surface_code_is_recorded_but_not_rejected() -> None:
     result = apply_quality_policy(_track(surface_type=np.array([9.0, 0.0, 0.0, 0.0])))
 

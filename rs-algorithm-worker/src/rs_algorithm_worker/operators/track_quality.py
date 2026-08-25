@@ -52,6 +52,10 @@ def apply_quality_policy(track: TrackData, policy: QualityPolicy | None = None) 
             status[index] = False
             reasons[index].append(code)
 
+    def record(mask: np.ndarray, code: str) -> None:
+        for index in np.flatnonzero(mask):
+            reasons[index].append(code)
+
     exclude(~np.isfinite(track.longitude), "NONFINITE_LONGITUDE")
     exclude(~np.isfinite(track.latitude), "NONFINITE_LATITUDE")
     for field_name, reason in (("alt", "NONFINITE_ALT"), ("range_ku", "NONFINITE_RANGE_KU")):
@@ -67,6 +71,7 @@ def apply_quality_policy(track: TrackData, policy: QualityPolicy | None = None) 
     if surface_type is None:
         unavailable_fields.append("surface_type")
     else:
+        record(~np.isfinite(surface_type), "NONFINITE_SURFACE_TYPE")
         explicit_non_ocean = np.isin(surface_type, tuple(policy.non_ocean_surface_types))
         exclude(explicit_non_ocean, "NON_OCEAN_SURFACE")
         known_surface = np.isin(
@@ -85,6 +90,7 @@ def apply_quality_policy(track: TrackData, policy: QualityPolicy | None = None) 
         if values is None:
             unavailable_fields.append(field_name)
             continue
+        record(~np.isfinite(values), "NONFINITE_" + code)
         exclude(values == 1.0, code)
         unknown = np.isfinite(values) & ~np.isin(values, (0.0, 1.0))
         for index in np.flatnonzero(unknown):
@@ -94,6 +100,7 @@ def apply_quality_policy(track: TrackData, policy: QualityPolicy | None = None) 
     if orbit_state is None:
         unavailable_fields.append("orb_state_flag")
     else:
+        record(~np.isfinite(orbit_state), "NONFINITE_ORBIT_STATE_FLAG")
         # The product metadata defines 3 as good and 8 as bad. Values 4-7
         # require the official threshold before they can be rejected.
         exclude(orbit_state == 8.0, "ORBIT_STATE_FLAG")
