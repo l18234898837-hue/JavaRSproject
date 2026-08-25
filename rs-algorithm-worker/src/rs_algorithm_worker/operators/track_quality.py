@@ -80,13 +80,31 @@ def apply_quality_policy(track: TrackData, policy: QualityPolicy | None = None) 
         ("rain_flag", "RAIN_FLAG"),
         ("ice_flag", "ICE_FLAG"),
         ("qual_alt_1hz_range_ku", "RANGE_QUALITY_FLAG"),
-        ("orb_state_flag", "ORBIT_STATE_FLAG"),
     ):
         values = _field(track, field_name)
         if values is None:
             unavailable_fields.append(field_name)
             continue
-        exclude(np.isfinite(values) & (values != 0.0), code)
+        exclude(values == 1.0, code)
+        unknown = np.isfinite(values) & ~np.isin(values, (0.0, 1.0))
+        for index in np.flatnonzero(unknown):
+            reasons[index].append("UNKNOWN_" + code)
+
+    orbit_state = _field(track, "orb_state_flag")
+    if orbit_state is None:
+        unavailable_fields.append("orb_state_flag")
+    else:
+        # The product metadata defines 3 as good and 8 as bad. Values 4-7
+        # require the official threshold before they can be rejected.
+        exclude(orbit_state == 8.0, "ORBIT_STATE_FLAG")
+        unresolved_orbit = np.isin(orbit_state, (4.0, 5.0, 6.0, 7.0))
+        for index in np.flatnonzero(unresolved_orbit):
+            reasons[index].append("UNRESOLVED_ORBIT_STATE_FLAG")
+        unknown_orbit = np.isfinite(orbit_state) & ~np.isin(
+            orbit_state, (3.0, 4.0, 5.0, 6.0, 7.0, 8.0)
+        )
+        for index in np.flatnonzero(unknown_orbit):
+            reasons[index].append("UNKNOWN_ORBIT_STATE_FLAG")
 
     updated_track = replace(track, quality=status.copy())
     reason_codes = tuple(tuple(item) for item in reasons)
