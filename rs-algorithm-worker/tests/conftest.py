@@ -34,6 +34,23 @@ def hy1c_manifest():
 
 
 @pytest.fixture
+def hy1c_l2a_manifest():
+    root = _path_env("MULTISOURCE_HY1C_CZI_L2A_SAMPLE_ROOT")
+    if root is None or not root.exists():
+        pytest.skip("MULTISOURCE_HY1C_CZI_L2A_SAMPLE_ROOT is not configured")
+    required = (("MAIN", ("*.h5", "*.H5")), ("METADATA", ("*.xml", "*.XML")),
+                ("BROWSE", ("*.jpg", "*.JPG", "*.jpeg", "*.JPEG")))
+    inputs = []
+    for ordinal, (role, patterns) in enumerate(required):
+        path = next((candidate for pattern in patterns for candidate in root.glob(pattern)), None)
+        if path is None:
+            pytest.skip(f"MULTISOURCE_HY1C_CZI_L2A_SAMPLE_ROOT lacks {role}")
+        inputs.append({"path": str(path), "role": role, "ordinal": ordinal,
+                       "storageUri": f"file:///{path.name}"})
+    return {"inputs": inputs}
+
+
+@pytest.fixture
 def fy4b_manifest():
     value = os.getenv("MULTISOURCE_FY4B_SAMPLE_FILE")
     if not value or not Path(value).is_file():
