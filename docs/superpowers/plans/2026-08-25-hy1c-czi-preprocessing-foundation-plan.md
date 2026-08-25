@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Deliver the first scientific preprocessing route for `HY-1C-CZI/v1`: validate an L1B product package, radiometrically calibrate and geolocate its selected bands, apply an optional ROI, and write a standards-compliant COG with traceable intermediate artifacts.
+**Goal:** Establish reusable preprocessing and optional-algorithm contracts, provide tested baseline implementations for common operators, feature extraction, multi-band fusion, and saliency detection, then validate the complete flow with a real `HY-1C-CZI/v1` product.
 
-**Architecture:** Product adapters remain thin, versioned descriptions of product evidence and product-specific mappings. Reusable Python operators perform data access, calibration, swath geolocation, crop, and COG writing. Java remains the source of task state and stages, but adds stage-output promotion and authorized artifact input resolution so each DAG stage consumes only declared raw inputs or registered upstream artifacts.
+**Architecture:** Product adapters remain thin, versioned descriptions of product evidence and product-specific mappings. Canonical Python data models and operator protocols separate file/product differences from reusable processing. Baseline algorithms are independent, replaceable capabilities that consume standardized raster/band data; they are not silently enabled for every product. Java remains the source of task state and stages, and adds stage-output promotion and authorized artifact input resolution so each DAG stage consumes only declared raw inputs or registered upstream artifacts.
 
 **Tech Stack:** Java 17, Spring, MyBatis-Plus, PostgreSQL JSONB, Python 3.11+, pytest, h5py, NumPy, rasterio/GDAL, pyproj.
 
-**Scope:** This plan implements the shared stage-artifact foundation and one complete HY-1C CZI L1B route. HY-2D and FY-3H reuse these boundaries but need their own product specifications, plans, and validation baselines; they are deliberately separate follow-up plans.
+**Scope:** This plan implements (1) canonical data/operator contracts, (2) windowed common operator baselines, (3) baseline feature extraction, multi-band fusion, and contrast-based saliency capabilities, (4) the shared stage-artifact foundation, and (5) one complete HY-1C CZI L1B route that exercises the applicable capabilities. HY-2D, FY-3H, FY-4, optical commercial products, and SAR need their own applicability declarations and scientific baselines.
 
 **Scientific gate:** Do not implement a calibration formula, HDF dataset path, geolocation array name, valid range, target grid, or resampling rule from a filename or inferred convention. The values in the HY-1C official product specification and supplied sample must be recorded in test fixtures before an operator is made available to users.
 
@@ -43,8 +43,11 @@ script/sql/migrations/
   V20260825_01__add_multisource_stage_artifact_contract.sql     # Forward-only database change
 
 rs-algorithm-worker/
-  pyproject.toml                                                # Add pinned raster runtime dependencies
+  pyproject.toml                                                # Add pinned raster and algorithm runtime dependencies
   src/rs_algorithm_worker/
+    models.py                                                   # Canonical ProductContext and data values
+    operators/base.py                                           # Operator protocol and result values
+    operators/registry.py                                       # Versioned operator lookup
     product_adapters/hy1c_czi.py                               # HY-1C evidence, mapping and plan only
     operators/models.py                                        # Windowed raster and operator result values
     operators/hdf.py                                           # HDF window access
@@ -52,15 +55,73 @@ rs-algorithm-worker/
     operators/swath.py                                         # Latitude/longitude to target grid
     operators/crop.py                                          # Geographic ROI clipping
     operators/cog.py                                           # Atomic tiled COG write
+    algorithms/base.py                                          # Algorithm capability protocol
+    algorithms/features.py                                      # Statistics, gradients and texture baseline
+    algorithms/fusion.py                                        # Percentile stretch and band stack baseline
+    algorithms/saliency.py                                      # Contrast saliency baseline
+    capabilities.py                                             # Applicability and parameter schemas
     registry.py                                                # Profile-key stage routing
   tests/
     fixtures/hy1c_czi_v1.json                                  # Reviewed product mapping, not guessed values
+    test_models.py                                              # Canonical model validation
+    test_operator_contracts.py                                  # Operator protocol and registry
     test_operators_*.py                                        # Synthetic, deterministic operator tests
+    test_algorithms_*.py                                       # Synthetic algorithm baseline tests
     test_hy1c_czi_preprocess.py                                # Real-sample adapter and pipeline tests
     test_registry.py                                           # Contract and profile-routing tests
 ```
 
 ## Fixed Contracts
+
+### Canonical data and operator contracts
+
+All operators consume canonical values rather than adapter-specific HDF handles:
+
+```python
+@dataclass(frozen=True)
+class RasterData:
+    values: numpy.ndarray
+    crs: str | None
+    transform: Affine | None
+    nodata: float | int | None
+    band_metadata: tuple[BandMetadata, ...]
+
+@dataclass(frozen=True)
+class SwathData:
+    values: numpy.ndarray
+    longitude: numpy.ndarray
+    latitude: numpy.ndarray
+    metadata: Mapping[str, Any]
+
+class Operator(Protocol):
+    name: str
+    version: str
+    def validate(self, context: ProductContext, parameters: Mapping[str, Any]) -> None: ...
+    def execute(self, context: ProductContext, inputs: Mapping[str, Any],
+                parameters: Mapping[str, Any], output_dir: Path) -> OperatorResult: ...
+```
+
+`OperatorResult` contains typed outputs, statistics, warnings, algorithm version and a deterministic metadata snapshot. Operators must be independent of Java, HTTP, database repositories, and physical storage authorization. The Worker runtime supplies authorized local paths; operators only receive paths already resolved by the manifest validator.
+
+`OperatorRegistry` and `CapabilityRegistry` are separate. The former resolves implementation names and versions; the latter declares whether a product profile and data shape may expose a capability. A capability is enabled only when its required bands/variables, spatial reference, and product-specific quality prerequisites are present.
+
+### Optional algorithm contracts
+
+The three algorithm capabilities consume standardized canonical data and expose replaceable implementations:
+
+```text
+FeatureExtractor.extract(RasterData | GridData, FeatureParameters) -> FeatureSet
+BandFusionOperator.fuse(BandSet, FusionParameters) -> RasterData
+SaliencyDetector.detect(RasterData | FeatureSet, SaliencyParameters) -> SaliencyResult
+```
+
+The first baseline implementations are intentionally general-purpose and must be labeled as baselines:
+
+- Feature extraction: min/max/mean/std, valid-pixel ratio, gradient magnitude, local variance, and configured spectral indices only when a profile supplies the required band mapping.
+- Fusion: percentile stretch, explicit band-to-RGB mapping, and alignment through the shared resampling operator. It does not claim pan-sharpening unless a separate algorithm is supplied.
+- Saliency: normalized local-contrast score with fixed or adaptive threshold, producing a score raster and binary mask. It is a visual baseline, not a universal scientific detector.
+
+Every algorithm result records input profile, required bands, parameters, method name, implementation version, and applicability status. Unsupported capabilities return `NOT_SUPPORTED` or `NOT_CHECKED`; they must not silently run on incompatible data.
 
 ### Stage inputs and outputs
 
@@ -124,15 +185,168 @@ VALIDATE_SOURCE
   -> GEOLOCATE_CZI
   -> CROP_CZI
   -> WRITE_STANDARD_COG
+  -> EXTRACT_CZI_FEATURES             # selected by capabilities/parameters
+  -> FUSE_CZI_BANDS                   # selected by capabilities/parameters
+  -> DETECT_CZI_SALIENCY              # selected by capabilities/parameters
 ```
 
 `VALIDATE_SOURCE` consumes raw `MAIN`, `METADATA`, and `BROWSE`; it produces no data artifact. `CALIBRATE_CZI` consumes `MAIN` and outputs `CALIBRATED_CZI` as a lossless intermediate. `GEOLOCATE_CZI` consumes `CALIBRATED_CZI` plus raw `MAIN` for approved latitude/longitude arrays and outputs `GEOLOCATED_CZI`. `CROP_CZI` consumes `GEOLOCATED_CZI` and outputs `CROPPED_CZI`. `WRITE_STANDARD_COG` consumes `CROPPED_CZI` and writes final `STANDARD_COG` plus `STANDARD_METADATA_JSON`.
+
+The three optional stages consume `CROPPED_CZI`, never raw HDF data. `EXTRACT_CZI_FEATURES` produces `FEATURE_RASTER` and `FEATURE_METADATA_JSON`; `FUSE_CZI_BANDS` produces `FUSION_COG` and `FUSION_PREVIEW_PNG`; `DETECT_CZI_SALIENCY` consumes either `CROPPED_CZI` or the declared feature artifact and produces `SALIENCY_SCORE_COG`, `SALIENCY_MASK_COG`, and `SALIENCY_PREVIEW_PNG`. The HY-1C adapter exposes a branch only when reviewed band mapping and public parameters meet that capability's prerequisites. Stages may run independently after `CROP_CZI`; fusion must not depend on feature extraction, and saliency has an explicit source selector.
 
 If the product specification proves that L1B values are already calibrated, the reviewed profile must omit `CALIBRATE_CZI` and name the source quantity honestly. It must not run an identity operation named calibration.
 
 ---
 
-### Task 1: Record the Scientific HY-1C v1 Mapping Before Coding Operators
+### Task 1: Freeze Canonical Models, Operator Protocols, and Applicability Registry
+
+**Files:**
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/models.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/base.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/registry.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/algorithms/base.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/capabilities.py`
+- Create: `rs-algorithm-worker/tests/test_models.py`
+- Create: `rs-algorithm-worker/tests/test_operator_contracts.py`
+
+- [ ] **Step 1: Write failing model and protocol tests.**
+
+```python
+def test_raster_data_rejects_band_shape_mismatch():
+    with pytest.raises(ValueError, match="band metadata"):
+        RasterData(values=numpy.zeros((2, 3, 4)), crs="EPSG:4326",
+                   transform=None, nodata=None, band_metadata=(BandMetadata("B1"),))
+
+def test_registry_rejects_unknown_operator_version():
+    with pytest.raises(KeyError, match="operator version"):
+        OPERATOR_REGISTRY.resolve("calibration", "does-not-exist")
+```
+
+Add tests for `SwathData` shape mismatches, invalid CRS, missing capability prerequisites, and an algorithm capability marked `NOT_SUPPORTED` for an incompatible data shape.
+
+- [ ] **Step 2: Run the focused tests.**
+
+Run: `cd rs-algorithm-worker; .\.venv\Scripts\python.exe -m pytest tests\test_models.py tests\test_operator_contracts.py -q`
+
+Expected: collection failure because the canonical model and registries do not exist.
+
+- [ ] **Step 3: Implement immutable canonical models and registries.**
+
+Implement `RasterData`, `SwathData`, `GridData`, `BandSet`, `FeatureSet`, `SaliencyResult`, `OperatorResult`, and `ProductContext` with shape, finite-value, metadata, and version validation. Implement `OperatorRegistry` and `CapabilityRegistry` with explicit `(name, version)` keys. Do not add product-specific HDF paths to these modules.
+
+- [ ] **Step 4: Add capability declarations.**
+
+Represent each capability with supported data shapes, required bands/variables, parameter schema version, output types, and quality prerequisites. A capability lookup must return `SUPPORTED`, `NOT_SUPPORTED`, or `NOT_CHECKED` with reasons; it must never infer support from a file extension.
+
+- [ ] **Step 5: Run tests and commit the contracts.**
+
+Run the Step 2 command. Expected: PASS.
+
+```powershell
+git add rs-algorithm-worker/src/rs_algorithm_worker/models.py rs-algorithm-worker/src/rs_algorithm_worker/operators/base.py rs-algorithm-worker/src/rs_algorithm_worker/operators/registry.py rs-algorithm-worker/src/rs_algorithm_worker/algorithms/base.py rs-algorithm-worker/src/rs_algorithm_worker/capabilities.py rs-algorithm-worker/tests/test_models.py rs-algorithm-worker/tests/test_operator_contracts.py
+git commit -m "feat: add canonical worker data and capability contracts"
+```
+
+### Task 2: Implement Windowed Common Operators
+
+**Files:**
+- Modify: `rs-algorithm-worker/pyproject.toml`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/hdf.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/calibration.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/quality_mask.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/swath.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/grid.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/reproject.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/align.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/crop.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/cog.py`
+- Create: `rs-algorithm-worker/tests/test_operators_calibration.py`
+- Create: `rs-algorithm-worker/tests/test_operators_grid.py`
+- Create: `rs-algorithm-worker/tests/test_operators_spatial.py`
+- Create: `rs-algorithm-worker/tests/test_operators_cog.py`
+
+- [ ] **Step 1: Write failing synthetic operator tests.**
+
+Cover calibration with fill values, quality-bit masking, nearest-neighbour swath/grid conversion, CRS reprojection, band alignment, ROI clipping, and atomic tiled COG output. Each test uses small in-memory arrays and verifies shape, CRS/transform, NoData and warnings.
+
+- [ ] **Step 2: Run the operator tests and confirm missing implementations.**
+
+Run: `cd rs-algorithm-worker; .\.venv\Scripts\python.exe -m pytest tests\test_operators_calibration.py tests\test_operators_grid.py tests\test_operators_spatial.py tests\test_operators_cog.py -q`
+
+Expected: collection failure because the common operators do not exist.
+
+- [ ] **Step 3: Add pinned runtime dependencies.**
+
+Add bounded versions of `numpy`, `rasterio`, `pyproj`, and `scipy` to `pyproject.toml`. Keep HDF access through `h5py` and use row/window iteration; do not load a complete source scene by default.
+
+- [ ] **Step 4: Implement the smallest correct operator behavior.**
+
+`hdf.py` exposes windowed dataset reads. `calibration.py` applies linear scale/offset or an explicitly declared already-calibrated mode. `quality_mask.py` applies declared bit masks and returns valid-pixel statistics. `swath.py` validates matching value/latitude/longitude shapes. `grid.py` performs deterministic nearest-neighbour binning with explicit empty-cell NoData. `reproject.py` and `align.py` use rasterio/pyproj transforms. `crop.py` rejects non-intersecting ROI. `cog.py` writes a tiled, compressed temporary GeoTIFF, validates it, and atomically replaces the staged output.
+
+- [ ] **Step 5: Run tests and commit the common operators.**
+
+Run the Step 2 command. Expected: PASS.
+
+```powershell
+git add rs-algorithm-worker/pyproject.toml rs-algorithm-worker/src/rs_algorithm_worker/operators rs-algorithm-worker/tests/test_operators_*.py
+git commit -m "feat: add windowed reusable preprocessing operators"
+```
+
+### Task 3: Implement Baseline Feature, Fusion, and Saliency Algorithms
+
+**Files:**
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/algorithms/features.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/algorithms/fusion.py`
+- Create: `rs-algorithm-worker/src/rs_algorithm_worker/algorithms/saliency.py`
+- Create: `rs-algorithm-worker/tests/test_algorithms_features.py`
+- Create: `rs-algorithm-worker/tests/test_algorithms_fusion.py`
+- Create: `rs-algorithm-worker/tests/test_algorithms_saliency.py`
+
+- [ ] **Step 1: Write failing baseline tests.**
+
+```python
+def test_feature_baseline_reports_valid_pixel_statistics():
+    result = extract_features(raster, FeatureParameters(metrics=("statistics",)))
+    assert result.statistics["validPixelRatio"] == 1.0
+    assert {"min", "max", "mean", "std"}.issubset(result.statistics["band-1"])
+
+def test_fusion_baseline_stacks_explicit_bands_after_percentile_stretch():
+    result = fuse_bands(bands, FusionParameters(red="B3", green="B2", blue="B1"))
+    assert result.values.shape[0] == 3
+    assert result.band_metadata[0].name == "red"
+
+def test_saliency_baseline_returns_score_and_threshold_mask():
+    result = detect_saliency(raster, SaliencyParameters(threshold=0.5))
+    assert result.score.values.shape == raster.values.shape[-2:]
+    assert result.mask.dtype == numpy.bool_
+```
+
+Also test missing-band rejection, unsupported data-shape status, constant-image saliency, and deterministic repeated output.
+
+- [ ] **Step 2: Run the algorithm tests and confirm missing implementations.**
+
+Run: `cd rs-algorithm-worker; .\.venv\Scripts\python.exe -m pytest tests\test_algorithms_*.py -q`
+
+Expected: collection failure because the three algorithm modules do not exist.
+
+- [ ] **Step 3: Implement the baseline algorithms behind the protocols.**
+
+`features.py` provides statistics, gradient magnitude, local variance, and optional index formulas only when a `BandSet` mapping supplies the required bands. `fusion.py` performs percentile stretch and explicit RGB/false-colour stacking, delegating resampling to `align.py`; it does not implement pan-sharpening. `saliency.py` computes a normalized local-contrast score and fixed/adaptive threshold mask; it is labeled `CONTRAST_BASELINE` and does not claim a trained scientific model.
+
+- [ ] **Step 4: Register algorithms and capability restrictions.**
+
+Register versions such as `features/statistics-v1`, `fusion/percentile-rgb-v1`, and `saliency/contrast-v1`. Declare applicability per data shape and required bands. HY-2/CFOSAT dynamic products must return `NOT_SUPPORTED` for image-texture and RGB fusion capabilities unless a later dynamic-data profile is added.
+
+- [ ] **Step 5: Run tests and commit the algorithm baselines.**
+
+Run the Step 2 command. Expected: PASS.
+
+```powershell
+git add rs-algorithm-worker/src/rs_algorithm_worker/algorithms rs-algorithm-worker/src/rs_algorithm_worker/capabilities.py rs-algorithm-worker/tests/test_algorithms_*.py
+git commit -m "feat: add baseline feature fusion and saliency capabilities"
+```
+
+### Task 4: Record the Scientific HY-1C v1 Mapping Before Product Execution
 
 **Files:**
 - Create: `rs-algorithm-worker/tests/fixtures/hy1c_czi_v1.json`
@@ -182,7 +396,7 @@ git add rs-algorithm-worker/tests/fixtures rs-algorithm-worker/tests/test_hy1c_c
 git commit -m "test: record HY-1C CZI v1 processing evidence"
 ```
 
-### Task 2: Make the Java Plan Describe Real Stage Inputs and Outputs
+### Task 5: Make the Java Plan Describe Real Stage Inputs and Outputs
 
 **Files:**
 - Create: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/application/port/out/model/StageInput.java`
@@ -230,7 +444,7 @@ git add htht-modules/htht-multisource/src/main htht-modules/htht-multisource/src
 git commit -m "feat: declare multisource stage inputs and outputs"
 ```
 
-### Task 3: Promote Worker Outputs and Authorize Upstream Artifact Reads
+### Task 6: Promote Worker Outputs and Authorize Upstream Artifact Reads
 
 **Files:**
 - Create: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/application/port/out/ArtifactStorage.java`
@@ -283,7 +497,7 @@ git add htht-admin htht-modules/htht-multisource script/sql/migrations
 git commit -m "feat: promote and authorize multisource stage artifacts"
 ```
 
-### Task 4: Resolve Declared Stage Inputs During Dispatch
+### Task 7: Resolve Declared Stage Inputs During Dispatch
 
 **Files:**
 - Modify: `htht-modules/htht-multisource/src/main/java/com/htht/multisource/application/port/out/model/StageExecutionRequest.java`
@@ -331,63 +545,7 @@ git add htht-modules/htht-multisource/src/main htht-modules/htht-multisource/src
 git commit -m "feat: dispatch multisource stages with declared inputs"
 ```
 
-### Task 5: Add Windowed Generic Raster Operators
-
-**Files:**
-- Modify: `rs-algorithm-worker/pyproject.toml`
-- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/__init__.py`
-- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/models.py`
-- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/hdf.py`
-- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/calibration.py`
-- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/swath.py`
-- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/crop.py`
-- Create: `rs-algorithm-worker/src/rs_algorithm_worker/operators/cog.py`
-- Test: `rs-algorithm-worker/tests/test_operators_calibration.py`
-- Test: `rs-algorithm-worker/tests/test_operators_swath.py`
-- Test: `rs-algorithm-worker/tests/test_operators_cog.py`
-
-- [ ] **Step 1: Add failing synthetic calibration and nodata tests.**
-
-```python
-def test_linear_calibration_preserves_fill_values():
-    dn = numpy.array([[0, 10], [65535, 20]], dtype=numpy.uint16)
-    actual = calibrate_linear(dn, scale=0.1, offset=1.0, fill_value=65535)
-    numpy.testing.assert_allclose(actual[:1], [[1.0, 2.0]])
-    assert numpy.isnan(actual[1, 0])
-```
-
-Add range clipping and a test that an `already_calibrated` mapping returns float values without claiming a calibration transform.
-
-- [ ] **Step 2: Add failing window and geolocation tests.**
-
-```python
-def test_swath_gridder_marks_cells_without_observations_as_nan():
-    grid = grid_nearest(values=numpy.array([1.0]), lon=numpy.array([120.0]), lat=numpy.array([30.0]), grid=grid_spec())
-    assert numpy.isnan(grid.values).sum() > 0
-```
-
-The first release uses deterministic nearest-neighbour gridding to the approved EPSG:4326 grid. It must not silently interpolate values.
-
-- [ ] **Step 3: Run operator tests and confirm imports fail.**
-
-Run: `cd rs-algorithm-worker; .\.venv\Scripts\python.exe -m pytest tests\test_operators_calibration.py tests\test_operators_swath.py tests\test_operators_cog.py -q`
-
-Expected: collection failure because `operators` does not exist.
-
-- [ ] **Step 4: Add runtime dependencies and minimal windowed implementations.**
-
-Add `numpy`, `rasterio`, and `pyproj` with bounded versions to `pyproject.toml`. `hdf.py` iterates `h5py.Dataset` slices in configured row windows. `calibration.py` uses float32 output and NaN internally. `swath.py` checks matching value/latitude/longitude shapes and finite coordinate bounds before binning. `crop.py` rejects a non-intersecting ROI. `cog.py` writes a temporary tiled GeoTIFF, builds overviews, validates it with rasterio, then atomically replaces the final staged path.
-
-- [ ] **Step 5: Run focused tests and commit.**
-
-Run the Step 3 command. Expected: PASS.
-
-```powershell
-git add rs-algorithm-worker/pyproject.toml rs-algorithm-worker/src/rs_algorithm_worker/operators rs-algorithm-worker/tests/test_operators_*.py
-git commit -m "feat: add windowed raster preprocessing operators"
-```
-
-### Task 6: Replace the HY-1C Minimal Adapter Plan With the v2 Scientific DAG
+### Task 8: Replace the HY-1C Minimal Adapter Plan With the v2 Scientific DAG
 
 **Files:**
 - Modify: `rs-algorithm-worker/src/rs_algorithm_worker/product_adapters/hy1c_czi.py`
@@ -401,7 +559,8 @@ git commit -m "feat: add windowed raster preprocessing operators"
 def test_hy1c_standardize_plan_declares_persistent_handoffs(hy1c_candidate, standardize_parameters):
     plan = build_plan(hy1c_candidate, standardize_parameters)
     assert [stage["stageKey"] for stage in plan["stages"]] == [
-        "VALIDATE_SOURCE", "CALIBRATE_CZI", "GEOLOCATE_CZI", "CROP_CZI", "WRITE_STANDARD_COG"
+        "VALIDATE_SOURCE", "CALIBRATE_CZI", "GEOLOCATE_CZI", "CROP_CZI", "WRITE_STANDARD_COG",
+        "EXTRACT_CZI_FEATURES", "FUSE_CZI_BANDS", "DETECT_CZI_SALIENCY"
     ]
     assert plan["stages"][2]["inputs"] == [
         {"key": "MAIN", "source": "RAW_INPUT", "artifactType": "", "required": True},
@@ -409,7 +568,7 @@ def test_hy1c_standardize_plan_declares_persistent_handoffs(hy1c_candidate, stan
     ]
 ```
 
-Assert that the plan includes `plan-v2`, reviewed mapping version, each output path, and stage-specific parameter snapshots.
+Assert that the plan includes `plan-v2`, reviewed mapping version, each output path, stage-specific parameter snapshots, and only exposes optional branches whose capability prerequisites are satisfied. Add a test showing that a missing required fusion band removes `FUSE_CZI_BANDS` with an explicit `NOT_SUPPORTED` reason rather than producing a malformed plan.
 
 - [ ] **Step 2: Run the HY-1C and registry tests.**
 
@@ -423,7 +582,7 @@ Make `inspect` test all registered adapters and report only candidates supported
 
 - [ ] **Step 4: Implement the v2 plan builder.**
 
-Validate the exact public parameter object. Embed only the reviewed mapping key and requested business parameters in each stage snapshot. Do not embed absolute paths, data arrays, or a copied raw metadata document. Return `CALIBRATE_CZI` only if the reviewed mapping says `linear`; otherwise build the honest no-calibration branch and test it separately.
+Validate the exact public parameter object, including an `optionalCapabilities` list and algorithm parameter objects whose schemas are owned by `CapabilityRegistry`. Embed only the reviewed mapping key and requested business parameters in each stage snapshot. Do not embed absolute paths, data arrays, or a copied raw metadata document. Return `CALIBRATE_CZI` only if the reviewed mapping says `linear`; otherwise build the honest no-calibration branch and test it separately. Add optional branch stages only after `CapabilityRegistry` returns `SUPPORTED`.
 
 - [ ] **Step 5: Re-run tests and commit.**
 
@@ -434,7 +593,7 @@ git add rs-algorithm-worker/src/rs_algorithm_worker/product_adapters/hy1c_czi.py
 git commit -m "feat: plan HY-1C CZI standardization stages"
 ```
 
-### Task 7: Execute HY-1C Stages and Write Standard Outputs
+### Task 9: Execute HY-1C Stages and Write Standard Outputs
 
 **Files:**
 - Modify: `rs-algorithm-worker/src/rs_algorithm_worker/registry.py`
@@ -451,7 +610,7 @@ def test_write_standard_cog_emits_only_declared_final_artifacts(stage_manifest, 
     assert all(item["uri"].startswith("rs://output/") for item in response["artifacts"])
 ```
 
-For each stage, test that a missing required upstream artifact, corrupt HDF, malformed parameters, or non-intersecting ROI returns a stable non-retryable code and produces no artifact.
+Add execution tests for `EXTRACT_CZI_FEATURES`, `FUSE_CZI_BANDS`, and `DETECT_CZI_SALIENCY`. For each stage, test that a missing required upstream artifact, corrupt HDF, malformed parameters, unavailable capability, or non-intersecting ROI returns a stable non-retryable code and produces no artifact.
 
 - [ ] **Step 2: Run the execution tests.**
 
@@ -461,13 +620,13 @@ Expected: FAIL because non-GF execution currently returns success with no artifa
 
 - [ ] **Step 3: Implement each stage as a small execution function.**
 
-`VALIDATE_SOURCE` repeats product evidence and mapping checks. `CALIBRATE_CZI` reads configured band windows and writes a lossless intermediate with a sidecar metadata JSON. `GEOLOCATE_CZI` reads its declared calibrated input and raw navigation arrays, then produces an EPSG:4326 intermediate. `CROP_CZI` applies the validated optional ROI. `WRITE_STANDARD_COG` writes a tiled, compressed COG and a JSON sidecar containing profile/mapping/operator versions, source checksums, CRS, transform, bounds, band metadata, unit, NoData, valid-pixel count, and parameters.
+`VALIDATE_SOURCE` repeats product evidence and mapping checks. `CALIBRATE_CZI` reads configured band windows and writes a lossless intermediate with a sidecar metadata JSON. `GEOLOCATE_CZI` reads its declared calibrated input and raw navigation arrays, then produces an EPSG:4326 intermediate. `CROP_CZI` applies the validated optional ROI. `WRITE_STANDARD_COG` writes a tiled, compressed COG and a JSON sidecar containing profile/mapping/operator versions, source checksums, CRS, transform, bounds, band metadata, unit, NoData, valid-pixel count, and parameters. The optional stages delegate only to the registered baseline algorithms and write their declared feature, fusion, or saliency artifacts with versions and parameters included in the metadata.
 
 Every output must be first written beneath the manifest output directory. Return only logical URI, type, byte size, and SHA-256 after reading the final staged file. Do not catch arbitrary exceptions as success.
 
 - [ ] **Step 4: Add an end-to-end real-sample test.**
 
-Run the full five-stage sequence with promoted outputs represented as the next-stage manifest inputs. Assert `rasterio.open` can read the COG, its CRS is EPSG:4326, dimensions are positive, declared NoData is present, band description and unit match the reviewed fixture, and the sidecar has no local filesystem paths.
+Run the standardization sequence and each supported optional branch with promoted outputs represented as next-stage manifest inputs. Assert `rasterio.open` can read every COG, its CRS is EPSG:4326, dimensions are positive, declared NoData is present, band description and unit match the reviewed fixture, and all sidecars have no local filesystem paths. Assert fusion is three-band RGB, feature output records its metric list, and saliency output contains score and mask artifacts.
 
 - [ ] **Step 5: Run Worker regression and commit.**
 
@@ -477,10 +636,10 @@ Expected: all Worker tests pass; real-sample tests run rather than skip.
 
 ```powershell
 git add rs-algorithm-worker/src rs-algorithm-worker/tests
-git commit -m "feat: execute HY-1C CZI preprocessing DAG"
+git commit -m "feat: execute HY-1C CZI preprocessing and algorithm DAG"
 ```
 
-### Task 8: Integrate the Complete HY-1C Task Through Java and Verify It
+### Task 10: Integrate the Complete HY-1C Task Through Java and Verify It
 
 **Files:**
 - Modify: `htht-admin/src/main/java/com/htht/config/multisource/MultiSourceAdapterConfiguration.java`
@@ -497,7 +656,8 @@ void completesTheHy1cPlanWithPromotedIntermediates() {
     fixture.dispatchUntilTerminal(taskId);
     assertThat(fixture.task(taskId).lifecycleStatus()).isEqualTo(SUCCEEDED);
     assertThat(fixture.artifacts(taskId)).extracting(Artifact::type)
-        .contains("CALIBRATED_CZI", "GEOLOCATED_CZI", "CROPPED_CZI", "STANDARD_COG", "STANDARD_METADATA_JSON");
+        .contains("CALIBRATED_CZI", "GEOLOCATED_CZI", "CROPPED_CZI", "STANDARD_COG", "STANDARD_METADATA_JSON",
+            "FEATURE_RASTER", "FUSION_COG", "SALIENCY_SCORE_COG", "SALIENCY_MASK_COG");
 }
 ```
 
@@ -536,13 +696,13 @@ git commit -m "feat: integrate HY-1C CZI standard preprocessing"
 
 ## Follow-up Plans
 
-1. **HY-2D altimeter:** reuse artifact handoff, quality mask and writer contracts; add safe TAR extraction, variable/unit mapping, time-aware bin averaging or an explicitly approved gridding method, and NetCDF primary output.
-2. **FY-3H MERSI:** reuse HDF, calibration, swath and COG operators; add multi-resolution band groups, calibration LUT handling, band alignment, and per-band resampling rules.
-3. **FY-4 AGRI, GF optical and SAR:** each requires its own product-spec-backed adapter plan. Navigation, RPC and terrain correction must not be added to the HY-1C operators by assumption.
+1. **HY-2D altimeter:** reuse artifact handoff, quality mask, gridder and writer contracts; add safe TAR extraction, variable/unit mapping, time-aware bin averaging or an explicitly approved gridding method, and NetCDF primary output. Its algorithms should be dynamic-data statistics and anomaly detection, not the raster texture/RGB/saliency baselines.
+2. **FY-3H MERSI:** reuse HDF, calibration, swath, alignment, COG, feature, fusion and saliency contracts; add multi-resolution band groups, calibration LUT handling, and per-band resampling rules.
+3. **FY-4 AGRI, GF optical and SAR:** each requires its own product-spec-backed adapter plan. Navigation, RPC and terrain correction must not be added to the HY-1C operators by assumption. SAR requires separate speckle, polarimetric-feature, and terrain-correction capability declarations.
 
 ## Plan Self-Review
 
-- **Coverage:** includes the missing stage-to-stage artifact contract, local storage authorization, operator implementation, HY-1C adapter/DAG, Worker execution, Java integration, real-sample testing, COG validation and deployment configuration.
-- **Scope:** intentionally stops after one full optical swath product. HY-2D and FY-3H are separate scientific implementations rather than being hidden in generic tasks.
-- **Consistency:** the v2 plan contract, `StageInput`/`StageOutput` names, `TASK_ARTIFACT` source type, intermediate types, and five HY-1C stage keys are used consistently throughout.
+- **Coverage:** includes canonical models, common operator interfaces and baselines, three optional algorithm capabilities, stage-to-stage artifact contracts, local storage authorization, HY-1C adapter/DAG, Worker execution, Java integration, real-sample testing, COG validation and deployment configuration.
+- **Scope:** implements baseline capabilities and validates them with one full optical swath product. HY-2D and FY-3H remain separate scientific product implementations rather than being hidden in generic tasks.
+- **Consistency:** the v2 plan contract, `StageInput`/`StageOutput` names, `TASK_ARTIFACT` source type, intermediate types, capability statuses, and HY-1C stage keys are used consistently throughout.
 - **Scientific gate:** required values are blocked on a reviewed fixture rather than replaced with invented dataset names, coefficients, or thresholds.
