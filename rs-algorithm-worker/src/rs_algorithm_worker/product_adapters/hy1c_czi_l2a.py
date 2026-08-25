@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import h5py
-
 
 @dataclass(frozen=True)
 class BandMapping:
@@ -101,6 +101,125 @@ def validate_source_against_mapping(h5_path: str | Path, mapping: ReviewedL2AMap
         wavelengths = _required_dataset(handle, mapping.wavelength_path)[...].reshape(-1).tolist()
         if wavelengths != [band.wavelength_nm for band in mapping.bands]:
             raise ValueError("HY-1C CZI L2A wavelength order does not match reviewed mapping")
+
+
+def inspect_l2a_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    paths_by_role = _manifest_paths_by_role(manifest)
+    main = _single_role_path(paths_by_role, "MAIN", {".h5", ".hdf5"})
+    metadata = _single_role_path(paths_by_role, "METADATA", {".xml"})
+    browse = _single_role_path(paths_by_role, "BROWSE", {".jpg", ".jpeg"})
+    mapping = load_reviewed_mapping()
+    validate_source_against_mapping(main, mapping)
+    try:
+        root = ET.parse(metadata).getroot()
+    except (OSError, ET.ParseError) as error:
+        raise ValueError("HY-1C CZI L2A XML metadata is unreadable") from error
+    with h5py.File(main, "r") as handle:
+        product_name = _decode(_attribute_value(handle.attrs, "Product Name"))
+        if "_CZI_L2A_" not in product_name:
+            raise ValueError("HY-1C CZI L2A product evidence is required")
+        longitude = float(_decode(_attribute_value(handle.attrs, "Scene Center Longitude")))
+        latitude = float(_decode(_attribute_value(handle.attrs, "Scene Center Latitude")))
+    return {
+        "packageId": product_name,
+        "profileKey": {"productCode": "HY-1C-CZI", "profileVersion": "L2A-v1"},
+        "dataShape": "SWATH_RASTER",
+        "supportStatus": "SUPPORTED",
+        "files": [
+            {"role": "MAIN", "ordinal": 0, "path": str(main)},
+            {"role": "METADATA", "ordinal": 0, "path": str(metadata)},
+            {"role": "BROWSE", "ordinal": 0, "path": str(browse)},
+        ],
+        "metadataSnapshot": {
+            "mappingVersion": mapping.mapping_version,
+            "xmlRoot": root.tag.rsplit("}", 1)[-1],
+            "sceneCentre": {"longitude": longitude, "latitude": latitude},
+        },
+        "confidence": 1.0,
+    }
+
+
+def build_l2a_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any]) -> dict[str, Any]:
+    if candidate.get("profileKey") != {"productCode": "HY-1C-CZI", "profileVersion": "L2A-v1"}:
+        raise ValueError("HY-1C CZI L2A candidate is required")
+    from ..l2a_profile import parse_l2a_parameters
+
+    centre = candidate.get("metadataSnapshot", {}).get("sceneCentre", {})
+    parameters = parse_l2a_parameters(parameter_snapshot,
+                                       centre_longitude=centre.get("longitude"), centre_latitude=centre.get("latitude"))
+    stage_snapshot = json.dumps({"mappingVersion": load_reviewed_mapping().mapping_version,
+                                 "parameters": parameter_snapshot}, sort_keys=True, separators=(",", ":"))
+    raw_main = _input("main", "RAW_INPUT", "MAIN")
+    raw_metadata = _input("metadata", "RAW_INPUT", "METADATA")
+    raw_browse = _input("browse", "RAW_INPUT", "BROWSE")
+    stages = [
+        _stage("VALIDATE_SOURCE", [], [raw_main, raw_metadata, raw_browse],
+               [_output("VALIDATION_METADATA_JSON", "validation/source.json", "INTERMEDIATE")], stage_snapshot),
+        _stage("DECODE_SCALE_AND_NODATA", ["VALIDATE_SOURCE"], [raw_main],
+               [_output("DECODED_CZI_RASTER", "decoded/czi-raster.npz", "INTERMEDIATE")], stage_snapshot),
+        _stage("APPLY_L2_FLAGS", ["DECODE_SCALE_AND_NODATA"],
+               [_input("decoded", "UPSTREAM_ARTIFACT", "DECODED_CZI_RASTER"), raw_main],
+               [_output("QUALITY_MASKED_CZI_RASTER", "quality/masked-czi-raster.npz", "INTERMEDIATE"),
+                _output("VALID_MASK", "quality/valid-mask.npz", "INTERMEDIATE")], stage_snapshot),
+        _stage("GEOLOCATE_AND_GRID", ["APPLY_L2_FLAGS"],
+               [_input("masked", "UPSTREAM_ARTIFACT", "QUALITY_MASKED_CZI_RASTER"), raw_main],
+               [_output("GRIDDED_CZI_RASTER", "grid/czi-raster.npz", "INTERMEDIATE")], stage_snapshot),
+        _stage("CROP_OPTIONAL", ["GEOLOCATE_AND_GRID"],
+               [_input("gridded", "UPSTREAM_ARTIFACT", "GRIDDED_CZI_RASTER")],
+               [_output("CROPPED_CZI_RASTER", "crop/czi-raster.npz", "INTERMEDIATE")], stage_snapshot),
+        _stage("WRITE_STANDARD_COG", ["CROP_OPTIONAL", "APPLY_L2_FLAGS"],
+               [_input("cropped", "UPSTREAM_ARTIFACT", "CROPPED_CZI_RASTER"),
+                _input("validMask", "UPSTREAM_ARTIFACT", "VALID_MASK")],
+               [_output("STANDARD_COG", "standard/czi-l2a.tif", "FINAL"),
+                _output("STANDARD_METADATA_JSON", "standard/czi-l2a.json", "FINAL")], stage_snapshot),
+    ]
+    if parameters.algorithms.get("features", {}).get("enabled"):
+        stages.append(_stage("EXTRACT_CZI_FEATURES", ["CROP_OPTIONAL", "APPLY_L2_FLAGS"],
+            [_input("cropped", "UPSTREAM_ARTIFACT", "CROPPED_CZI_RASTER"), _input("validMask", "UPSTREAM_ARTIFACT", "VALID_MASK")],
+            [_output("FEATURE_COG", "features/czi-features.tif", "FINAL"),
+             _output("FEATURE_METADATA_JSON", "features/czi-features.json", "FINAL")], stage_snapshot))
+    if parameters.algorithms.get("fusion", {}).get("enabled"):
+        stages.append(_stage("FUSE_CZI_BANDS", ["CROP_OPTIONAL", "APPLY_L2_FLAGS"],
+            [_input("cropped", "UPSTREAM_ARTIFACT", "CROPPED_CZI_RASTER"), _input("validMask", "UPSTREAM_ARTIFACT", "VALID_MASK")],
+            [_output("FUSION_COG", "fusion/czi-rgb.tif", "FINAL"), _output("FUSION_PREVIEW_PNG", "fusion/czi-rgb.png", "FINAL")], stage_snapshot))
+    if parameters.algorithms.get("saliency", {}).get("enabled"):
+        stages.append(_stage("DETECT_CZI_SALIENCY", ["CROP_OPTIONAL", "APPLY_L2_FLAGS"],
+            [_input("cropped", "UPSTREAM_ARTIFACT", "CROPPED_CZI_RASTER"), _input("validMask", "UPSTREAM_ARTIFACT", "VALID_MASK")],
+            [_output("SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"), _output("SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"),
+             _output("SALIENCY_PREVIEW_PNG", "saliency/preview.png", "FINAL")], stage_snapshot))
+    return {"version": "plan-v2", "stages": stages}
+
+
+def _stage(key: str, dependencies: list[str], inputs: list[dict[str, Any]], outputs: list[dict[str, Any]], snapshot: str) -> dict[str, Any]:
+    return {"stageKey": key, "stageCode": key, "dependsOnStageKeys": dependencies,
+            "inputs": inputs, "outputs": outputs, "parameterSnapshot": snapshot}
+
+
+def _input(key: str, source: str, artifact_type: str) -> dict[str, Any]:
+    return {"key": key, "source": source, "artifactType": artifact_type, "required": True}
+
+
+def _output(artifact_type: str, relative_path: str, retention: str) -> dict[str, Any]:
+    return {"artifactType": artifact_type, "relativePath": relative_path, "retention": retention}
+
+
+def _manifest_paths_by_role(manifest: dict[str, Any]) -> dict[str, list[Path]]:
+    values: dict[str, list[Path]] = {}
+    for item in manifest.get("inputs", []):
+        if not isinstance(item, dict) or not isinstance(item.get("role"), str) or not isinstance(item.get("path"), str):
+            raise ValueError("HY-1C CZI L2A manifest inputs are invalid")
+        path = Path(item["path"])
+        if not path.is_file():
+            raise ValueError("HY-1C CZI L2A manifest input file does not exist")
+        values.setdefault(item["role"], []).append(path)
+    return values
+
+
+def _single_role_path(paths: dict[str, list[Path]], role: str, extensions: set[str]) -> Path:
+    matches = [path for path in paths.get(role, []) if path.suffix.lower() in extensions]
+    if len(matches) != 1:
+        raise ValueError(f"HY-1C CZI L2A requires one {role} file")
+    return matches[0]
 
 
 def _validate_mapping(mapping: ReviewedL2AMapping) -> None:
