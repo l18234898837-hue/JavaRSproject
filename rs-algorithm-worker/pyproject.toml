@@ -10,6 +10,10 @@ dependencies = [
     "Pillow>=10,<11",
     "h5py>=3.10,<4",
     "netCDF4>=1.6,<2",
+    "numpy>=1.26,<3",
+    "rasterio>=1.4,<2",
+    "pyproj>=3.6,<4",
+    "scipy>=1.14,<2",
 ]
 
 [project.optional-dependencies]
