@@ -47,3 +47,10 @@ class CapabilityRegistry:
         if missing:
             return CapabilityResult(CapabilityStatus.NOT_SUPPORTED, f"missing required bands: {', '.join(sorted(missing))}")
         return CapabilityResult(CapabilityStatus.SUPPORTED, "capability prerequisites are satisfied")
+
+
+COMMON_CAPABILITIES = CapabilityRegistry((
+    CapabilitySpec("features", "statistics-v1", frozenset({"RASTER_GRID", "SWATH_RASTER"}), ()),
+    CapabilitySpec("fusion", "percentile-rgb-v1", frozenset({"RASTER_GRID"}), ("B1", "B2", "B3")),
+    CapabilitySpec("saliency", "contrast-v1", frozenset({"RASTER_GRID"}), ()),
+))
