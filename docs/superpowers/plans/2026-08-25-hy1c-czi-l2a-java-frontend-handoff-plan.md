@@ -12,7 +12,7 @@
 
 ## 0. 基线、范围和约束
 
-在分支 `hy1c-czi-l2a-v1`、工作区 `D:\Lwy_project_space\RSImageProcess\.worktrees\hy1c-czi-l2a-v1` 实施。真实输入包为：
+本计划已于 `2026-08-25` 合并到 `main`（合并提交 `fd3ed90`）；`hy1c-czi-l2a-v1` 分支和临时工作区已删除。后续开发直接在主仓库 `D:\Lwy_project_space\RSImageProcess\JavaRSproject` 的 `main` 分支进行。真实输入包为：
 
 ```text
 D:\Lwy_project_space\RSImageProcess\otherfile\H1C_OPER_CZI_L2A_20260715T024305_20260715T024401_41109_10
@@ -35,6 +35,17 @@ D:\Lwy_project_space\RSImageProcess\otherfile\H1C_OPER_CZI_L2A_20260715T024305_2
 - `Artifact` 没有 `relativePath` 与 `retention`，没有 `ArtifactStorage` 和 `LocalTaskArtifactStorage`。
 - Worker 没有网格化、裁剪、COG、特征、融合、显著性阶段实现。
 - Vue 仅支持 GF-6 WFV 的输入角色和阶段标签。
+
+### 已同步的实际进度
+
+截至合并时，以下基础能力已进入 `main`：
+
+- Java 已能持久化 `plan-v2` 的阶段输入、输出和参数快照，并在建计划时校验依赖、重复输出和不安全相对路径。
+- HY-1C CZI L2A 的 HDF5 路径、`Slope/Offset`、FillValue、有效范围和默认质量标志掩膜均已从真实样例和提供资料审查后写入 fixture/适配器。
+- 已完成 L2A 参数校验、`AUTO_UTM` 解析、固定六阶段 DAG 以及可选特征/融合/显著性分支声明。
+- Worker 已完成波段数值解码和 L2 质量标志掩膜；尚未完成网格化、裁剪、标准 COG 和可选算法的阶段执行。
+
+因此，本计划中的“任务一”仍是后续开发的第一项，不应重复实现以上基础能力。
 
 ## 1. 必须保持的跨端契约
 
