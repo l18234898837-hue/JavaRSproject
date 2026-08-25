@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from rs_algorithm_worker.models import BandMetadata, BandSet, RasterData
+from rs_algorithm_worker.operators.spatial import require_grid
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,7 @@ class FusionParameters:
 
 
 def fuse_bands(bands: BandSet, parameters: FusionParameters) -> RasterData:
+    require_grid(bands.raster)
     if not 0 <= parameters.low_percentile < parameters.high_percentile <= 100:
         raise ValueError("fusion percentiles are invalid")
     by_name = {metadata.name: index for index, metadata in enumerate(bands.raster.band_metadata)}
