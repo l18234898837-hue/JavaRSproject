@@ -3,6 +3,12 @@ package com.htht.config.multisource;
 import com.htht.multisource.application.usecase.model.TaskArtifactView;
 import com.htht.multisource.application.usecase.model.TaskDetailView;
 import com.htht.multisource.domain.model.AccessSubject;
+import com.htht.multisource.domain.model.Artifact;
+import com.htht.multisource.domain.model.StageId;
+import com.htht.multisource.domain.model.StorageUri;
+import com.htht.multisource.domain.model.TaskId;
+import com.htht.multisource.application.port.out.ArtifactRepository;
+import com.htht.multisource.application.port.out.TaskArtifactStore;
 import org.springframework.stereotype.Component;
 
 import javax.servlet.http.HttpServletResponse;
@@ -20,10 +26,12 @@ import java.util.zip.ZipOutputStream;
 
 @Component
 public final class LocalWorkerResultArchiveService {
-    private final Path workRoot;
+    private final TaskArtifactStore artifactStore;
+    private final ArtifactRepository artifactRepository;
 
-    public LocalWorkerResultArchiveService(MultiSourceWorkerProperties properties) {
-        this.workRoot = properties.toLocalProcessProperties().workRoot().toAbsolutePath().normalize();
+    public LocalWorkerResultArchiveService(TaskArtifactStore artifactStore, ArtifactRepository artifactRepository) {
+        this.artifactStore = artifactStore;
+        this.artifactRepository = artifactRepository;
     }
 
     public void write(TaskDetailView detail, AccessSubject subject, HttpServletResponse response) throws IOException {
@@ -40,7 +48,11 @@ public final class LocalWorkerResultArchiveService {
                 || Path.of(segments[1]).isAbsolute() || Path.of(segments[1]).normalize().startsWith("..")) {
                 throw new IllegalArgumentException("Artifact URI is invalid.");
             }
-            Path file = findArtifact(segments[1], artifact.checksum());
+            Path file = artifactRepository.findByTaskId(detail.id()).stream()
+                .filter(registered -> registered.uri().equals(artifact.uri()))
+                .map(artifactStore::resolveForDownload)
+                .filter(candidate -> Files.isRegularFile(candidate))
+                .findFirst().orElse(null);
             if (file == null) {
                 throw new IOException("Registered artifact file is unavailable.");
             }
@@ -58,23 +70,6 @@ public final class LocalWorkerResultArchiveService {
                 zip.closeEntry();
             }
         }
-    }
-
-    private Path findArtifact(String relative, String expectedChecksum) throws IOException {
-        if (!Files.isDirectory(workRoot)) {
-            return null;
-        }
-        try (var children = Files.list(workRoot)) {
-            for (Path execution : children.filter(Files::isDirectory).toList()) {
-                Path output = execution.resolve("output").toAbsolutePath().normalize();
-                Path file = output.resolve(relative).normalize();
-                if (file.startsWith(output) && Files.isRegularFile(file)
-                    && checksum(file).equalsIgnoreCase(expectedChecksum)) {
-                    return file;
-                }
-            }
-        }
-        return null;
     }
 
     private static String archiveName(String relative, List<ArchiveEntry> entries) {

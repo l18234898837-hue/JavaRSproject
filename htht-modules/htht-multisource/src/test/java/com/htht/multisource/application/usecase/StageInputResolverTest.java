@@ -130,7 +130,7 @@ class StageInputResolverTest {
 
         assertThat(resolved).containsExactly(new InputAsset("decoded", 0,
             new AssetReference("TASK_ARTIFACT", "rs://artifact/decoded.nc"),
-            new StorageUri("rs://artifact/decoded.nc"), "sha256:decoded", true));
+            new StorageUri("rs://task-artifact/legacy/101/201"), "sha256:decoded", true));
     }
 
     private static ProcessingTask task(List<ProcessingStage> stages, List<InputAsset> assets) {

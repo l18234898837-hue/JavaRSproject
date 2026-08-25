@@ -86,7 +86,7 @@ public final class StageInputResolver {
                 input.key(),
                 0,
                 new AssetReference("TASK_ARTIFACT", artifact.uri().value()),
-                artifact.uri(),
+                new com.htht.multisource.domain.model.StorageUri("rs://task-artifact/" + artifact.storageKey()),
                 artifact.checksum(),
                 input.required()
             ))

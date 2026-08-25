@@ -115,11 +115,13 @@ class DispatchNextStageUseCaseTest {
             assertThat(request.stageId()).isEqualTo(new StageId(201L));
             assertThat(request.executionId()).isEqualTo(new ExecutionId("exec-01"));
             assertThat(request.attempt()).isEqualTo(1);
+            assertThat(request.inputs()).extracting(InputAsset::role).containsExactly("MAIN");
         });
         assertThat(dispatcher.request).satisfies(request -> {
             assertThat(request.stageKey()).isEqualTo("READ");
             assertThat(request.processorVersion()).isEqualTo("worker-1.2.3");
             assertThat(request.executionId()).isEqualTo(new ExecutionId("exec-01"));
+            assertThat(request.inputs()).extracting(InputAsset::role).containsExactly("MAIN");
         });
         assertThat(events.artifacts).singleElement().satisfies(artifact ->
             assertThat(artifact.uri().value()).isEqualTo("rs://output/7/task-01/result.tif")
@@ -199,11 +201,15 @@ class DispatchNextStageUseCaseTest {
     private static ProcessingTask task(TaskLifecycleStatus lifecycleStatus) {
         InputAsset input = new InputAsset("MAIN", 0, new AssetReference("SYS_FILE", "42"),
             new StorageUri("rs://sys-file/42"), "sha256:input", true);
+        InputAsset undeclared = new InputAsset("AUXILIARY", 0, new AssetReference("SYS_FILE", "43"),
+            new StorageUri("rs://sys-file/43"), "sha256:auxiliary", false);
         ProductCandidate candidate = new ProductCandidate("package-01", new ProductProfileKey("FY-3H-MERSI", "v1"),
-            ProductDataShape.SWATH_RASTER, ProductSupportStatus.SUPPORTED, List.of(input), "{}", 0.91);
+            ProductDataShape.SWATH_RASTER, ProductSupportStatus.SUPPORTED, List.of(input, undeclared), "{}", 0.91);
         return new ProcessingTask(TASK_ID, "task-01", new AccessSubject(7L), lifecycleStatus, QualityStatus.NOT_CHECKED,
             "{\"mode\":\"standard\"}", new StorageUri("rs://output/7/task-01"),
-            new ProcessingPlan("plan-v1", "worker-1.2.3", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of()))),
+            new ProcessingPlan("plan-v1", "worker-1.2.3", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of(),
+                List.of(new com.htht.multisource.application.port.out.model.StageInput("main", com.htht.multisource.application.port.out.model.StageInput.Source.RAW_INPUT, "MAIN", true)),
+                List.of(), "{}"))),
             new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate)), List.of(candidate));
     }
 

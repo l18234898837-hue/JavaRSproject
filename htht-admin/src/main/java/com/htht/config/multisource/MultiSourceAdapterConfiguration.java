@@ -167,6 +167,13 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
+    public CompositeLocalWorkerAssetResolver multisourceWorkerAssetResolver(SysFileAssetStorageAdapter sysFileStorage,
+                                                                              TaskArtifactStore artifactStore,
+                                                                              MultiSourceWorkerProperties properties) {
+        return new CompositeLocalWorkerAssetResolver(sysFileStorage, properties.requireArtifactRoot());
+    }
+
+    @Bean
     public TaskArtifactStore taskArtifactStore(MultiSourceWorkerProperties properties) {
         return new LocalTaskArtifactStore(properties.toLocalProcessProperties().workRoot(),
             properties.requireArtifactRoot());
@@ -189,7 +196,7 @@ public class MultiSourceAdapterConfiguration {
 
     @Bean
     public LocalProcessWorkerGateway multisourceWorkerGateway(MultiSourceWorkerProperties properties,
-                                                               SysFileAssetStorageAdapter assetStorage,
+                                                               CompositeLocalWorkerAssetResolver assetStorage,
                                                                @Value("${file.upload-path}") String uploadPath) {
         ObjectMapper objectMapper = new ObjectMapper();
         var workerProperties = properties.toLocalProcessProperties();
@@ -208,15 +215,15 @@ public class MultiSourceAdapterConfiguration {
 
     @Bean
     public PreflightProductUseCase preflightProductUseCase(LocalProcessWorkerGateway workerGateway,
-                                                           SysFileAssetStorageAdapter assetStorage) {
+                                                           CompositeLocalWorkerAssetResolver assetStorage) {
         return new PreflightProductService((ProductInspector) workerGateway, assetStorage);
     }
 
     @Bean
     public TaskCreationCoordinator multisourceTaskCreationCoordinator(ProcessingTaskRepository taskRepository,
                                                                        TaskStageRepository stageRepository,
-                                                                       LocalProcessWorkerGateway workerGateway,
-                                                                       SysFileAssetStorageAdapter assetStorage,
+                                                                     LocalProcessWorkerGateway workerGateway,
+                                                                       CompositeLocalWorkerAssetResolver assetStorage,
                                                                        TaskIdGenerator taskIdGenerator,
                                                                        StageIdGenerator stageIdGenerator) {
         return new TaskCreationCoordinator(taskRepository, stageRepository, (ProcessingPlanner) workerGateway,
@@ -256,12 +263,14 @@ public class MultiSourceAdapterConfiguration {
     public DispatchNextStageUseCase dispatchNextStageUseCase(ProcessingTaskRepository taskRepository,
                                                              TaskStageRepository stageRepository,
                                                              LocalProcessWorkerGateway workerGateway,
-                                                             SysFileAssetStorageAdapter assetStorage,
+                                                             CompositeLocalWorkerAssetResolver assetStorage,
                                                              ExecutionIdGenerator executionIdGenerator,
                                                              ExecutionClock executionClock,
-                                                             AcceptWorkerEventUseCase eventUseCase) {
+                                                             AcceptWorkerEventUseCase eventUseCase,
+                                                             ArtifactRepository artifactRepository) {
         return new DispatchNextStageService(taskRepository, stageRepository, workerGateway, assetStorage,
-            executionIdGenerator, executionClock, EXECUTION_LEASE_DURATION, eventUseCase);
+            executionIdGenerator, executionClock, EXECUTION_LEASE_DURATION, eventUseCase, artifactRepository,
+            new com.htht.multisource.application.usecase.service.StageInputResolver());
     }
 
     @Bean
