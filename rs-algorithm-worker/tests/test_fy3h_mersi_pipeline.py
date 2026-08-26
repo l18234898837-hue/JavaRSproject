@@ -5,6 +5,8 @@ import json
 import h5py
 import numpy as np
 import pytest
+import rasterio
+from affine import Affine
 
 from fy3h_fixture import COLUMNS, ROWS, make_fy3h_pair
 from rs_algorithm_worker.fy3h_mersi_pipeline import (
@@ -25,6 +27,8 @@ from rs_algorithm_worker.models_fy3h import (
     QUALITY_FRAME_PREPROCESS_FAILURE,
     QUALITY_SATURATED,
 )
+from rs_algorithm_worker.models import BandMetadata, RasterData
+from rs_algorithm_worker.fy3h_mersi_pipeline import write_standard_mersi_cogs
 
 
 def test_reflective_calibration_uses_official_formula_and_masks_fill_value():
@@ -185,3 +189,23 @@ def test_quality_mask_preserves_reason_bits_and_expands_failed_frame_to_ten_rows
     assert summary["ruleVersion"] == "fy3h-mersi-l1-quality-v1"
     assert summary["channelQuality"]["CH01"]["validPixelCount"] == 9
     assert summary["reasonCounts"]["FRAME_PREPROCESS_FAILURE"] == 10
+
+
+def test_standard_mersi_cogs_have_declared_bands_and_safe_summary(tmp_path):
+    names = tuple([f"CH{band:02d}_REFLECTANCE" for band in range(1, 20)] +
+                  [f"CH{band:02d}_BRIGHTNESS_TEMPERATURE" for band in range(20, 26)])
+    science = RasterData(np.ones((25, 2, 2), dtype=np.float32), "EPSG:4326", Affine(0.01, 0, 120, 0, -0.01, 31),
+                         np.nan, tuple(BandMetadata(name) for name in names))
+    quality = RasterData(np.zeros((2, 2), dtype=np.uint32), "EPSG:4326", science.transform, np.uint32(0xFFFFFFFF),
+                         (BandMetadata("quality_mask", unit="bitmask"),))
+
+    result = write_standard_mersi_cogs(science, quality, tmp_path, {"inputFiles": ["sample.HDF"]})
+
+    with rasterio.open(result.standard_cog) as dataset:
+        assert dataset.count == 25
+        assert dataset.descriptions[0] == "CH01_REFLECTANCE"
+        assert dataset.descriptions[-1] == "CH25_BRIGHTNESS_TEMPERATURE"
+        assert dataset.crs.to_string() == "EPSG:4326"
+    with rasterio.open(result.quality_cog) as dataset:
+        assert dataset.descriptions == ("quality_mask",)
+    assert "C:\\" not in result.summary_path.read_text(encoding="utf-8")

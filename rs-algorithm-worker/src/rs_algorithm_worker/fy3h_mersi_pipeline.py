@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -14,6 +15,8 @@ from .models_fy3h import (
     QUALITY_INVALID_NAVIGATION, QUALITY_MISSING, QUALITY_NON_DAYLIGHT,
     QUALITY_OUT_OF_RANGE, QUALITY_SATURATED,
 )
+from .models import RasterData
+from .operators.cog import write_cog
 from .operators.hdf import iter_dataset_windows
 from .product_adapters.fy3h_mersi import EMISSIVE_SOURCES, GEO_FIELDS, REFLECTIVE_SOURCES
 
@@ -42,6 +45,33 @@ class ReflectiveCalibration:
 class EmissiveCalibration:
     radiance: np.ndarray
     brightness_temperature: np.ndarray
+
+
+@dataclass(frozen=True)
+class StandardMersiOutput:
+    standard_cog: Path
+    quality_cog: Path
+    summary_path: Path
+
+
+def write_standard_mersi_cogs(science: RasterData, quality: RasterData, output_dir: Path,
+                              summary: Mapping[str, Any]) -> StandardMersiOutput:
+    if science.values.ndim != 3 or science.values.shape[0] != 25:
+        raise ValueError("FY-3H standard COG requires 25 science bands")
+    if quality.values.ndim != 2 or quality.values.shape != science.values.shape[-2:]:
+        raise ValueError("FY-3H standard COG requires a matching quality grid")
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    standard = write_cog(science, output_dir / "mersi.tif")
+    quality_result = write_cog(quality, output_dir / "quality.tif")
+    document = dict(summary)
+    document.update({"profileKey": {"productCode": "FY-3H-MERSI", "profileVersion": "L1-1000M-GEO1K-v1"},
+                     "ruleVersion": QUALITY_RULE_VERSION, "formulaVersion": FORMULA_VERSION,
+                     "targetGrid": {"crs": science.crs, "width": science.values.shape[-1], "height": science.values.shape[-2]},
+                     "artifacts": {"standardSha256": standard.sha256, "qualitySha256": quality_result.sha256}})
+    summary_path = output_dir / "summary.json"
+    summary_path.write_text(json.dumps(document, ensure_ascii=True, sort_keys=True, allow_nan=False), encoding="utf-8")
+    return StandardMersiOutput(standard.path, quality_result.path, summary_path)
 
 
 def build_quality_mask(raw: np.ndarray, frame_flags: np.ndarray, geo_flags: np.ndarray, *, rows_per_scan: int,
