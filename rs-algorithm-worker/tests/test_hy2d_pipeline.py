@@ -13,6 +13,7 @@ from rs_algorithm_worker.operators.ssh import SshResult
 from rs_algorithm_worker.operators.track_output import write_standard_track_output
 from rs_algorithm_worker.operators.track_quality import apply_quality_policy
 from rs_algorithm_worker.algorithms.track_anomaly import detect_track_anomalies
+from rs_algorithm_worker.algorithms.track_anomaly import TrackAnomalyResult
 from rs_algorithm_worker.algorithms.track_features import extract_track_features
 
 
@@ -146,6 +147,39 @@ def test_write_standard_track_output_writes_interoperable_track_artifacts(tmp_pa
     assert summary["anomalySummary"] == anomalies.summary
     assert summary["fieldMissingRates"]["alt"] == pytest.approx(1 / 3)
     assert "official review" in summary["scientificBoundary"].lower()
+
+
+def test_track_geojson_is_empty_when_fewer_than_two_finite_coordinates(tmp_path) -> None:
+    track = TrackData(
+        time=np.array([1.0, 2.0]), longitude=np.array([120.0, np.nan]), latitude=np.array([20.0, np.nan]),
+        fields={"alt": np.array([700.0, 701.0]), "range_ku": np.array([690.0, 691.0])}, quality=np.ones(2, dtype=bool),
+    )
+    quality = apply_quality_policy(track)
+    result = write_standard_track_output(
+        track=quality.track, ssh=SshResult(np.array([1.0, np.nan]), {"sshFormulaVersion": "v1"}), quality=quality,
+        features=[], anomalies=TrackAnomalyResult(((), ()), np.array([np.nan, np.nan]), {"anomalyCount": 0}),
+        output_dir=tmp_path / "output", processing_version="v1",
+    )
+
+    geojson = __import__("json").loads(result.paths["track_geojson"].read_text(encoding="utf-8"))
+    assert geojson == {"type": "FeatureCollection", "features": []}
+
+
+def test_anomaly_geojson_serializes_nonfinite_time_and_ssh_as_null(tmp_path) -> None:
+    track = TrackData(
+        time=np.array([np.nan]), longitude=np.array([120.0]), latitude=np.array([20.0]),
+        fields={"alt": np.array([700.0]), "range_ku": np.array([690.0])}, quality=np.ones(1, dtype=bool),
+    )
+    quality = apply_quality_policy(track)
+    result = write_standard_track_output(
+        track=quality.track, ssh=SshResult(np.array([np.nan]), {"sshFormulaVersion": "v1"}), quality=quality,
+        features=[], anomalies=TrackAnomalyResult((("ADJACENT_JUMP",),), np.array([np.nan]), {"anomalyCount": 1}),
+        output_dir=tmp_path / "output", processing_version="v1",
+    )
+
+    geojson = __import__("json").loads(result.paths["anomaly_geojson"].read_text(encoding="utf-8"))
+    assert geojson["features"][0]["properties"]["time"] is None
+    assert geojson["features"][0]["properties"]["ssh"] is None
 
 
 @pytest.mark.real_sample

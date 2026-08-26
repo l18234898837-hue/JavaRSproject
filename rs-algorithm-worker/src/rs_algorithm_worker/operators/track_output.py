@@ -60,7 +60,7 @@ def write_standard_track_output(
     _write_track_geojson(paths["track_geojson"], track)
     _write_anomaly_geojson(paths["anomaly_geojson"], track, ssh.values, anomalies)
     summary = _summary(track, ssh, quality, features, anomalies, processing_version)
-    paths["summary"].write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    paths["summary"].write_text(json.dumps(summary, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
     return StandardTrackOutput(destination, paths, summary)
 
 
@@ -124,11 +124,14 @@ def _write_netcdf(path: Path, track: TrackData, ssh: SshResult, quality: TrackQu
 def _write_track_geojson(path: Path, track: TrackData) -> None:
     coordinates = [[float(lon), float(lat)] for lon, lat in zip(track.longitude, track.latitude)
                    if np.isfinite(lon) and np.isfinite(lat)]
-    payload = {"type": "FeatureCollection", "features": [{
-        "type": "Feature", "properties": {"observationCount": len(coordinates)},
-        "geometry": {"type": "LineString", "coordinates": coordinates},
-    }]}
-    path.write_text(json.dumps(payload), encoding="utf-8")
+    if len(coordinates) < 2:
+        payload = {"type": "FeatureCollection", "features": []}
+    else:
+        payload = {"type": "FeatureCollection", "features": [{
+            "type": "Feature", "properties": {"observationCount": len(coordinates)},
+            "geometry": {"type": "LineString", "coordinates": coordinates},
+        }]}
+    path.write_text(json.dumps(payload, allow_nan=False), encoding="utf-8")
 
 
 def _write_anomaly_geojson(path: Path, track: TrackData, ssh: np.ndarray, anomalies: TrackAnomalyResult) -> None:
@@ -137,9 +140,9 @@ def _write_anomaly_geojson(path: Path, track: TrackData, ssh: np.ndarray, anomal
         if not reasons or not (np.isfinite(track.longitude[index]) and np.isfinite(track.latitude[index])):
             continue
         features.append({"type": "Feature", "properties": {
-            "index": index, "time": float(track.time[index]), "ssh": float(ssh[index]), "reason_codes": list(reasons),
+            "index": index, "time": _finite_or_none(track.time[index]), "ssh": _finite_or_none(ssh[index]), "reason_codes": list(reasons),
         }, "geometry": {"type": "Point", "coordinates": [float(track.longitude[index]), float(track.latitude[index])]}})
-    path.write_text(json.dumps({"type": "FeatureCollection", "features": features}), encoding="utf-8")
+    path.write_text(json.dumps({"type": "FeatureCollection", "features": features}, allow_nan=False), encoding="utf-8")
 
 
 def _summary(
@@ -163,3 +166,8 @@ def _summary(
         "anomalySummary": dict(anomalies.summary),
         "scientificBoundary": _SCIENTIFIC_BOUNDARY,
     }
+
+
+def _finite_or_none(value: float) -> float | None:
+    numeric = float(value)
+    return numeric if np.isfinite(numeric) else None

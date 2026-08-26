@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 from typing import Any, Mapping
 
 import numpy as np
 from netCDF4 import Dataset
+import rasterio
+from rasterio.transform import from_origin
 
 
 _GRID_METHOD = "bin-statistics-no-interpolation"
@@ -38,7 +41,7 @@ class TrackGridResult:
     metadata: Mapping[str, Any] = field(default_factory=lambda: {
         "method": _GRID_METHOD,
         "scientificBoundary": "Track observations are aggregated by spatial bin; no interpolation is performed.",
-        "cogStatus": "deferred: this is a statistical grid, not an image product",
+        "cogStatus": "provided: four-band statistical grid, not an image product",
     })
 
 
@@ -85,14 +88,48 @@ def bin_track_ssh(
     return TrackGridResult(mean, std, valid_count, valid_ratio, grid)
 
 
+@dataclass(frozen=True)
+class TrackGridOutput:
+    output_dir: Path
+    paths: Mapping[str, Path]
+    summary: Mapping[str, Any]
+
+
+def write_track_grid_outputs(result: TrackGridResult, output_dir: Path) -> TrackGridOutput:
+    """Write all declared optional-grid artifacts inside one caller-owned directory."""
+    destination = Path(output_dir).resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "netcdf": _safe_child(destination, "track-grid.nc"),
+        "cog": _safe_child(destination, "track-grid.tif"),
+        "summary": _safe_child(destination, "track-grid-summary.json"),
+    }
+    write_track_grid_netcdf(result, paths["netcdf"])
+    write_track_grid_cog(result, paths["cog"])
+    summary = {
+        "method": result.method,
+        "bounds": _bounds(result.grid),
+        "resolution": result.grid.resolution,
+        "gridShape": list(result.ssh_mean.shape),
+        "observedBinCount": int((result.count > 0).sum()),
+        "validObservationCount": int(result.count.sum()),
+        "scientificBoundary": result.metadata["scientificBoundary"],
+    }
+    paths["summary"].write_text(json.dumps(summary, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
+    return TrackGridOutput(destination, paths, summary)
+
+
 def write_track_grid_netcdf(result: TrackGridResult, output_path: Path) -> Path:
-    """Write the statistical grid to NetCDF. It deliberately does not create a COG."""
+    """Write a georeferenced statistical grid to NetCDF without interpolation."""
     path = Path(output_path).resolve()
     if not path.parent.is_dir():
         raise ValueError("output parent directory must exist")
     with Dataset(path, "w", format="NETCDF4") as dataset:
         dataset.createDimension("latitude", result.ssh_mean.shape[0])
         dataset.createDimension("longitude", result.ssh_mean.shape[1])
+        latitude, longitude = _grid_centers(result.grid, result.ssh_mean.shape)
+        dataset.createVariable("latitude", "f8", ("latitude",))[:] = latitude
+        dataset.createVariable("longitude", "f8", ("longitude",))[:] = longitude
         for name, values, dtype in (
             ("ssh_mean", result.ssh_mean, "f8"),
             ("ssh_std", result.ssh_std, "f8"),
@@ -102,8 +139,36 @@ def write_track_grid_netcdf(result: TrackGridResult, output_path: Path) -> Path:
             variable = dataset.createVariable(name, dtype, ("latitude", "longitude"), fill_value=np.nan if dtype == "f8" else None)
             variable[:] = values
         dataset.setncattr("method", result.method)
+        dataset.setncattr("crs", "EPSG:4326")
+        dataset.setncattr("bounds", json.dumps(_bounds(result.grid)))
+        dataset.setncattr("resolution", result.grid.resolution)
+        dataset.setncattr("latitude_row_order", "north-to-south")
         for key, value in result.metadata.items():
             dataset.setncattr(key, str(value))
+    return path
+
+
+def write_track_grid_cog(result: TrackGridResult, output_path: Path) -> Path:
+    """Write the four declared statistical bands as a georeferenced COG."""
+    path = Path(output_path).resolve()
+    if not path.parent.is_dir():
+        raise ValueError("output parent directory must exist")
+    height, width = result.ssh_mean.shape
+    values = np.stack((
+        result.ssh_mean,
+        result.ssh_std,
+        result.count.astype(np.float64),
+        result.valid_ratio,
+    ))
+    transform = from_origin(result.grid.min_lon, result.grid.max_lat, result.grid.resolution, result.grid.resolution)
+    with rasterio.open(
+        path, "w", driver="COG", width=width, height=height, count=4, dtype="float64",
+        crs="EPSG:4326", transform=transform, nodata=np.nan, BLOCKSIZE=128, COMPRESS="DEFLATE",
+    ) as dataset:
+        dataset.write(values)
+        for index, name in enumerate(("ssh_mean", "ssh_std", "count", "valid_ratio"), start=1):
+            dataset.set_band_description(index, name)
+        dataset.update_tags(method=result.method, product_kind="statistical-grid-no-interpolation")
     return path
 
 
@@ -119,3 +184,21 @@ def _validated_inputs(
     if not (values.shape == lon.shape == lat.shape == quality.shape):
         raise ValueError("track grid inputs must have matching shapes")
     return values, lon, lat, quality
+
+
+def _safe_child(output_dir: Path, filename: str) -> Path:
+    path = (output_dir / filename).resolve()
+    if path.parent != output_dir:
+        raise ValueError("output path escapes the requested output directory")
+    return path
+
+
+def _bounds(grid: TrackGridSpec) -> dict[str, float]:
+    return {"minLon": grid.min_lon, "minLat": grid.min_lat, "maxLon": grid.max_lon, "maxLat": grid.max_lat}
+
+
+def _grid_centers(grid: TrackGridSpec, shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+    height, width = shape
+    longitude = grid.min_lon + (np.arange(width, dtype=np.float64) + 0.5) * grid.resolution
+    latitude = grid.max_lat - (np.arange(height, dtype=np.float64) + 0.5) * grid.resolution
+    return latitude, longitude
