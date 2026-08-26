@@ -28,11 +28,13 @@ def grid_swath(values: np.ndarray, quality_bits: np.ndarray, longitude: np.ndarr
         raise ValueError("projected FY-3H swath grids require metre resolution")
     if crs.is_geographic and resolution > 1:
         raise ValueError("geographic FY-3H swath grids require degree resolution")
-    valid = np.isfinite(value) & np.isfinite(lon) & np.isfinite(lat) & (quality == 0)
-    if not valid.any():
+    valid_navigation = np.isfinite(lon) & np.isfinite(lat)
+    valid = np.isfinite(value) & valid_navigation & (quality == 0)
+    if not valid_navigation.any():
         raise ValueError("FY-3H swath grid requires valid navigation and science samples")
     transformer = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
-    x, y = transformer.transform(lon[valid], lat[valid])
+    source = valid if valid.any() else valid_navigation
+    x, y = transformer.transform(lon[source], lat[source])
     if not np.all(np.isfinite(x)) or not np.all(np.isfinite(y)):
         raise ValueError("FY-3H swath grid navigation cannot be projected")
     bounds = _bounds(np.asarray(x), np.asarray(y), resolution, roi, crs)
@@ -45,9 +47,13 @@ def grid_swath(values: np.ndarray, quality_bits: np.ndarray, longitude: np.ndarr
     cols, rows = np.meshgrid(np.arange(width), np.arange(height))
     target = np.column_stack((min_x + (cols.ravel() + 0.5) * resolution, max_y - (rows.ravel() + 0.5) * resolution))
     _, index = cKDTree(np.column_stack((x, y))).query(target)
-    source_values, source_quality = value[valid], quality[valid].astype(np.uint32)
-    science = source_values[index].reshape(height, width).astype(np.float32)
-    mask = source_quality[index].reshape(height, width).astype(np.uint32)
+    if valid.any():
+        source_values, source_quality = value[valid], quality[valid].astype(np.uint32)
+        science = source_values[index].reshape(height, width).astype(np.float32)
+        mask = source_quality[index].reshape(height, width).astype(np.uint32)
+    else:
+        science = np.full((height, width), np.nan, dtype=np.float32)
+        mask = np.full((height, width), QUALITY_NODATA, dtype=np.uint32)
     return (RasterData(science, crs.to_string(), transform, np.nan, (BandMetadata("science"),)),
             RasterData(mask, crs.to_string(), transform, QUALITY_NODATA, (BandMetadata("quality_mask", unit="bitmask"),)))
 

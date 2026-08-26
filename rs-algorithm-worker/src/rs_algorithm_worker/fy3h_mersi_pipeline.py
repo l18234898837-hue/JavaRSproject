@@ -119,10 +119,14 @@ def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
                    longitude=decoded.longitude, latitude=decoded.latitude, solar_zenith=decoded.solar_zenith_degrees,
                    sensor_zenith=decoded.sensor_zenith_degrees, reflective=channel <= 19)
                    for channel in range(1, 26)}
+        science = {channel: (calibrated.reflectance_by_channel[channel] if channel <= 19
+                             else calibrated.brightness_temperature_by_channel[channel]) for channel in range(1, 26)}
+        for channel, values in science.items():
+            quality[channel].reason_bits[~np.isfinite(values)] |= QUALITY_CALIBRATION_FAILURE
         path = directory / "quality" / "mersi.npz"; path.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(path, longitude=decoded.longitude, latitude=decoded.latitude,
                             **{f"quality__{key}": value.reason_bits for key, value in quality.items()},
-                            **{f"science__{key}": (calibrated.reflectance_by_channel[key] if key <= 19 else calibrated.brightness_temperature_by_channel[key]) for key in range(1, 26)})
+                            **{f"science__{key}": value for key, value in science.items()})
         summary = directory / "quality" / "summary.json"; summary.write_text(json.dumps(summarize_quality(quality), sort_keys=True), encoding="utf-8")
         return _stage_response(output_uri, [("QUALITY_MERSI_RASTER", path, "quality/mersi.npz"), ("MERSI_QUALITY_SUMMARY_JSON", summary, "quality/summary.json")])
     if stage == "GRID_MERSI_SWATH":
@@ -130,9 +134,11 @@ def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         parameters = parse_fy3h_parameters(_payload_parameters(payload))
         with np.load(roles["quality"], allow_pickle=False) as data:
             longitude, latitude = data["longitude"], data["latitude"]
+            roi = parameters.get("roi") or (float(np.nanmin(longitude)), float(np.nanmin(latitude)),
+                                             float(np.nanmax(longitude)), float(np.nanmax(latitude)))
             grids = [grid_swath(data[f"science__{channel}"], data[f"quality__{channel}"], longitude, latitude,
                                 target_crs=parameters["targetCrs"], resolution=parameters.get("resolutionDegrees", parameters.get("resolutionMeters")),
-                                roi=parameters.get("roi"), continuous_resampling=parameters["continuousResampling"])
+                                roi=roi, continuous_resampling=parameters["continuousResampling"])
                      for channel in range(1, 26)]
         path = directory / "grid" / "mersi.npz"; path.parent.mkdir(parents=True, exist_ok=True)
         quality_path = directory / "grid" / "quality-mask.npz"
