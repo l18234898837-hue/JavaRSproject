@@ -28,6 +28,11 @@ class TrackGridSpec:
             raise ValueError("grid bounds must be finite and increasing")
         if self.resolution <= 0:
             raise ValueError("grid resolution must be positive")
+        columns = (self.max_lon - self.min_lon) / self.resolution
+        rows = (self.max_lat - self.min_lat) / self.resolution
+        if not (np.isclose(columns, round(columns), rtol=0.0, atol=1e-9)
+                and np.isclose(rows, round(rows), rtol=0.0, atol=1e-9)):
+            raise ValueError("grid bounds must be divisible by resolution")
 
 
 @dataclass(frozen=True)

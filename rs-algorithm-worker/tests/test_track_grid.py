@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import numpy as np
 from netCDF4 import Dataset
+import pytest
 import rasterio
 
 from rs_algorithm_worker.operators.track_grid import TrackGridSpec, bin_track_ssh, write_track_grid_outputs
+
+
+def test_track_grid_spec_rejects_bounds_not_divisible_by_resolution() -> None:
+    with pytest.raises(ValueError, match="divisible"):
+        TrackGridSpec(min_lon=0.0, min_lat=0.0, max_lon=2.2, max_lat=1.0, resolution=1.0)
 
 
 def test_bin_track_ssh_aggregates_valid_observations_without_interpolation() -> None:
