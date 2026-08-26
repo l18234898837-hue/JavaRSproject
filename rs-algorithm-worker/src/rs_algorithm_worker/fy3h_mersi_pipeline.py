@@ -136,7 +136,7 @@ def calibrate_mersi(decoded: DecodedMersi) -> CalibratedMersi:
                                     intercept=calibration["intercept"][channel - 1],
                                     scan_coefficients=np.asarray(calibration["ir_coefficients"])[channel - 20].T,
                                     scan_index=decoded.scan_index,
-                                    wave_number=float(np.asarray(calibration["wave_numbers"])[channel - 1]) * 1e4,
+                                    wave_number=_wave_number_cm(calibration["wave_numbers"][channel - 1]),
                                     tbb_coefficients=np.asarray(calibration["tbb_coefficients"])[[channel - 20, channel - 14]],
                                     fill_value=calibration["fill_value"][channel - 1])
         radiance[channel], brightness_temperature[channel] = result.radiance, result.brightness_temperature
@@ -149,12 +149,14 @@ def _decode_observation(handle: h5py.File, rows_per_window: int) -> tuple[dict[i
     slopes = np.empty(25, dtype=np.float32)
     intercepts = np.empty(25, dtype=np.float32)
     fills = np.empty(25, dtype=np.float32)
+    valid_ranges = np.empty((25, 2), dtype=np.float32)
     for sources in (REFLECTIVE_SOURCES, EMISSIVE_SOURCES):
         for path, band_numbers in sources.items():
             dataset = handle[path]
             for local, channel in enumerate(band_numbers):
                 channels[channel] = _read_channel_windows(dataset, local, rows_per_window)
                 slopes[channel - 1], intercepts[channel - 1], fills[channel - 1] = _channel_attributes(dataset, local)
+                valid_ranges[channel - 1] = _channel_valid_range(dataset)
     calibration = {
         "vis_coefficients": np.asarray(handle["Calibration/VIS_Cal_Coeff"][:], dtype=np.float32),
         "ir_coefficients": np.asarray(handle["Calibration/IR_Cal_Coeff"][:], dtype=np.float32),
@@ -162,7 +164,7 @@ def _decode_observation(handle: h5py.File, rows_per_window: int) -> tuple[dict[i
         "solar_irradiance": np.asarray(handle.attrs["Solar_Irradiance"], dtype=np.float32),
         "wave_numbers": np.asarray(handle.attrs["Effect_Center_WaveLength"], dtype=np.float32),
         "tbb_coefficients": np.asarray(handle.attrs["TBB_Trans_Coefficient"], dtype=np.float32),
-        "slope": slopes, "intercept": intercepts, "fill_value": fills,
+        "slope": slopes, "intercept": intercepts, "fill_value": fills, "valid_range": valid_ranges,
     }
     if calibration["ir_coefficients"].shape[1] != 4:
         raise ValueError("FY-3H MERSI thermal calibration dimensions are invalid")
@@ -227,6 +229,20 @@ def _channel_attribute(dataset: h5py.Dataset, name: str, channel: int) -> float:
     if index >= values.size or not np.isfinite(values[index]):
         raise ValueError(f"FY-3H MERSI {name} is invalid")
     return float(values[index])
+
+
+def _channel_valid_range(dataset: h5py.Dataset) -> np.ndarray:
+    values = np.asarray(dataset.attrs["valid_range"], dtype=np.float32).reshape(-1)
+    if values.shape != (2,) or not np.all(np.isfinite(values)) or values[0] > values[1]:
+        raise ValueError("FY-3H MERSI valid_range is invalid")
+    return values
+
+
+def _wave_number_cm(wavelength_micrometers: float) -> float:
+    wavelength = float(wavelength_micrometers)
+    if not np.isfinite(wavelength) or wavelength <= 0:
+        raise ValueError("FY-3H MERSI effective center wavelength is invalid")
+    return 1.0e4 / wavelength
 
 
 def _expanded_scan_index(index: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:

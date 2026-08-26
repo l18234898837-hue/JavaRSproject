@@ -77,6 +77,7 @@ def test_decode_mersi_pair_reads_windows_and_maps_each_ten_rows_to_one_scan(tmp_
     np.testing.assert_array_equal(decoded.scan_index, np.repeat(np.arange(2), 10))
     assert decoded.frame_flags.shape == (2,)
     assert decoded.geo_flags.shape == (2, 1)
+    np.testing.assert_array_equal(decoded.calibration["valid_range"][0], [0, 65534])
 
 
 def test_decoded_mersi_npz_and_json_round_trip_without_pickle(tmp_path):
@@ -145,8 +146,19 @@ def test_calibrate_mersi_applies_hdf_thermal_coefficients_by_scan_frame(tmp_path
     with h5py.File(observation, "r+") as handle:
         handle["Data/EV_1KM_Emissive"][0, :, :] = 100
         handle["Calibration/IR_Cal_Coeff"][:, 1, :] = 1
+        wavelengths = np.asarray(handle.attrs["Effect_Center_WaveLength"], dtype=np.float32)
+        wavelengths[19] = 10.0
+        handle.attrs["Effect_Center_WaveLength"] = wavelengths
 
-    calibrated = calibrate_mersi(decode_mersi_pair(observation, geo, rows_per_window=7))
+    decoded = decode_mersi_pair(observation, geo, rows_per_window=7)
+    calibrated = calibrate_mersi(decoded)
+    expected = calibrate_emissive(
+        decoded.dn_by_channel[20], slope=1, intercept=0,
+        scan_coefficients=np.array([[0, 1, 0, 0], [0, 1, 0, 0]], dtype=np.float32),
+        scan_index=decoded.scan_index, wave_number=1000,
+        tbb_coefficients=np.array([1, 1], dtype=np.float32), fill_value=65535,
+    )
 
     assert np.isfinite(calibrated.radiance_by_channel[20]).all()
     assert np.isfinite(calibrated.brightness_temperature_by_channel[20]).all()
+    np.testing.assert_allclose(calibrated.brightness_temperature_by_channel[20], expected.brightness_temperature)
