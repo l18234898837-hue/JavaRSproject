@@ -8,6 +8,8 @@ import pytest
 from netCDF4 import Dataset
 
 from rs_algorithm_worker.models_track import TrackData
+from rs_algorithm_worker.hy2d_pipeline import execute_hy2d_stage
+from rs_algorithm_worker.registry import dispatch
 from rs_algorithm_worker.operators.netcdf_track import decode_values, decode_tar_gz
 from rs_algorithm_worker.operators.ssh import SshResult
 from rs_algorithm_worker.operators.track_output import write_standard_track_output
@@ -94,6 +96,78 @@ def test_decode_tar_gz_rejects_non_netcdf3_and_length_mismatch(tmp_path):
     package = _archive(tmp_path, [("sample.nc", nc.read_bytes()), ("sample.meta.xml", b"<meta />")])
     with pytest.raises(ValueError, match="NETCDF3_CLASSIC"):
         decode_tar_gz(package)
+
+
+def test_execute_hy2d_decode_stage_returns_hashed_logical_artifact(tmp_path):
+    nc = tmp_path / "sample.nc"
+    _write_nc(nc)
+    package = _archive(tmp_path, [("sample.nc", nc.read_bytes()), ("sample.meta.xml", b"<meta />")])
+    output = tmp_path / "execution" / "output"
+    result = execute_hy2d_stage({
+        "stageKey": "DECODE_ALTIMETER_TRACK", "outputUri": "rs://output/task-1",
+        "parameterSnapshot": {},
+    }, {"inputs": [{"role": "MAIN", "path": str(package)}], "output": {"path": str(output)}})
+
+    artifact = result["artifacts"][0]
+    assert artifact["type"] == "DECODED_ALTIMETER_TRACK"
+    assert artifact["uri"] == "rs://output/task-1/decoded/track.npz"
+    assert artifact["checksum"].startswith("sha256:")
+    assert (output / "decoded" / "track.npz").is_file()
+
+
+def test_execute_hy2d_quality_stage_uses_only_declared_upstream_track(tmp_path):
+    nc = tmp_path / "sample.nc"
+    _write_nc(nc)
+    package = _archive(tmp_path, [("sample.nc", nc.read_bytes()), ("sample.meta.xml", b"<meta />")])
+    decoded_output = tmp_path / "decoded-output"
+    execute_hy2d_stage({"stageKey": "DECODE_ALTIMETER_TRACK", "outputUri": "rs://output/task-1", "parameterSnapshot": {}}, {
+        "inputs": [{"role": "MAIN", "path": str(package)}], "output": {"path": str(decoded_output)},
+    })
+    quality_output = tmp_path / "quality-output"
+    result = execute_hy2d_stage({"stageKey": "APPLY_TRACK_QUALITY", "outputUri": "rs://output/task-1", "parameterSnapshot": {}}, {
+        "inputs": [{"role": "decoded", "path": str(decoded_output / "decoded" / "track.npz")}],
+        "output": {"path": str(quality_output)},
+    })
+
+    assert {item["type"] for item in result["artifacts"]} == {
+        "QUALITY_FILTERED_ALTIMETER_TRACK", "TRACK_QUALITY_SUMMARY_JSON",
+    }
+
+
+def test_registry_builds_hy2d_plan_v2_for_recognized_package(tmp_path):
+    nc = tmp_path / "sample.nc"
+    _write_nc(nc)
+    package = _archive(tmp_path, [("sample.nc", nc.read_bytes()), ("sample.meta.xml", b"<meta />")])
+    manifest = {"inputs": [{"role": "MAIN", "path": str(package), "storageUri": "rs://input/sample"}]}
+    inspected = dispatch({"operation": "inspect"}, manifest)
+    candidate = inspected["candidates"][0]
+    request = {"operation": "build-plan", "payload": {"candidate": candidate, "parameterSnapshot": {}}}
+
+    plan = dispatch(request, manifest)
+
+    assert plan["version"] == "plan-v2"
+    assert "WRITE_STANDARD_TRACK_OUTPUT" in {stage["stageKey"] for stage in plan["stages"]}
+
+
+def test_execute_hy2d_ssh_stage_uses_only_quality_track(tmp_path):
+    nc = tmp_path / "sample.nc"
+    _write_nc(nc)
+    package = _archive(tmp_path, [("sample.nc", nc.read_bytes()), ("sample.meta.xml", b"<meta />")])
+    decoded = tmp_path / "decoded"
+    execute_hy2d_stage({"stageKey": "DECODE_ALTIMETER_TRACK", "outputUri": "rs://output/task-1", "parameterSnapshot": {}}, {
+        "inputs": [{"role": "MAIN", "path": str(package)}], "output": {"path": str(decoded)},
+    })
+    quality = tmp_path / "quality"
+    execute_hy2d_stage({"stageKey": "APPLY_TRACK_QUALITY", "outputUri": "rs://output/task-1", "parameterSnapshot": {}}, {
+        "inputs": [{"role": "decoded", "path": str(decoded / "decoded" / "track.npz")}], "output": {"path": str(quality)},
+    })
+    ssh_output = tmp_path / "ssh"
+    result = execute_hy2d_stage({"stageKey": "CALCULATE_BASELINE_SSH", "outputUri": "rs://output/task-1", "parameterSnapshot": {}}, {
+        "inputs": [{"role": "qualityTrack", "path": str(quality / "quality" / "track.npz")}], "output": {"path": str(ssh_output)},
+    })
+
+    assert result["artifacts"][0]["type"] == "BASELINE_SSH_TRACK"
+    assert (ssh_output / "ssh" / "track.npz").is_file()
 
 
 def test_write_standard_track_output_writes_interoperable_track_artifacts(tmp_path):
