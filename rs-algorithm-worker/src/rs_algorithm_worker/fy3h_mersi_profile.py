@@ -132,6 +132,8 @@ def _fusion(value: Any, bands: list[int]) -> dict[str, Any]:
     rgb = {key: value.get(key) for key in ("red", "green", "blue")}
     if any(component not in bands for component in rgb.values()):
         raise ValueError("FY-3H fusion RGB bands must be selected")
+    if any(component > 19 for component in rgb.values()):
+        raise ValueError("FY-3H fusion RGB bands must be reflectance channels 1 through 19")
     percentiles = value.get("percentiles", [2.0, 98.0])
     if not isinstance(percentiles, (list, tuple)) or len(percentiles) != 2:
         raise ValueError("FY-3H fusion percentiles are invalid")

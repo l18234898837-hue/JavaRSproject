@@ -93,6 +93,16 @@ def test_fy3h_statistics_only_features_do_not_declare_a_nonexistent_cog_or_featu
         }})
 
 
+def test_fy3h_rejects_thermal_channels_for_rgb_fusion(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path)
+    candidate = inspect_manifest(_manifest(observation, geo))[0]
+
+    with pytest.raises(ValueError, match="reflectance"):
+        build_plan(candidate, {"bands": [1, 2, 20], "fusion": {
+            "enabled": True, "red": 20, "green": 2, "blue": 1,
+        }})
+
+
 def test_fy3h_rejects_cross_orbit_pair(tmp_path):
     observation, geo = make_fy3h_pair(tmp_path, orbit=3948)
     with h5py.File(geo, "r+") as handle:
