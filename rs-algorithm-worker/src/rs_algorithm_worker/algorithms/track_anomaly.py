@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from numbers import Real
 
 import numpy as np
 
 from .track_features import _valid_runs, _validated_values, _validate_window_size
 
 
+_ABSOLUTE_SSH_LIMIT_VERSION = "hy2d-idr-2mc-engineering-baseline-v1"
+
+
 @dataclass(frozen=True)
 class TrackAnomalyResult:
     reason_codes: tuple[tuple[str, ...], ...]
     mad_scores: np.ndarray
-    summary: dict[str, int]
+    summary: dict[str, int | float | str]
 
 
 def detect_track_anomalies(
@@ -21,19 +25,29 @@ def detect_track_anomalies(
     window_size: int = 5,
     mad_threshold: float = 3.5,
     jump_threshold_meters: float = 1.0,
+    absolute_ssh_limit_meters: float = 100.0,
 ) -> TrackAnomalyResult:
-    """Flag local MAD outliers and consecutive-sample SSH jumps.
+    """Flag local MAD outliers, SSH jumps, and engineering-limit SSH values.
 
     MAD scores use ``abs(value - median) / (1.4826 * MAD)``.  A zero MAD has
     no defined standardized score, so only the explicit jump threshold applies.
+
+    The absolute SSH limit is an engineering baseline, not an official HY-2D
+    IDR/IGDR quality threshold. Replace or review it when the official product
+    specification becomes available.
     """
-    _validate_window_size(window_size)
+    _validate_mad_window_size(window_size)
     _validate_positive("mad_threshold", mad_threshold)
     _validate_positive("jump_threshold_meters", jump_threshold_meters)
+    _validate_positive("absolute_ssh_limit_meters", absolute_ssh_limit_meters)
     values, valid = _validated_values(ssh, valid_mask)
     reasons: list[list[str]] = [[] for _ in values]
     scores = np.full(values.shape, np.nan, dtype=float)
     half_window = window_size // 2
+
+    for index in np.flatnonzero(valid):
+        if abs(values[index]) > absolute_ssh_limit_meters:
+            reasons[index].append("ABSOLUTE_SSH_LIMIT")
 
     for run_start, run_end in _valid_runs(valid):
         for index in range(run_start, run_end):
@@ -62,10 +76,18 @@ def detect_track_anomalies(
             "madOutlierCount": mad_outlier_count,
             "jumpCount": jump_count,
             "anomalyCount": sum(bool(item) for item in reason_codes),
+            "absoluteSshLimitMeters": float(absolute_ssh_limit_meters),
+            "absoluteSshLimitVersion": _ABSOLUTE_SSH_LIMIT_VERSION,
         },
     )
 
 
+def _validate_mad_window_size(window_size: int) -> None:
+    _validate_window_size(window_size)
+    if window_size % 2 == 0:
+        raise ValueError("window_size must be a positive odd integer")
+
+
 def _validate_positive(name: str, value: float) -> None:
-    if not np.isfinite(value) or value <= 0.0:
+    if isinstance(value, bool) or not isinstance(value, Real) or not np.isfinite(value) or value <= 0.0:
         raise ValueError(f"{name} must be positive")
