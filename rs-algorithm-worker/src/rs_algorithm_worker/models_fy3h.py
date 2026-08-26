@@ -125,8 +125,8 @@ def read_calibrated_mersi(path: Path) -> CalibratedMersi:
 
 def _write(path: Path, arrays: Mapping[str, np.ndarray], model: str, metadata: Mapping[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(path, **arrays)
     document = {"modelVersion": MODEL_VERSION, "model": model, "metadata": _json_value(metadata)}
+    np.savez_compressed(path, **arrays, metadata_json=np.asarray(json.dumps(document, ensure_ascii=True, sort_keys=True)))
     path.with_suffix(".json").write_text(json.dumps(document, ensure_ascii=True, sort_keys=True, allow_nan=False), encoding="utf-8")
     return path
 
@@ -134,19 +134,17 @@ def _write(path: Path, arrays: Mapping[str, np.ndarray], model: str, metadata: M
 def _read(path: Path, model: str) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
     metadata_path = path.with_suffix(".json")
     try:
-        document = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        with np.load(path, allow_pickle=False) as data:
+            embedded = str(data["metadata_json"]) if "metadata_json" in data else None
+            arrays = {name: data[name] for name in data.files if name != "metadata_json"}
+        document = json.loads(embedded) if embedded is not None else json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as error:
         raise ValueError("FY-3H MERSI metadata is unreadable") from error
     if not isinstance(document, dict) or document.get("modelVersion") != MODEL_VERSION or document.get("model") != model:
         raise ValueError("FY-3H MERSI metadata version is unsupported")
     metadata = document.get("metadata")
     if not isinstance(metadata, dict):
         raise ValueError("FY-3H MERSI metadata is invalid")
-    try:
-        with np.load(path, allow_pickle=False) as data:
-            arrays = {name: data[name] for name in data.files}
-    except (OSError, ValueError) as error:
-        raise ValueError("FY-3H MERSI arrays are unreadable") from error
     return arrays, metadata
 
 
