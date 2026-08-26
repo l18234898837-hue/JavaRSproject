@@ -6,6 +6,28 @@ import pytest
 
 from rs_algorithm_worker.product_adapters.gf6_wfv_browse import inspect_manifest
 from rs_algorithm_worker.registry import dispatch
+from fy3h_fixture import make_fy3h_pair
+
+
+def _fy3h_manifest(*paths):
+    return {"inputs": [
+        {"path": str(path), "role": "MAIN", "ordinal": ordinal, "storageUri": f"file:///{path.name}"}
+        for ordinal, path in enumerate(paths)
+    ]}
+
+
+def test_registry_builds_fy3h_plan_v2_for_recognized_pair(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path)
+    manifest = _fy3h_manifest(observation, geo)
+    candidate = dispatch({"operation": "inspect"}, manifest)["candidates"][0]
+
+    response = dispatch({"operation": "build-plan", "payload": {
+        "candidate": candidate,
+        "parameterSnapshot": {"targetCrs": "EPSG:4326", "resolutionDegrees": 0.01},
+    }}, manifest)
+
+    assert response["version"] == "plan-v2"
+    assert response["stages"][0]["stageKey"] == "VALIDATE_FY3H_PAIR"
 
 
 @pytest.mark.real_sample

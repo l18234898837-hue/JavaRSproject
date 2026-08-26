@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import json
 import re
-from types import MappingProxyType
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import h5py
 import numpy as np
 
-from .base import build_plan, input_paths
+from .base import input_paths
+from ..fy3h_mersi_profile import parse_fy3h_parameters
 
 
 PROFILE_KEY = {"productCode": "FY-3H-MERSI", "profileVersion": "L1-1000M-GEO1K-v1"}
@@ -103,6 +105,97 @@ def inspect_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
         },
         "confidence": 0.95,
     }]
+
+
+def build_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    if candidate.get("profileKey") != PROFILE_KEY or candidate.get("dataShape") != "SWATH_RASTER":
+        raise ValueError("FY-3H MERSI candidate is required")
+    files = candidate.get("files")
+    if candidate.get("supportStatus") != "SUPPORTED" or not isinstance(files, list) or len(files) != 2:
+        raise ValueError("supported FY-3H MERSI candidate with files is required")
+    if any(not isinstance(item, dict) for item in files):
+        raise ValueError("FY-3H MERSI candidate requires OBSERVATION and GEO1K files")
+    if [item.get("role") for item in files] != ["OBSERVATION", "GEO1K"]:
+        raise ValueError("FY-3H MERSI candidate requires OBSERVATION and GEO1K files")
+    if any(not isinstance(item.get("ordinal"), int) or not isinstance(item.get("path"), str) or not item["path"]
+           for item in files):
+        raise ValueError("FY-3H MERSI candidate requires OBSERVATION and GEO1K files")
+    parameters = parse_fy3h_parameters(parameter_snapshot or {})
+    snapshot = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
+    observation = _input("observation", "RAW_INPUT", "OBSERVATION")
+    geo = _input("geo", "RAW_INPUT", "GEO1K")
+    stages = [
+        _stage("VALIDATE_FY3H_PAIR", [], [observation, geo],
+               [_output("FY3H_INPUT_VALIDATION_JSON", "validation/pair.json", "INTERMEDIATE")], snapshot),
+        _stage("DECODE_MERSI_L1", ["VALIDATE_FY3H_PAIR"], [observation, geo],
+               [_output("DECODED_MERSI_L1", "decoded/mersi-l1.npz", "INTERMEDIATE")], snapshot),
+        _stage("CALIBRATE_MERSI_L1", ["DECODE_MERSI_L1"],
+               [_input("decoded", "UPSTREAM_ARTIFACT", "DECODED_MERSI_L1")],
+               [_output("CALIBRATED_MERSI_RASTER", "calibrated/mersi.npz", "INTERMEDIATE")], snapshot),
+        _stage("APPLY_MERSI_QUALITY", ["DECODE_MERSI_L1", "CALIBRATE_MERSI_L1"], [
+            _input("decoded", "UPSTREAM_ARTIFACT", "DECODED_MERSI_L1"),
+            _input("calibrated", "UPSTREAM_ARTIFACT", "CALIBRATED_MERSI_RASTER"),
+        ], [
+            _output("QUALITY_MERSI_RASTER", "quality/mersi.npz", "INTERMEDIATE"),
+            _output("MERSI_QUALITY_SUMMARY_JSON", "quality/summary.json", "INTERMEDIATE"),
+        ], snapshot),
+        _stage("GRID_MERSI_SWATH", ["APPLY_MERSI_QUALITY"],
+               [_input("quality", "UPSTREAM_ARTIFACT", "QUALITY_MERSI_RASTER")], [
+                   _output("GRIDDED_MERSI_RASTER", "grid/mersi.npz", "INTERMEDIATE"),
+                   _output("GRIDDED_MERSI_QUALITY_MASK", "grid/quality-mask.npz", "INTERMEDIATE"),
+               ], snapshot),
+        _stage("WRITE_MERSI_STANDARD_COG", ["GRID_MERSI_SWATH"], [
+            _input("gridded", "UPSTREAM_ARTIFACT", "GRIDDED_MERSI_RASTER"),
+            _input("qualityMask", "UPSTREAM_ARTIFACT", "GRIDDED_MERSI_QUALITY_MASK"),
+        ], [
+            _output("STANDARD_MERSI_COG", "standard/mersi.tif", "FINAL"),
+            _output("STANDARD_MERSI_QUALITY_COG", "standard/quality.tif", "FINAL"),
+            _output("STANDARD_MERSI_SUMMARY_JSON", "standard/summary.json", "FINAL"),
+        ], snapshot),
+    ]
+    if parameters["features"]["enabled"]:
+        stages.append(_stage("EXTRACT_MERSI_FEATURES", ["WRITE_MERSI_STANDARD_COG"],
+            [_input("standard", "UPSTREAM_ARTIFACT", "STANDARD_MERSI_COG")], [
+                _output("MERSI_FEATURE_COG", "features/mersi.tif", "FINAL"),
+                _output("MERSI_FEATURE_SUMMARY_JSON", "features/summary.json", "FINAL"),
+            ], snapshot))
+    if parameters["fusion"]["enabled"]:
+        stages.append(_stage("FUSE_MERSI_BANDS", ["WRITE_MERSI_STANDARD_COG"],
+            [_input("standard", "UPSTREAM_ARTIFACT", "STANDARD_MERSI_COG")], [
+                _output("MERSI_FUSION_COG", "fusion/mersi-rgb.tif", "FINAL"),
+            ], snapshot))
+    if parameters["saliency"]["enabled"]:
+        saliency_input = _input("standard", "UPSTREAM_ARTIFACT", "STANDARD_MERSI_COG")
+        dependencies = ["WRITE_MERSI_STANDARD_COG"]
+        if parameters["saliency"]["source"] in _feature_source_names(parameters):
+            dependencies.append("EXTRACT_MERSI_FEATURES")
+            saliency_input = _input("features", "UPSTREAM_ARTIFACT", "MERSI_FEATURE_COG")
+        stages.append(_stage("DETECT_MERSI_SALIENCY", dependencies, [saliency_input], [
+            _output("MERSI_SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"),
+            _output("MERSI_SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"),
+        ], snapshot))
+    return {"version": "plan-v2", "stages": stages}
+
+
+def _feature_source_names(parameters: dict[str, Any]) -> set[str]:
+    variables = {
+        f"CH{band:02d}_{'REFLECTANCE' if band <= 19 else 'BRIGHTNESS_TEMPERATURE'}"
+        for band in parameters["bands"]
+    }
+    return {f"{metric}:{variable}" for metric in parameters["features"]["metrics"] for variable in variables}
+
+
+def _stage(key: str, dependencies: list[str], inputs: list[dict[str, Any]], outputs: list[dict[str, Any]], snapshot: str) -> dict[str, Any]:
+    return {"stageKey": key, "stageCode": key, "dependsOnStageKeys": dependencies,
+            "inputs": inputs, "outputs": outputs, "parameterSnapshot": snapshot}
+
+
+def _input(key: str, source: str, artifact_type: str) -> dict[str, Any]:
+    return {"key": key, "source": source, "artifactType": artifact_type, "required": True}
+
+
+def _output(artifact_type: str, relative_path: str, retention: str) -> dict[str, Any]:
+    return {"artifactType": artifact_type, "relativePath": relative_path, "retention": retention}
 
 
 def _classify(path: Path, entry: dict[str, Any]) -> dict[str, Any]:

@@ -1,4 +1,5 @@
 import h5py
+import json
 import numpy as np
 import pytest
 
@@ -26,7 +27,50 @@ def test_fy3h_recognizes_one_matching_1000m_and_geo1k_pair(tmp_path):
         ("OBSERVATION", 1, str(observation)),
         ("GEO1K", 0, str(geo)),
     ]
-    assert build_plan(candidate)["stages"][0]["stageCode"] == "VALIDATE_SOURCE"
+    assert build_plan(candidate)["stages"][0]["stageCode"] == "VALIDATE_FY3H_PAIR"
+
+
+def test_fy3h_plan_declares_the_fixed_pair_processing_contract(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path)
+    candidate = inspect_manifest(_manifest(observation, geo))[0]
+
+    plan = build_plan(candidate, {
+        "targetCrs": "EPSG:4326",
+        "resolutionDegrees": 0.01,
+        "continuousResampling": "nearest",
+        "bands": list(range(1, 26)),
+    })
+
+    stages = {stage["stageKey"]: stage for stage in plan["stages"]}
+    assert plan["version"] == "plan-v2"
+    assert list(stages) == [
+        "VALIDATE_FY3H_PAIR", "DECODE_MERSI_L1", "CALIBRATE_MERSI_L1",
+        "APPLY_MERSI_QUALITY", "GRID_MERSI_SWATH", "WRITE_MERSI_STANDARD_COG",
+    ]
+    assert stages["DECODE_MERSI_L1"]["inputs"] == [
+        {"key": "observation", "source": "RAW_INPUT", "artifactType": "OBSERVATION", "required": True},
+        {"key": "geo", "source": "RAW_INPUT", "artifactType": "GEO1K", "required": True},
+    ]
+    assert {output["artifactType"] for output in stages["WRITE_MERSI_STANDARD_COG"]["outputs"]} == {
+        "STANDARD_MERSI_COG", "STANDARD_MERSI_QUALITY_COG", "STANDARD_MERSI_SUMMARY_JSON",
+    }
+    snapshots = {stage["parameterSnapshot"] for stage in stages.values()}
+    assert len(snapshots) == 1
+    snapshot = snapshots.pop()
+    assert json.loads(snapshot)["bands"] == list(range(1, 26))
+    assert snapshot == json.dumps(json.loads(snapshot), sort_keys=True, separators=(",", ":"))
+
+
+def test_fy3h_rejects_even_saliency_window_and_quality_override(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path)
+    candidate = inspect_manifest(_manifest(observation, geo))[0]
+
+    with pytest.raises(ValueError, match="odd"):
+        build_plan(candidate, {"saliency": {
+            "enabled": True, "source": "CH01_REFLECTANCE", "windowSize": 4, "threshold": 0.5,
+        }})
+    with pytest.raises(ValueError, match="unsupported FY-3H parameter"):
+        build_plan(candidate, {"qualityPolicy": "ignore"})
 
 
 def test_fy3h_rejects_cross_orbit_pair(tmp_path):
