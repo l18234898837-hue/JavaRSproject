@@ -8,6 +8,8 @@ import pytest
 
 from fy3h_fixture import COLUMNS, ROWS, make_fy3h_pair
 from rs_algorithm_worker.fy3h_mersi_pipeline import (
+    build_quality_mask,
+    summarize_quality,
     calibrate_emissive,
     calibrate_mersi,
     calibrate_reflective,
@@ -20,6 +22,8 @@ from rs_algorithm_worker.models_fy3h import (
     read_decoded_mersi,
     write_calibrated_mersi,
     write_decoded_mersi,
+    QUALITY_FRAME_PREPROCESS_FAILURE,
+    QUALITY_SATURATED,
 )
 
 
@@ -162,3 +166,22 @@ def test_calibrate_mersi_applies_hdf_thermal_coefficients_by_scan_frame(tmp_path
     assert np.isfinite(calibrated.radiance_by_channel[20]).all()
     assert np.isfinite(calibrated.brightness_temperature_by_channel[20]).all()
     np.testing.assert_allclose(calibrated.brightness_temperature_by_channel[20], expected.brightness_temperature)
+
+
+def test_quality_mask_preserves_reason_bits_and_expands_failed_frame_to_ten_rows():
+    result = build_quality_mask(
+        raw=np.array([[1], [65534]] + [[1]] * 18, dtype=np.uint16),
+        frame_flags=np.array([0, 1 << 25], dtype=np.uint64),
+        geo_flags=np.zeros((2, 1), dtype=np.uint8),
+        rows_per_scan=10,
+    )
+
+    assert result.valid[0, 0]
+    assert not result.valid[1, 0]
+    assert not result.valid[10, 0]
+    assert result.reason_bits[1, 0] & QUALITY_SATURATED
+    assert result.reason_bits[10, 0] & QUALITY_FRAME_PREPROCESS_FAILURE
+    summary = summarize_quality({1: result})
+    assert summary["ruleVersion"] == "fy3h-mersi-l1-quality-v1"
+    assert summary["channelQuality"]["CH01"]["validPixelCount"] == 9
+    assert summary["reasonCounts"]["FRAME_PREPROCESS_FAILURE"] == 10

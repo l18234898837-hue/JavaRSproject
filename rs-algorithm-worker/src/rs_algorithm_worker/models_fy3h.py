@@ -10,6 +10,29 @@ import numpy as np
 
 MODEL_VERSION = "fy3h-mersi-model-v1"
 
+QUALITY_MISSING = np.uint32(1 << 0)
+QUALITY_SATURATED = np.uint32(1 << 1)
+QUALITY_DEAD_DETECTOR = np.uint32(1 << 2)
+QUALITY_OUT_OF_RANGE = np.uint32(1 << 3)
+QUALITY_FRAME_CHANNEL_FAILURE = np.uint32(1 << 4)
+QUALITY_FRAME_PREPROCESS_FAILURE = np.uint32(1 << 5)
+QUALITY_CALIBRATION_FAILURE = np.uint32(1 << 6)
+QUALITY_GEOLOCATION_FAILURE = np.uint32(1 << 7)
+QUALITY_INVALID_NAVIGATION = np.uint32(1 << 8)
+QUALITY_NON_DAYLIGHT = np.uint32(1 << 9)
+
+
+@dataclass(frozen=True)
+class QualityMask:
+    valid: np.ndarray
+    reason_bits: np.ndarray
+
+    def __post_init__(self) -> None:
+        if self.valid.dtype != np.dtype(bool) or self.reason_bits.dtype != np.dtype(np.uint32):
+            raise ValueError("FY-3H MERSI quality mask requires bool and uint32 arrays")
+        if self.valid.shape != self.reason_bits.shape:
+            raise ValueError("FY-3H MERSI quality mask dimensions must match")
+
 
 @dataclass(frozen=True)
 class DecodedMersi:

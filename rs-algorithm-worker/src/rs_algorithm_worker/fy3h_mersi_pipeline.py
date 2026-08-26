@@ -7,7 +7,13 @@ from typing import Any, Mapping
 import h5py
 import numpy as np
 
-from .models_fy3h import CalibratedMersi, DecodedMersi
+from .models_fy3h import (
+    CalibratedMersi, DecodedMersi, QualityMask, QUALITY_CALIBRATION_FAILURE,
+    QUALITY_DEAD_DETECTOR, QUALITY_FRAME_CHANNEL_FAILURE,
+    QUALITY_FRAME_PREPROCESS_FAILURE, QUALITY_GEOLOCATION_FAILURE,
+    QUALITY_INVALID_NAVIGATION, QUALITY_MISSING, QUALITY_NON_DAYLIGHT,
+    QUALITY_OUT_OF_RANGE, QUALITY_SATURATED,
+)
 from .operators.hdf import iter_dataset_windows
 from .product_adapters.fy3h_mersi import EMISSIVE_SOURCES, GEO_FIELDS, REFLECTIVE_SOURCES
 
@@ -17,6 +23,13 @@ FORMULA_REVIEW_STATUS = "pending-manual-pdf-review"
 ROWS_PER_SCAN = 10
 PLANCK_C1_MW_CM = 1.191042e-5
 PLANCK_C2_CM_K = 1.4387752
+QUALITY_RULE_VERSION = "fy3h-mersi-l1-quality-v1"
+FRAME_QUALITY_RULES = {
+    "channelFailure": (range(0, 25), QUALITY_FRAME_CHANNEL_FAILURE),
+    "preprocessFailure": ((25,), QUALITY_FRAME_PREPROCESS_FAILURE),
+    "calibrationFailure": ((26, 29), QUALITY_CALIBRATION_FAILURE),
+    "geolocationFailure": ((33,), QUALITY_GEOLOCATION_FAILURE),
+}
 
 
 @dataclass(frozen=True)
@@ -29,6 +42,73 @@ class ReflectiveCalibration:
 class EmissiveCalibration:
     radiance: np.ndarray
     brightness_temperature: np.ndarray
+
+
+def build_quality_mask(raw: np.ndarray, frame_flags: np.ndarray, geo_flags: np.ndarray, *, rows_per_scan: int,
+                       valid_range: tuple[float, float] | np.ndarray | None = None,
+                       longitude: np.ndarray | None = None, latitude: np.ndarray | None = None,
+                       solar_zenith: np.ndarray | None = None, sensor_zenith: np.ndarray | None = None,
+                       reflective: bool = False) -> QualityMask:
+    """Map source sentinels and frame-level QA into stable product reason bits."""
+    values = np.asarray(raw)
+    if values.ndim != 2 or rows_per_scan < 1 or values.shape[0] % rows_per_scan:
+        raise ValueError("FY-3H MERSI quality mask requires complete two-dimensional scan frames")
+    frames = values.shape[0] // rows_per_scan
+    flags = np.asarray(frame_flags).reshape(-1)
+    geo = np.asarray(geo_flags)
+    if flags.shape != (frames,) or geo.ndim < 1 or geo.shape[0] != frames:
+        raise ValueError("FY-3H MERSI frame quality dimensions are invalid")
+    bits = np.zeros(values.shape, dtype=np.uint32)
+    bits[values == 65535] |= QUALITY_MISSING
+    bits[values == 65534] |= QUALITY_SATURATED
+    bits[values == 65533] |= QUALITY_DEAD_DETECTOR
+    if valid_range is not None:
+        lower, upper = _finite_vector(np.asarray(valid_range), 2, "valid range")
+        if lower > upper:
+            raise ValueError("FY-3H MERSI valid range is invalid")
+        bits[(values < lower) | (values > upper)] |= QUALITY_OUT_OF_RANGE
+    frame_bits = np.zeros(frames, dtype=np.uint32)
+    for source_bits, reason in FRAME_QUALITY_RULES.values():
+        for bit in source_bits:
+            frame_bits[(flags & (np.uint64(1) << np.uint64(bit))) != 0] |= reason
+    frame_bits[np.any(geo != 0, axis=tuple(range(1, geo.ndim)))] |= QUALITY_GEOLOCATION_FAILURE
+    bits |= np.repeat(frame_bits, rows_per_scan)[:, None]
+    _apply_navigation_quality(bits, longitude, latitude, solar_zenith, sensor_zenith, reflective)
+    return QualityMask(valid=bits == 0, reason_bits=bits)
+
+
+def summarize_quality(quality_by_channel: Mapping[int, QualityMask]) -> dict[str, Any]:
+    names = {
+        QUALITY_MISSING: "MISSING", QUALITY_SATURATED: "SATURATED", QUALITY_DEAD_DETECTOR: "DEAD_DETECTOR",
+        QUALITY_OUT_OF_RANGE: "OUT_OF_RANGE", QUALITY_FRAME_CHANNEL_FAILURE: "FRAME_CHANNEL_FAILURE",
+        QUALITY_FRAME_PREPROCESS_FAILURE: "FRAME_PREPROCESS_FAILURE", QUALITY_CALIBRATION_FAILURE: "CALIBRATION_FAILURE",
+        QUALITY_GEOLOCATION_FAILURE: "GEOLOCATION_FAILURE", QUALITY_INVALID_NAVIGATION: "INVALID_NAVIGATION",
+        QUALITY_NON_DAYLIGHT: "NON_DAYLIGHT",
+    }
+    counts = {name: 0 for name in names.values()}
+    channels: dict[str, dict[str, int]] = {}
+    for channel, mask in quality_by_channel.items():
+        channel_name = f"CH{channel:02d}"
+        channels[channel_name] = {"validPixelCount": int(mask.valid.sum()), "totalPixelCount": int(mask.valid.size)}
+        for bit, name in names.items():
+            counts[name] += int(np.count_nonzero(mask.reason_bits & bit))
+    return {"ruleVersion": QUALITY_RULE_VERSION, "sourceRules": {key: list(bits) for key, (bits, _) in FRAME_QUALITY_RULES.items()},
+            "channelQuality": channels, "reasonCounts": counts}
+
+
+def _apply_navigation_quality(bits: np.ndarray, longitude: np.ndarray | None, latitude: np.ndarray | None,
+                              solar_zenith: np.ndarray | None, sensor_zenith: np.ndarray | None,
+                              reflective: bool) -> None:
+    if any(value is not None for value in (longitude, latitude, solar_zenith, sensor_zenith)):
+        if any(value is None or np.asarray(value).shape != bits.shape for value in (longitude, latitude, solar_zenith, sensor_zenith)):
+            raise ValueError("FY-3H MERSI navigation dimensions must match quality values")
+        lon, lat, solar, sensor = (np.asarray(value) for value in (longitude, latitude, solar_zenith, sensor_zenith))
+        invalid = (~np.isfinite(lon) | ~np.isfinite(lat) | ~np.isfinite(solar) | ~np.isfinite(sensor) |
+                   (lon < -180) | (lon > 180) | (lat < -90) | (lat > 90) |
+                   (solar < 0) | (solar > 180) | (sensor < 0) | (sensor > 180))
+        bits[invalid] |= QUALITY_INVALID_NAVIGATION
+        if reflective:
+            bits[solar >= 88] |= QUALITY_NON_DAYLIGHT
 
 
 def calibrate_reflective(values: np.ndarray, *, slope: float, intercept: float, coefficients: np.ndarray,
