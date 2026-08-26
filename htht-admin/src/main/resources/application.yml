@@ -13,6 +13,7 @@ multisource:
   worker:
     command: ${MULTISOURCE_WORKER_COMMAND}
     work-root: ${MULTISOURCE_WORK_ROOT}
+    artifact-root: ${MULTISOURCE_ARTIFACT_ROOT}
     timeout: ${MULTISOURCE_WORKER_TIMEOUT}
     processor-version: ${MULTISOURCE_WORKER_PROCESSOR_VERSION}
 

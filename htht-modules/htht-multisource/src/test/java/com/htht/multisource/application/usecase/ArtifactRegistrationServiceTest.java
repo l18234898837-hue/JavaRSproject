@@ -2,12 +2,17 @@ package com.htht.multisource.application.usecase;
 
 import com.htht.multisource.application.port.out.ArtifactRepository;
 import com.htht.multisource.application.port.out.ArtifactValidator;
+import com.htht.multisource.application.port.out.TaskArtifactStore;
 import com.htht.multisource.application.port.out.model.ArtifactCandidate;
+import com.htht.multisource.application.port.out.model.StageOutput;
 import com.htht.multisource.application.usecase.service.ArtifactRegistrationService;
 import com.htht.multisource.domain.model.Artifact;
+import com.htht.multisource.domain.model.ProcessingStage;
+import com.htht.multisource.domain.model.StageExecutionStatus;
 import com.htht.multisource.domain.model.StageId;
 import com.htht.multisource.domain.model.StorageUri;
 import com.htht.multisource.domain.model.TaskId;
+import com.htht.multisource.domain.model.TaskStage;
 import com.htht.multisource.domain.model.ExecutionId;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -53,6 +58,28 @@ class ArtifactRegistrationServiceTest {
         assertThat(repository.artifacts).isEmpty();
     }
 
+    @Test
+    void rejectsAnArtifactThatIsNotDeclaredByTheStageBeforeMaterializing() {
+        RecordingValidator validator = new RecordingValidator();
+        InMemoryArtifactRepository repository = new InMemoryArtifactRepository();
+        RecordingArtifactStore store = new RecordingArtifactStore();
+        ArtifactRegistrationService service = new ArtifactRegistrationService(validator, repository, store);
+        ProcessingStage declaredStage = new ProcessingStage("WRITE", "WRITE", List.of(), List.of(),
+            List.of(new StageOutput("SUMMARY", "summary.json", StageOutput.Retention.FINAL)), "{}");
+        TaskStage taskStage = new TaskStage(STAGE_ID, TASK_ID, "WRITE", StageExecutionStatus.RUNNING, 1,
+            new com.htht.multisource.domain.model.StageExecution(new ExecutionId("exec-01"), "worker",
+                java.time.Instant.now().plusSeconds(60), null, null, java.time.Instant.now(), null));
+
+        assertThatThrownBy(() -> service.register(TASK_ID, taskStage, declaredStage, OUTPUT_URI,
+            new ExecutionId("exec-01"), List.of(artifact("other.json", "sha256:other", 3))))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("declared");
+
+        assertThat(validator.candidates).isEmpty();
+        assertThat(store.materialized).isEmpty();
+        assertThat(repository.artifacts).isEmpty();
+    }
+
     private static ArtifactCandidate artifact(String name, String checksum, long size) {
         return new ArtifactCandidate(new StorageUri(OUTPUT_URI.value() + "/" + name), checksum, "OUTPUT", size);
     }
@@ -86,6 +113,25 @@ class ArtifactRegistrationServiceTest {
         @Override
         public void save(Artifact artifact) {
             artifacts.add(artifact);
+        }
+    }
+
+    private static final class RecordingArtifactStore implements TaskArtifactStore {
+        private final List<Artifact> materialized = new ArrayList<>();
+
+        @Override
+        public Artifact materialize(TaskId taskId, StageId stageId, String stageKey, int attempt,
+                                    ExecutionId executionId, StorageUri outputUri, ArtifactCandidate candidate,
+                                    StageOutput output) {
+            Artifact artifact = new Artifact(taskId, stageId, candidate.type(), candidate.uri(), "101/output/" +
+                output.relativePath(), candidate.checksum(), candidate.sizeBytes());
+            materialized.add(artifact);
+            return artifact;
+        }
+
+        @Override
+        public java.nio.file.Path resolveForDownload(Artifact artifact) {
+            throw new UnsupportedOperationException();
         }
     }
 }

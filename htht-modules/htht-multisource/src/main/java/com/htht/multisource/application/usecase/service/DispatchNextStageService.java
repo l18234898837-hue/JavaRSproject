@@ -1,6 +1,7 @@
 package com.htht.multisource.application.usecase.service;
 
 import com.htht.multisource.application.port.out.AssetStorage;
+import com.htht.multisource.application.port.out.ArtifactRepository;
 import com.htht.multisource.application.port.out.ExecutionClock;
 import com.htht.multisource.application.port.out.ExecutionIdGenerator;
 import com.htht.multisource.application.port.out.ProcessingTaskRepository;
@@ -35,6 +36,8 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
     private final ExecutionClock clock;
     private final Duration leaseDuration;
     private final AcceptWorkerEventUseCase eventUseCase;
+    private final ArtifactRepository artifactRepository;
+    private final StageInputResolver stageInputResolver;
 
     public DispatchNextStageService(
         ProcessingTaskRepository taskRepository,
@@ -46,6 +49,25 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
         Duration leaseDuration,
         AcceptWorkerEventUseCase eventUseCase
     ) {
+        this(taskRepository, stageRepository, dispatcher, assetStorage, executionIdGenerator, clock, leaseDuration,
+            eventUseCase, new ArtifactRepository() {
+                @Override public java.util.List<com.htht.multisource.domain.model.Artifact> findByTaskId(TaskId taskId) { return java.util.List.of(); }
+                @Override public void save(com.htht.multisource.domain.model.Artifact artifact) { throw new UnsupportedOperationException(); }
+            }, new StageInputResolver());
+    }
+
+    public DispatchNextStageService(
+        ProcessingTaskRepository taskRepository,
+        TaskStageRepository stageRepository,
+        TaskDispatcher dispatcher,
+        AssetStorage assetStorage,
+        ExecutionIdGenerator executionIdGenerator,
+        ExecutionClock clock,
+        Duration leaseDuration,
+        AcceptWorkerEventUseCase eventUseCase,
+        ArtifactRepository artifactRepository,
+        StageInputResolver stageInputResolver
+    ) {
         this.taskRepository = Objects.requireNonNull(taskRepository, "taskRepository");
         this.stageRepository = Objects.requireNonNull(stageRepository, "stageRepository");
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
@@ -54,6 +76,8 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
         this.clock = Objects.requireNonNull(clock, "clock");
         this.leaseDuration = Objects.requireNonNull(leaseDuration, "leaseDuration");
         this.eventUseCase = Objects.requireNonNull(eventUseCase, "eventUseCase");
+        this.artifactRepository = Objects.requireNonNull(artifactRepository, "artifactRepository");
+        this.stageInputResolver = Objects.requireNonNull(stageInputResolver, "stageInputResolver");
         if (leaseDuration.isZero() || leaseDuration.isNegative()) {
             throw new IllegalArgumentException("Lease duration must be positive.");
         }
@@ -76,16 +100,18 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("Claimed stage is absent from task plan snapshot."));
             var candidate = task.candidates().get(0);
+            var stageInputs = stageInputResolver.resolve(task, planStage, stageRepository.findByTaskId(taskId),
+                artifactRepository.findByTaskId(taskId));
             DispatchReceipt receipt;
             try {
                 receipt = dispatchWithRefresh(() -> {
                     var grant = assetStorage.grant(new ExecutionGrantRequest(
-                        task.id(), claim.stage().id(), executionId, claim.stage().attempt(), candidate.files(), task.outputUri()
+                        task.id(), claim.stage().id(), executionId, claim.stage().attempt(), stageInputs, task.outputUri()
                     ));
                     return new StageExecutionRequest(
                         task.id(), claim.stage().id(), planStage.stageKey(), claim.stage().attempt(), executionId,
                         "1.0", candidate.profileKey().productCode(), candidate.profileKey().profileVersion(),
-                        task.plan().processorVersion(), task.parameterSnapshot(), candidate.files(), task.outputUri(), grant
+                        task.plan().processorVersion(), task.parameterSnapshot(), stageInputs, task.outputUri(), grant
                     );
                 });
             } catch (RuntimeException failure) {

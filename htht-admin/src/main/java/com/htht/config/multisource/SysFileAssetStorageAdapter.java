@@ -33,7 +33,7 @@ import java.util.UUID;
  * Bridges sys_file records to controlled Worker assets. sys_file has no owner field, so this adapter
  * can validate existence and path safety but cannot establish per-file ownership.
  */
-public final class SysFileAssetStorageAdapter implements AssetStorage, LocalWorkerAssetResolver {
+public final class SysFileAssetStorageAdapter implements LocalWorkerAssetResolver {
     private final ISysFileService sysFileService;
     private final Path uploadRoot;
     private final Map<String, GrantScope> grants = new ConcurrentHashMap<>();
@@ -62,7 +62,6 @@ public final class SysFileAssetStorageAdapter implements AssetStorage, LocalWork
         return resolveReference(new AssetReference("SYS_FILE", id));
     }
 
-    @Override
     public AssetAccessGrant grantRead(AccessSubject subject, List<InputAsset> inputs) {
         String reference = UUID.randomUUID().toString();
         Instant expiresAt = Instant.now().plusSeconds(300);
@@ -70,12 +69,10 @@ public final class SysFileAssetStorageAdapter implements AssetStorage, LocalWork
         return new AssetAccessGrant(reference, expiresAt);
     }
 
-    @Override
     public ExecutionGrant grant(TaskId taskId, List<InputAsset> inputs, StorageUri outputUri) {
         throw new UnsupportedOperationException("Execution grants must bind a stage execution.");
     }
 
-    @Override
     public ExecutionGrant grant(ExecutionGrantRequest request) {
         String reference = UUID.randomUUID().toString();
         Instant expiresAt = Instant.now().plusSeconds(300);
@@ -83,7 +80,10 @@ public final class SysFileAssetStorageAdapter implements AssetStorage, LocalWork
         return new ExecutionGrant(reference, expiresAt, request.taskId(), request.stageId(), request.executionId(), request.attempt());
     }
 
-    @Override
+    void authorize(String grantReference, Instant expiresAt, Set<String> storageUris) {
+        grants.put(grantReference, new GrantScope(expiresAt, storageUris));
+    }
+
     public AssetMetadata resolve(AccessSubject subject, AssetReference reference) {
         Path path = resolveReference(reference);
         try {

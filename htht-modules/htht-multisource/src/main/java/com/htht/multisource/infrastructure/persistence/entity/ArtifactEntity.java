@@ -12,6 +12,7 @@ public class ArtifactEntity {
     private Long stageId;
     private String artifactType;
     private String storageUri;
+    private String storageKey;
     private String checksum;
     private Long sizeBytes;
     public Long getArtifactId() { return artifactId; }
@@ -24,6 +25,8 @@ public class ArtifactEntity {
     public void setArtifactType(String artifactType) { this.artifactType = artifactType; }
     public String getStorageUri() { return storageUri; }
     public void setStorageUri(String storageUri) { this.storageUri = storageUri; }
+    public String getStorageKey() { return storageKey; }
+    public void setStorageKey(String storageKey) { this.storageKey = storageKey; }
     public String getChecksum() { return checksum; }
     public void setChecksum(String checksum) { this.checksum = checksum; }
     public Long getSizeBytes() { return sizeBytes; }

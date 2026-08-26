@@ -64,9 +64,8 @@ public class AcceptWorkerEventService implements AcceptWorkerEventUseCase {
         }
         switch (event.type()) {
             case SUCCEEDED -> {
-                if (!artifacts.isEmpty()) {
-                    artifactRegistration.register(event.taskId(), event.stageId(),
-                        resolveOutputUri(event.taskId()), event.executionId(), artifacts);
+                if (taskRepository != null) {
+                    artifactRegistration.register(resolveTask(event.taskId()), stage, event.executionId(), artifacts);
                 }
                 stageRepository.save(stage.succeed(event.executionId(), event.attempt(), event.occurredAt()));
             }
@@ -81,12 +80,16 @@ public class AcceptWorkerEventService implements AcceptWorkerEventUseCase {
     }
 
     private StorageUri resolveOutputUri(TaskId taskId) {
+        return resolveTask(taskId).outputUri();
+    }
+
+    private com.htht.multisource.domain.model.ProcessingTask resolveTask(TaskId taskId) {
         if (taskRepository == null) {
             throw new IllegalStateException("Task output URI resolver is not configured.");
         }
         return taskRepository.findById(taskId)
             .orElseThrow(() -> new IllegalArgumentException("Processing task not found."))
-            .outputUri();
+            ;
     }
 
     private void updateTaskLifecycle(TaskId taskId) {

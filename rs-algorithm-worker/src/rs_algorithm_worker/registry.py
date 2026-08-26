@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .product_adapters import fy3h_mersi, fy4b_agri, gf6_wfv_browse, hy1c_czi, hy1c_czi_l2a, hy2d_altimeter
+from .hy2d_pipeline import execute_hy2d_stage
 
 
 LOGICAL_OUTPUT_URI = re.compile(r"rs://output/[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*/?")
@@ -30,6 +31,9 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
                 raise ValueError("recognized HY-1C CZI L2A packageId is required")
             return hy1c_czi_l2a.build_l2a_plan(candidate, _parameter_snapshot(payload))
         adapter = _adapter_for_manifest(manifest)
+        if adapter is hy2d_altimeter:
+            candidate = _recognized_hy2d_candidate(manifest, payload.get("candidate", {}).get("packageId"))
+            return hy2d_altimeter.build_plan(candidate, _parameter_snapshot(payload))
         if adapter is gf6_wfv_browse:
             candidate = _recognized_gf_candidate(manifest, payload.get("candidate", {}).get("packageId"))
             return adapter.build_plan(candidate, _parameter_snapshot(payload))
@@ -39,9 +43,14 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
             "dependsOnStageKeys": [],
         }]}
     if operation == "execute-stage":
+        payload = _payload(request)
+        if payload.get("profileCode") == "HY-2D-ALTIMETER":
+            return execute_hy2d_stage(payload, manifest)
         adapter = _adapter_for_manifest(manifest)
+        if adapter is hy2d_altimeter:
+            return execute_hy2d_stage(payload, manifest)
         if adapter is gf6_wfv_browse:
-            return _execute_gf_browse_stage(_payload(request), manifest)
+            return _execute_gf_browse_stage(payload, manifest)
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": []}
     raise ValueError(f"unsupported operation: {operation}")
 
@@ -113,6 +122,15 @@ def _recognized_gf_candidate(manifest: dict[str, Any], package_id: Any) -> dict[
         if candidate["packageId"] == package_id:
             return candidate
     raise ValueError("recognized GF-6 packageId is required")
+
+
+def _recognized_hy2d_candidate(manifest: dict[str, Any], package_id: Any) -> dict[str, Any]:
+    if not isinstance(package_id, str) or not package_id:
+        raise ValueError("recognized HY-2D packageId is required")
+    for item in hy2d_altimeter.inspect_manifest(manifest):
+        if item["packageId"] == package_id:
+            return item
+    raise ValueError("recognized HY-2D packageId is required")
 
 
 def _execute_gf_browse_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
