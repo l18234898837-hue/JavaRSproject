@@ -6,6 +6,7 @@ from rs_algorithm_worker.models import BandMetadata, RasterData
 from rs_algorithm_worker.operators.align import align_to_reference
 from rs_algorithm_worker.operators.crop import crop_grid
 from rs_algorithm_worker.operators.reproject import reproject_raster
+from rs_algorithm_worker.operators.swath_grid import grid_swath
 from rasterio.enums import Resampling
 
 
@@ -94,3 +95,16 @@ def test_alignment_preserves_declared_nodata_for_uncovered_cells():
 
     assert result.nodata == -9999.0
     assert (result.values == -9999.0).any()
+
+
+def test_swath_grid_uses_valid_navigation_and_nearest_quality_samples():
+    science, quality = grid_swath(
+        np.array([[1.0, np.nan], [3.0, 5.0]], dtype=np.float32),
+        np.array([[0, 1], [0, 0]], dtype=np.uint32),
+        np.array([[120.00, 120.01], [120.00, 120.01]]),
+        np.array([[30.01, 30.01], [30.00, 30.00]]),
+        target_crs="EPSG:4326", resolution=0.01, continuous_resampling="nearest",
+    )
+
+    assert np.isfinite(science.values).any()
+    assert set(np.unique(quality.values[quality.values != quality.nodata])).issubset({0, 1})
