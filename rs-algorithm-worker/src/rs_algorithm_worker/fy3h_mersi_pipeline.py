@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -15,6 +16,7 @@ from .models_fy3h import (
     QUALITY_INVALID_NAVIGATION, QUALITY_MISSING, QUALITY_NON_DAYLIGHT,
     QUALITY_OUT_OF_RANGE, QUALITY_SATURATED,
 )
+from .models_fy3h import read_decoded_mersi, write_decoded_mersi, read_calibrated_mersi, write_calibrated_mersi
 from .models import RasterData
 from .operators.cog import write_cog
 from .operators.hdf import iter_dataset_windows
@@ -72,6 +74,51 @@ def write_standard_mersi_cogs(science: RasterData, quality: RasterData, output_d
     summary_path = output_dir / "summary.json"
     summary_path.write_text(json.dumps(document, ensure_ascii=True, sort_keys=True, allow_nan=False), encoding="utf-8")
     return StandardMersiOutput(standard.path, quality_result.path, summary_path)
+
+
+def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    stage = payload.get("stageKey")
+    output_uri = payload.get("outputUri")
+    output = manifest.get("output")
+    if not isinstance(stage, str) or not isinstance(output_uri, str) or not output_uri.startswith("rs://output/"):
+        raise ValueError("FY-3H MERSI stage and logical output URI are required")
+    if not isinstance(output, dict) or not isinstance(output.get("path"), str):
+        raise ValueError("FY-3H MERSI temporary output directory is required")
+    directory = Path(output["path"]).resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+    roles = {item.get("role"): Path(item["path"]) for item in manifest.get("inputs", [])
+             if isinstance(item, dict) and isinstance(item.get("role"), str) and isinstance(item.get("path"), str)}
+    if stage == "VALIDATE_FY3H_PAIR":
+        _require_roles(roles, {"OBSERVATION", "GEO1K"})
+        path = directory / "validation" / "pair.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"profileKey": "FY-3H-MERSI", "valid": True}), encoding="utf-8")
+        return _stage_response(output_uri, [("FY3H_INPUT_VALIDATION_JSON", path, "validation/pair.json")])
+    if stage == "DECODE_MERSI_L1":
+        _require_roles(roles, {"OBSERVATION", "GEO1K"})
+        path = directory / "decoded" / "mersi-l1.npz"
+        write_decoded_mersi(path, decode_mersi_pair(roles["OBSERVATION"], roles["GEO1K"], rows_per_window=100))
+        return _stage_response(output_uri, [("DECODED_MERSI_L1", path, "decoded/mersi-l1.npz")])
+    if stage == "CALIBRATE_MERSI_L1":
+        _require_roles(roles, {"decoded"})
+        path = directory / "calibrated" / "mersi.npz"
+        write_calibrated_mersi(path, calibrate_mersi(read_decoded_mersi(roles["decoded"])))
+        return _stage_response(output_uri, [("CALIBRATED_MERSI_RASTER", path, "calibrated/mersi.npz")])
+    raise ValueError("unsupported FY-3H MERSI stage")
+
+
+def _require_roles(roles: Mapping[str, Path], expected: set[str]) -> None:
+    if set(roles) != expected or any(not path.is_file() for path in roles.values()):
+        raise ValueError(f"FY-3H MERSI stage requires exactly {', '.join(sorted(expected))}")
+
+
+def _stage_response(root_uri: str, artifacts: list[tuple[str, Path, str]]) -> dict[str, Any]:
+    result = []
+    for kind, path, relative in artifacts:
+        content = path.read_bytes()
+        result.append({"uri": root_uri.rstrip("/") + "/" + relative, "type": kind,
+                       "sizeBytes": len(content), "checksum": "sha256:" + hashlib.sha256(content).hexdigest()})
+    return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": result}
 
 
 def build_quality_mask(raw: np.ndarray, frame_flags: np.ndarray, geo_flags: np.ndarray, *, rows_per_scan: int,
