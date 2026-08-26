@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 import h5py
 import numpy as np
+from affine import Affine
 
 from .models_fy3h import (
     CalibratedMersi, DecodedMersi, QualityMask, QUALITY_CALIBRATION_FAILURE,
@@ -17,7 +18,7 @@ from .models_fy3h import (
     QUALITY_OUT_OF_RANGE, QUALITY_SATURATED,
 )
 from .models_fy3h import read_decoded_mersi, write_decoded_mersi, read_calibrated_mersi, write_calibrated_mersi
-from .models import RasterData
+from .models import BandMetadata, RasterData
 from .operators.cog import write_cog
 from .operators.swath_grid import grid_swath
 from .fy3h_mersi_profile import parse_fy3h_parameters
@@ -109,6 +110,7 @@ def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
     if stage == "APPLY_MERSI_QUALITY":
         _require_roles(roles, {"decoded", "calibrated"})
         decoded = read_decoded_mersi(roles["decoded"])
+        calibrated = read_calibrated_mersi(roles["calibrated"])
         quality = {channel: build_quality_mask(decoded.dn_by_channel[channel], decoded.frame_flags, decoded.geo_flags,
                    rows_per_scan=ROWS_PER_SCAN, valid_range=decoded.calibration["valid_range"][channel - 1],
                    longitude=decoded.longitude, latitude=decoded.latitude, solar_zenith=decoded.solar_zenith_degrees,
@@ -116,15 +118,53 @@ def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
                    for channel in range(1, 26)}
         path = directory / "quality" / "mersi.npz"; path.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(path, longitude=decoded.longitude, latitude=decoded.latitude,
-                            **{f"quality__{key}": value.reason_bits for key, value in quality.items()})
+                            **{f"quality__{key}": value.reason_bits for key, value in quality.items()},
+                            **{f"science__{key}": (calibrated.reflectance_by_channel[key] if key <= 19 else calibrated.brightness_temperature_by_channel[key]) for key in range(1, 26)})
         summary = directory / "quality" / "summary.json"; summary.write_text(json.dumps(summarize_quality(quality), sort_keys=True), encoding="utf-8")
         return _stage_response(output_uri, [("QUALITY_MERSI_RASTER", path, "quality/mersi.npz"), ("MERSI_QUALITY_SUMMARY_JSON", summary, "quality/summary.json")])
+    if stage == "GRID_MERSI_SWATH":
+        _require_roles(roles, {"quality"})
+        parameters = parse_fy3h_parameters(_payload_parameters(payload))
+        with np.load(roles["quality"], allow_pickle=False) as data:
+            longitude, latitude = data["longitude"], data["latitude"]
+            grids = [grid_swath(data[f"science__{channel}"], data[f"quality__{channel}"], longitude, latitude,
+                                target_crs=parameters["targetCrs"], resolution=parameters.get("resolutionDegrees", parameters.get("resolutionMeters")),
+                                roi=parameters.get("roi"), continuous_resampling=parameters["continuousResampling"])
+                     for channel in range(1, 26)]
+        path = directory / "grid" / "mersi.npz"; path.parent.mkdir(parents=True, exist_ok=True)
+        quality_path = directory / "grid" / "quality-mask.npz"
+        np.savez_compressed(path, values=np.stack([item[0].values for item in grids]),
+                            crs=np.asarray(grids[0][0].crs), transform=np.asarray(grids[0][0].transform)[:6])
+        np.savez_compressed(quality_path, values=grids[0][1].values, crs=np.asarray(grids[0][1].crs), transform=np.asarray(grids[0][1].transform)[:6])
+        return _stage_response(output_uri, [("GRIDDED_MERSI_RASTER", path, "grid/mersi.npz"), ("GRIDDED_MERSI_QUALITY_MASK", quality_path, "grid/quality-mask.npz")])
+    if stage == "WRITE_MERSI_STANDARD_COG":
+        _require_roles(roles, {"grid", "qualityGrid"})
+        with np.load(roles["grid"], allow_pickle=False) as data:
+            values, crs, transform = data["values"], str(data["crs"]), Affine(*data["transform"])
+        with np.load(roles["qualityGrid"], allow_pickle=False) as data:
+            quality_values = data["values"]
+        metadata = tuple(BandMetadata(f"CH{channel:02d}_{'REFLECTANCE' if channel <= 19 else 'BRIGHTNESS_TEMPERATURE'}") for channel in range(1, 26))
+        output = write_standard_mersi_cogs(RasterData(values, crs, transform, np.nan, metadata),
+                                           RasterData(quality_values.astype(np.uint32), crs, transform, np.uint32(0xFFFFFFFF), (BandMetadata("quality_mask", unit="bitmask"),)),
+                                           directory / "standard", {})
+        return _stage_response(output_uri, [("STANDARD_MERSI_COG", output.standard_cog, "standard/mersi.tif"),
+                                           ("STANDARD_MERSI_QUALITY_COG", output.quality_cog, "standard/quality.tif"),
+                                           ("STANDARD_MERSI_SUMMARY_JSON", output.summary_path, "standard/summary.json")])
     raise ValueError("unsupported FY-3H MERSI stage")
 
 
 def _require_roles(roles: Mapping[str, Path], expected: set[str]) -> None:
     if set(roles) != expected or any(not path.is_file() for path in roles.values()):
         raise ValueError(f"FY-3H MERSI stage requires exactly {', '.join(sorted(expected))}")
+
+
+def _payload_parameters(payload: Mapping[str, Any]) -> dict[str, Any]:
+    value = payload.get("parameterSnapshot", {})
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, dict):
+        raise ValueError("FY-3H MERSI parameter snapshot is invalid")
+    return value
 
 
 def _stage_response(root_uri: str, artifacts: list[tuple[str, Path, str]]) -> dict[str, Any]:
