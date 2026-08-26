@@ -19,6 +19,8 @@ from .models_fy3h import (
 from .models_fy3h import read_decoded_mersi, write_decoded_mersi, read_calibrated_mersi, write_calibrated_mersi
 from .models import RasterData
 from .operators.cog import write_cog
+from .operators.swath_grid import grid_swath
+from .fy3h_mersi_profile import parse_fy3h_parameters
 from .operators.hdf import iter_dataset_windows
 from .product_adapters.fy3h_mersi import EMISSIVE_SOURCES, GEO_FIELDS, REFLECTIVE_SOURCES
 
@@ -104,6 +106,19 @@ def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         path = directory / "calibrated" / "mersi.npz"
         write_calibrated_mersi(path, calibrate_mersi(read_decoded_mersi(roles["decoded"])))
         return _stage_response(output_uri, [("CALIBRATED_MERSI_RASTER", path, "calibrated/mersi.npz")])
+    if stage == "APPLY_MERSI_QUALITY":
+        _require_roles(roles, {"decoded", "calibrated"})
+        decoded = read_decoded_mersi(roles["decoded"])
+        quality = {channel: build_quality_mask(decoded.dn_by_channel[channel], decoded.frame_flags, decoded.geo_flags,
+                   rows_per_scan=ROWS_PER_SCAN, valid_range=decoded.calibration["valid_range"][channel - 1],
+                   longitude=decoded.longitude, latitude=decoded.latitude, solar_zenith=decoded.solar_zenith_degrees,
+                   sensor_zenith=decoded.sensor_zenith_degrees, reflective=channel <= 19)
+                   for channel in range(1, 26)}
+        path = directory / "quality" / "mersi.npz"; path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(path, longitude=decoded.longitude, latitude=decoded.latitude,
+                            **{f"quality__{key}": value.reason_bits for key, value in quality.items()})
+        summary = directory / "quality" / "summary.json"; summary.write_text(json.dumps(summarize_quality(quality), sort_keys=True), encoding="utf-8")
+        return _stage_response(output_uri, [("QUALITY_MERSI_RASTER", path, "quality/mersi.npz"), ("MERSI_QUALITY_SUMMARY_JSON", summary, "quality/summary.json")])
     raise ValueError("unsupported FY-3H MERSI stage")
 
 
