@@ -9,6 +9,7 @@ from .track_features import _valid_runs, _validated_values, _validate_window_siz
 
 
 _ABSOLUTE_SSH_LIMIT_VERSION = "hy2d-idr-2mc-engineering-baseline-v1"
+_ABSOLUTE_SSH_LIMIT_SCIENTIFIC_STATUS = "ENGINEERING_BASELINE_REQUIRES_OFFICIAL_REVIEW"
 
 
 @dataclass(frozen=True)
@@ -29,8 +30,9 @@ def detect_track_anomalies(
 ) -> TrackAnomalyResult:
     """Flag local MAD outliers, SSH jumps, and engineering-limit SSH values.
 
-    MAD scores use ``abs(value - median) / (1.4826 * MAD)``.  A zero MAD has
-    no defined standardized score, so only the explicit jump threshold applies.
+    MAD scores use ``abs(value - median) / (1.4826 * MAD)``. A zero MAD has
+    no defined standardized score, but the independent absolute SSH limit and
+    adjacent-jump checks still apply.
 
     The absolute SSH limit is an engineering baseline, not an official HY-2D
     IDR/IGDR quality threshold. Replace or review it when the official product
@@ -78,6 +80,8 @@ def detect_track_anomalies(
             "anomalyCount": sum(bool(item) for item in reason_codes),
             "absoluteSshLimitMeters": float(absolute_ssh_limit_meters),
             "absoluteSshLimitVersion": _ABSOLUTE_SSH_LIMIT_VERSION,
+            "absoluteSshLimitScientificStatus": _ABSOLUTE_SSH_LIMIT_SCIENTIFIC_STATUS,
+            "absoluteSshLimitRequiresOfficialReview": True,
         },
     )
 

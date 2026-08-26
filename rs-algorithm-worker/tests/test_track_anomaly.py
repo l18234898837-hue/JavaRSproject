@@ -23,6 +23,8 @@ def test_detect_track_anomalies_records_mad_and_adjacent_jump_reasons() -> None:
         "anomalyCount": 2,
         "absoluteSshLimitMeters": 100.0,
         "absoluteSshLimitVersion": "hy2d-idr-2mc-engineering-baseline-v1",
+        "absoluteSshLimitScientificStatus": "ENGINEERING_BASELINE_REQUIRES_OFFICIAL_REVIEW",
+        "absoluteSshLimitRequiresOfficialReview": True,
     }
 
 
