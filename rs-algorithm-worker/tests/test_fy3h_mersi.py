@@ -73,6 +73,26 @@ def test_fy3h_rejects_even_saliency_window_and_quality_override(tmp_path):
         build_plan(candidate, {"qualityPolicy": "ignore"})
 
 
+def test_fy3h_statistics_only_features_do_not_declare_a_nonexistent_cog_or_feature_saliency(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path)
+    candidate = inspect_manifest(_manifest(observation, geo))[0]
+
+    plan = build_plan(candidate, {"bands": [1], "features": {
+        "enabled": True, "metrics": ["statistics"],
+    }})
+
+    stages = {stage["stageKey"]: stage for stage in plan["stages"]}
+    assert [output["artifactType"] for output in stages["EXTRACT_MERSI_FEATURES"]["outputs"]] == [
+        "MERSI_FEATURE_SUMMARY_JSON",
+    ]
+    with pytest.raises(ValueError, match="saliency source"):
+        build_plan(candidate, {"bands": [1], "features": {
+            "enabled": True, "metrics": ["statistics"],
+        }, "saliency": {
+            "enabled": True, "source": "statistics:CH01_REFLECTANCE", "windowSize": 3, "threshold": 0.5,
+        }})
+
+
 def test_fy3h_rejects_cross_orbit_pair(tmp_path):
     observation, geo = make_fy3h_pair(tmp_path, orbit=3948)
     with h5py.File(geo, "r+") as handle:

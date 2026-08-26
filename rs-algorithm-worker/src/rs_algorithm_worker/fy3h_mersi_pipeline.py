@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 import h5py
 import numpy as np
+import rasterio
 from affine import Affine
 
 from .models_fy3h import (
@@ -18,7 +19,10 @@ from .models_fy3h import (
     QUALITY_OUT_OF_RANGE, QUALITY_SATURATED,
 )
 from .models_fy3h import read_decoded_mersi, write_decoded_mersi, read_calibrated_mersi, write_calibrated_mersi
-from .models import BandMetadata, RasterData
+from .algorithms.features import FeatureParameters, extract_features
+from .algorithms.fusion import FusionParameters, fuse_bands
+from .algorithms.saliency import SaliencyParameters, detect_saliency
+from .models import BandMetadata, BandSet, RasterData
 from .operators.cog import write_cog
 from .operators.swath_grid import grid_swath
 from .fy3h_mersi_profile import parse_fy3h_parameters
@@ -89,8 +93,7 @@ def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         raise ValueError("FY-3H MERSI temporary output directory is required")
     directory = Path(output["path"]).resolve()
     directory.mkdir(parents=True, exist_ok=True)
-    roles = {item.get("role"): Path(item["path"]) for item in manifest.get("inputs", [])
-             if isinstance(item, dict) and isinstance(item.get("role"), str) and isinstance(item.get("path"), str)}
+    roles = _input_roles(manifest)
     if stage == "VALIDATE_FY3H_PAIR":
         _require_roles(roles, {"OBSERVATION", "GEO1K"})
         path = directory / "validation" / "pair.json"
@@ -150,12 +153,115 @@ def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         return _stage_response(output_uri, [("STANDARD_MERSI_COG", output.standard_cog, "standard/mersi.tif"),
                                            ("STANDARD_MERSI_QUALITY_COG", output.quality_cog, "standard/quality.tif"),
                                            ("STANDARD_MERSI_SUMMARY_JSON", output.summary_path, "standard/summary.json")])
+    if stage == "EXTRACT_MERSI_FEATURES":
+        _require_roles(roles, {"standard"})
+        parameters = parse_fy3h_parameters(_payload_parameters(payload))
+        standard = _selected_standard_bands(_read_cog(roles["standard"]), parameters["bands"])
+        feature_set = extract_features(standard, FeatureParameters(
+            metrics=tuple(parameters["features"]["metrics"]),
+            window_size=parameters["features"].get("windowSize", 3),
+        ))
+        feature_dir = directory / "features"
+        feature_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = feature_dir / "summary.json"
+        summary_path.write_text(json.dumps(feature_set.statistics, ensure_ascii=True, sort_keys=True, allow_nan=False), encoding="utf-8")
+        artifacts: list[tuple[Any, ...]] = [("MERSI_FEATURE_SUMMARY_JSON", summary_path, "features/summary.json")]
+        if feature_set.rasters:
+            values = np.stack([raster.values for raster in feature_set.rasters.values()])
+            first = next(iter(feature_set.rasters.values()))
+            feature_raster = RasterData(values, first.crs, first.transform, np.nan,
+                                        tuple(BandMetadata(name) for name in feature_set.rasters))
+            feature_path = write_cog(feature_raster, feature_dir / "mersi.tif").path
+            artifacts.insert(0, ("MERSI_FEATURE_COG", feature_path, "features/mersi.tif"))
+        return _stage_response(output_uri, artifacts)
+    if stage == "FUSE_MERSI_BANDS":
+        _require_roles(roles, {"standard"})
+        parameters = parse_fy3h_parameters(_payload_parameters(payload))
+        fusion = parameters["fusion"]
+        raster = _selected_standard_bands(_read_cog(roles["standard"]), parameters["bands"])
+        result = fuse_bands(BandSet(raster), FusionParameters(
+            red=_channel_name(fusion["red"]), green=_channel_name(fusion["green"]), blue=_channel_name(fusion["blue"]),
+            low_percentile=fusion["percentiles"][0], high_percentile=fusion["percentiles"][1],
+        ))
+        output_dir = directory / "fusion"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = write_cog(result, output_dir / "mersi-rgb.tif").path
+        return _stage_response(output_uri, [("MERSI_FUSION_COG", path, "fusion/mersi-rgb.tif", True)])
+    if stage == "DETECT_MERSI_SALIENCY":
+        parameters = parse_fy3h_parameters(_payload_parameters(payload))
+        saliency = parameters["saliency"]
+        expected_role = "features" if saliency["source"].startswith(("gradient:", "local_variance:")) else "standard"
+        _require_roles(roles, {expected_role})
+        source = _read_cog(roles[expected_role])
+        if expected_role == "standard":
+            source = _selected_standard_bands(source, parameters["bands"])
+        source = _named_band(source, saliency["source"])
+        result = detect_saliency(source, SaliencyParameters(
+            threshold=saliency["threshold"], window_size=saliency["windowSize"],
+        ))
+        output_dir = directory / "saliency"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        score_path = write_cog(result.score, output_dir / "score.tif").path
+        mask = RasterData(result.mask.astype(np.uint8), result.score.crs, result.score.transform, np.uint8(0),
+                          (BandMetadata("saliency_mask"),))
+        mask_path = write_cog(mask, output_dir / "mask.tif").path
+        return _stage_response(output_uri, [
+            ("MERSI_SALIENCY_SCORE_COG", score_path, "saliency/score.tif"),
+            ("MERSI_SALIENCY_MASK_COG", mask_path, "saliency/mask.tif"),
+        ])
     raise ValueError("unsupported FY-3H MERSI stage")
 
 
 def _require_roles(roles: Mapping[str, Path], expected: set[str]) -> None:
     if set(roles) != expected or any(not path.is_file() for path in roles.values()):
         raise ValueError(f"FY-3H MERSI stage requires exactly {', '.join(sorted(expected))}")
+
+
+def _input_roles(manifest: Mapping[str, Any]) -> dict[str, Path]:
+    inputs = manifest.get("inputs")
+    if not isinstance(inputs, list):
+        return {}
+    roles: dict[str, Path] = {}
+    for item in inputs:
+        if not isinstance(item, dict) or not isinstance(item.get("role"), str) or not isinstance(item.get("path"), str):
+            return {}
+        role = item["role"]
+        if role in roles:
+            raise ValueError("FY-3H MERSI stage input roles must be unique")
+        roles[role] = Path(item["path"])
+    return roles
+
+
+def _read_cog(path: Path) -> RasterData:
+    try:
+        with rasterio.open(path) as dataset:
+            if dataset.crs is None or dataset.transform is None or any(name is None or not name.strip() for name in dataset.descriptions):
+                raise ValueError("FY-3H MERSI COG metadata is invalid")
+            return RasterData(dataset.read(), dataset.crs.to_string(), dataset.transform, dataset.nodata,
+                              tuple(BandMetadata(name) for name in dataset.descriptions))
+    except rasterio.errors.RasterioError as error:
+        raise ValueError("FY-3H MERSI COG input is unreadable") from error
+
+
+def _channel_name(channel: int) -> str:
+    return f"CH{channel:02d}_{'REFLECTANCE' if channel <= 19 else 'BRIGHTNESS_TEMPERATURE'}"
+
+
+def _selected_standard_bands(raster: RasterData, channels: list[int]) -> RasterData:
+    return _named_bands(raster, [_channel_name(channel) for channel in channels])
+
+
+def _named_band(raster: RasterData, name: str) -> RasterData:
+    return _named_bands(raster, [name])
+
+
+def _named_bands(raster: RasterData, names: list[str]) -> RasterData:
+    by_name = {metadata.name: index for index, metadata in enumerate(raster.band_metadata)}
+    if any(name not in by_name for name in names):
+        raise ValueError("FY-3H MERSI requested COG band is unavailable")
+    indices = [by_name[name] for name in names]
+    return RasterData(raster.values[indices], raster.crs, raster.transform, raster.nodata,
+                      tuple(raster.band_metadata[index] for index in indices))
 
 
 def _payload_parameters(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -167,12 +273,15 @@ def _payload_parameters(payload: Mapping[str, Any]) -> dict[str, Any]:
     return value
 
 
-def _stage_response(root_uri: str, artifacts: list[tuple[str, Path, str]]) -> dict[str, Any]:
+def _stage_response(root_uri: str, artifacts: list[tuple[Any, ...]]) -> dict[str, Any]:
     result = []
-    for kind, path, relative in artifacts:
+    for kind, path, relative, *display in artifacts:
         content = path.read_bytes()
-        result.append({"uri": root_uri.rstrip("/") + "/" + relative, "type": kind,
-                       "sizeBytes": len(content), "checksum": "sha256:" + hashlib.sha256(content).hexdigest()})
+        artifact = {"uri": root_uri.rstrip("/") + "/" + relative, "type": kind,
+                    "sizeBytes": len(content), "checksum": "sha256:" + hashlib.sha256(content).hexdigest()}
+        if display and display[0]:
+            artifact["displayProduct"] = True
+        result.append(artifact)
     return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": result}
 
 

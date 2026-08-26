@@ -174,5 +174,5 @@ def _feature_sources(features: dict[str, Any], bands: list[int]) -> set[str]:
     variables = _selected_variables(bands)
     return {
         f"{metric}:{variable}"
-        for metric in features["metrics"] for variable in variables
+        for metric in features["metrics"] if metric in {"gradient", "local_variance"} for variable in variables
     }

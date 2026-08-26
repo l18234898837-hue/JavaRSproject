@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 
 import h5py
 import numpy as np
@@ -29,6 +30,8 @@ from rs_algorithm_worker.models_fy3h import (
 )
 from rs_algorithm_worker.models import BandMetadata, RasterData
 from rs_algorithm_worker.fy3h_mersi_pipeline import write_standard_mersi_cogs
+from rs_algorithm_worker.fy3h_mersi_pipeline import execute_fy3h_stage
+from rs_algorithm_worker.operators.cog import write_cog
 
 
 def test_reflective_calibration_uses_official_formula_and_masks_fill_value():
@@ -209,3 +212,114 @@ def test_standard_mersi_cogs_have_declared_bands_and_safe_summary(tmp_path):
     with rasterio.open(result.quality_cog) as dataset:
         assert dataset.descriptions == ("quality_mask",)
     assert "C:\\" not in result.summary_path.read_text(encoding="utf-8")
+
+
+def test_execute_feature_stage_writes_requested_feature_bands_and_statistics_to_declared_artifacts(tmp_path):
+    standard = _standard_cog(tmp_path / "input" / "standard.tif")
+    output = tmp_path / "output"
+
+    response = execute_fy3h_stage({
+        "stageKey": "EXTRACT_MERSI_FEATURES",
+        "outputUri": "rs://output/task-features",
+        "parameterSnapshot": {"bands": [1], "features": {
+            "enabled": True, "metrics": ["statistics", "gradient", "local_variance"], "windowSize": 3,
+        }},
+    }, {"output": {"path": str(output)}, "inputs": [{"role": "standard", "path": str(standard)}]})
+
+    _assert_stage_artifacts(response, "rs://output/task-features", {
+        "MERSI_FEATURE_COG": "features/mersi.tif",
+        "MERSI_FEATURE_SUMMARY_JSON": "features/summary.json",
+    }, output)
+    with rasterio.open(output / "features" / "mersi.tif") as dataset:
+        assert dataset.descriptions == ("gradient:CH01_REFLECTANCE", "local_variance:CH01_REFLECTANCE")
+        assert dataset.crs.to_string() == "EPSG:4326"
+    summary = json.loads((output / "features" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["CH01_REFLECTANCE"]["mean"] == pytest.approx(8.5)
+    assert str(standard) not in json.dumps(summary)
+
+
+def test_execute_fusion_stage_maps_selected_rgb_bands_and_marks_display_product(tmp_path):
+    standard = _standard_cog(tmp_path / "input" / "standard.tif")
+    output = tmp_path / "output"
+
+    response = execute_fy3h_stage({
+        "stageKey": "FUSE_MERSI_BANDS",
+        "outputUri": "rs://output/task-fusion",
+        "parameterSnapshot": {"bands": [1, 2, 3], "fusion": {
+            "enabled": True, "red": 3, "green": 2, "blue": 1, "percentiles": [0, 100],
+        }},
+    }, {"output": {"path": str(output)}, "inputs": [{"role": "standard", "path": str(standard)}]})
+
+    _assert_stage_artifacts(response, "rs://output/task-fusion", {"MERSI_FUSION_COG": "fusion/mersi-rgb.tif"}, output)
+    assert response["artifacts"][0]["displayProduct"] is True
+    with rasterio.open(output / "fusion" / "mersi-rgb.tif") as dataset:
+        assert dataset.descriptions == ("red", "green", "blue")
+        assert dataset.crs.to_string() == "EPSG:4326"
+        assert dataset.transform == Affine(0.01, 0, 120, 0, -0.01, 31)
+
+
+@pytest.mark.parametrize("inputs", [
+    lambda standard: [{"role": "standard", "path": str(standard)}, {"role": "standard", "path": str(standard)}],
+    lambda standard: [{"role": "standard", "path": str(standard)}, {"role": "extra", "path": str(standard)}],
+])
+def test_execute_optional_stage_rejects_duplicate_or_extra_input_roles(tmp_path, inputs):
+    standard = _standard_cog(tmp_path / "input" / "standard.tif")
+
+    with pytest.raises(ValueError, match="requires exactly|must be unique"):
+        execute_fy3h_stage({
+            "stageKey": "FUSE_MERSI_BANDS",
+            "outputUri": "rs://output/task-fusion",
+            "parameterSnapshot": {"bands": [1, 2, 3], "fusion": {
+                "enabled": True, "red": 3, "green": 2, "blue": 1,
+            }},
+        }, {"output": {"path": str(tmp_path / "output")}, "inputs": inputs(standard)})
+
+
+def test_execute_saliency_stage_uses_declared_standard_or_feature_source_and_writes_matching_grids(tmp_path):
+    standard = _standard_cog(tmp_path / "input" / "standard.tif")
+    feature_output = tmp_path / "feature-output"
+    execute_fy3h_stage({
+        "stageKey": "EXTRACT_MERSI_FEATURES",
+        "outputUri": "rs://output/task-features",
+        "parameterSnapshot": {"bands": [1], "features": {"enabled": True, "metrics": ["gradient"]}},
+    }, {"output": {"path": str(feature_output)}, "inputs": [{"role": "standard", "path": str(standard)}]})
+
+    for source, role, path in [
+        ("CH01_REFLECTANCE", "standard", standard),
+        ("gradient:CH01_REFLECTANCE", "features", feature_output / "features" / "mersi.tif"),
+    ]:
+        output = tmp_path / role
+        response = execute_fy3h_stage({
+            "stageKey": "DETECT_MERSI_SALIENCY",
+            "outputUri": f"rs://output/task-saliency-{role}",
+            "parameterSnapshot": {"bands": [1], "features": {"enabled": True, "metrics": ["gradient"]}, "saliency": {
+                "enabled": True, "source": source, "windowSize": 3, "threshold": 0.5,
+            }},
+        }, {"output": {"path": str(output)}, "inputs": [{"role": role, "path": str(path)}]})
+
+        _assert_stage_artifacts(response, f"rs://output/task-saliency-{role}", {
+            "MERSI_SALIENCY_SCORE_COG": "saliency/score.tif",
+            "MERSI_SALIENCY_MASK_COG": "saliency/mask.tif",
+        }, output)
+        with rasterio.open(output / "saliency" / "score.tif") as score, rasterio.open(output / "saliency" / "mask.tif") as mask:
+            assert (score.crs, score.transform, score.height, score.width) == (mask.crs, mask.transform, mask.height, mask.width)
+
+
+def _standard_cog(path):
+    values = np.stack([np.arange(16, dtype=np.float32).reshape(4, 4) + channel for channel in range(1, 26)])
+    metadata = tuple(BandMetadata(f"CH{channel:02d}_{'REFLECTANCE' if channel <= 19 else 'BRIGHTNESS_TEMPERATURE'}")
+                     for channel in range(1, 26))
+    path.parent.mkdir(parents=True)
+    return write_cog(RasterData(values, "EPSG:4326", Affine(0.01, 0, 120, 0, -0.01, 31), np.nan, metadata), path).path
+
+
+def _assert_stage_artifacts(response, output_uri, expected, output):
+    assert response["status"] == "SUCCEEDED"
+    artifacts = {artifact["type"]: artifact for artifact in response["artifacts"]}
+    assert set(artifacts) == set(expected)
+    for kind, relative_path in expected.items():
+        artifact = artifacts[kind]
+        content = (output / relative_path).read_bytes()
+        assert artifact["uri"] == f"{output_uri}/{relative_path}"
+        assert artifact["sizeBytes"] == len(content)
+        assert artifact["checksum"] == "sha256:" + hashlib.sha256(content).hexdigest()

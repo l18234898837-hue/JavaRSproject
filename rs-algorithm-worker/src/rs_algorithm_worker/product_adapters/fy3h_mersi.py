@@ -154,11 +154,11 @@ def build_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any] | N
         ], snapshot),
     ]
     if parameters["features"]["enabled"]:
+        feature_outputs = [_output("MERSI_FEATURE_SUMMARY_JSON", "features/summary.json", "FINAL")]
+        if any(metric in {"gradient", "local_variance"} for metric in parameters["features"]["metrics"]):
+            feature_outputs.insert(0, _output("MERSI_FEATURE_COG", "features/mersi.tif", "FINAL"))
         stages.append(_stage("EXTRACT_MERSI_FEATURES", ["WRITE_MERSI_STANDARD_COG"],
-            [_input("standard", "UPSTREAM_ARTIFACT", "STANDARD_MERSI_COG")], [
-                _output("MERSI_FEATURE_COG", "features/mersi.tif", "FINAL"),
-                _output("MERSI_FEATURE_SUMMARY_JSON", "features/summary.json", "FINAL"),
-            ], snapshot))
+            [_input("standard", "UPSTREAM_ARTIFACT", "STANDARD_MERSI_COG")], feature_outputs, snapshot))
     if parameters["fusion"]["enabled"]:
         stages.append(_stage("FUSE_MERSI_BANDS", ["WRITE_MERSI_STANDARD_COG"],
             [_input("standard", "UPSTREAM_ARTIFACT", "STANDARD_MERSI_COG")], [
@@ -182,7 +182,8 @@ def _feature_source_names(parameters: dict[str, Any]) -> set[str]:
         f"CH{band:02d}_{'REFLECTANCE' if band <= 19 else 'BRIGHTNESS_TEMPERATURE'}"
         for band in parameters["bands"]
     }
-    return {f"{metric}:{variable}" for metric in parameters["features"]["metrics"] for variable in variables}
+    return {f"{metric}:{variable}" for metric in parameters["features"]["metrics"]
+            if metric in {"gradient", "local_variance"} for variable in variables}
 
 
 def _stage(key: str, dependencies: list[str], inputs: list[dict[str, Any]], outputs: list[dict[str, Any]], snapshot: str) -> dict[str, Any]:
