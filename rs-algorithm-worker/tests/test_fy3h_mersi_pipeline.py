@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -303,6 +305,67 @@ def test_execute_saliency_stage_uses_declared_standard_or_feature_source_and_wri
         }, output)
         with rasterio.open(output / "saliency" / "score.tif") as score, rasterio.open(output / "saliency" / "mask.tif") as mask:
             assert (score.crs, score.transform, score.height, score.width) == (mask.crs, mask.transform, mask.height, mask.width)
+
+
+@pytest.mark.real_sample
+def test_real_fy3h_2335_produces_standard_cogs_and_summary(tmp_path):
+    response = _run_real_fy3h_plan("2335", tmp_path)
+    artifacts = {item["type"]: item for item in response["artifacts"]}
+
+    assert {"STANDARD_MERSI_COG", "STANDARD_MERSI_QUALITY_COG", "STANDARD_MERSI_SUMMARY_JSON"} <= artifacts.keys()
+    assert all("FY3H_MERSI_GRAN" not in item["uri"] for item in artifacts.values())
+    with rasterio.open(tmp_path / "standard" / "mersi.tif") as dataset:
+        assert dataset.count == 25
+        assert dataset.crs.to_string() == "EPSG:4326"
+        assert dataset.descriptions[0] == "CH01_REFLECTANCE"
+        assert dataset.descriptions[-1] == "CH25_BRIGHTNESS_TEMPERATURE"
+        assert dataset.nodata is not None
+        assert dataset.block_shapes[0][0] > 0
+    with rasterio.open(tmp_path / "standard" / "quality.tif") as dataset:
+        assert dataset.dtypes == ("uint32",)
+    summary = json.loads((tmp_path / "standard" / "summary.json").read_text(encoding="utf-8"))
+    assert "C:\\" not in json.dumps(summary)
+    assert {"formulaVersion", "ruleVersion", "artifacts"} <= summary.keys()
+
+
+@pytest.mark.real_sample
+def test_real_fy3h_2350_keeps_product_and_reports_geolocation_quality(tmp_path):
+    _run_real_fy3h_plan("2350", tmp_path, through_quality=True)
+    summary = json.loads((tmp_path / "quality" / "summary.json").read_text(encoding="utf-8"))
+
+    assert summary["reasonCounts"]["GEOLOCATION_FAILURE"] > 0
+    assert summary["channelQuality"]["CH01"]["validPixelCount"] > 0
+
+
+def _run_real_fy3h_plan(time: str, output: Path, *, through_quality: bool = False):
+    root_value = os.getenv("MULTISOURCE_FY3H_MERSI_SAMPLE_ROOT")
+    if not root_value:
+        pytest.skip("MULTISOURCE_FY3H_MERSI_SAMPLE_ROOT is not configured")
+    root = Path(root_value)
+    observation = root / f"FY3H_MERSI_GRAN_L1_20260701_{time}_1000M_V0.HDF"
+    geo = root / f"FY3H_MERSI_GRAN_L1_20260701_{time}_GEO1K_V0.HDF"
+    if not observation.is_file() or not geo.is_file():
+        pytest.skip(f"FY-3H sample root lacks the {time} pair")
+    parameters = {"targetCrs": "EPSG:4326", "resolutionDegrees": 0.01, "bands": list(range(1, 26))}
+
+    _execute_real_stage("DECODE_MERSI_L1", parameters, output, {"OBSERVATION": observation, "GEO1K": geo})
+    _execute_real_stage("CALIBRATE_MERSI_L1", parameters, output, {"decoded": output / "decoded" / "mersi-l1.npz"})
+    quality = _execute_real_stage("APPLY_MERSI_QUALITY", parameters, output, {
+        "decoded": output / "decoded" / "mersi-l1.npz", "calibrated": output / "calibrated" / "mersi.npz",
+    })
+    if through_quality:
+        return quality
+    _execute_real_stage("GRID_MERSI_SWATH", parameters, output, {"quality": output / "quality" / "mersi.npz"})
+    return _execute_real_stage("WRITE_MERSI_STANDARD_COG", parameters, output, {
+        "grid": output / "grid" / "mersi.npz", "qualityGrid": output / "grid" / "quality-mask.npz",
+    })
+
+
+def _execute_real_stage(stage: str, parameters: dict, output: Path, inputs: dict[str, Path]):
+    return execute_fy3h_stage({"stageKey": stage, "outputUri": "rs://output/real-sample", "parameterSnapshot": parameters}, {
+        "output": {"path": str(output)},
+        "inputs": [{"role": role, "path": str(path)} for role, path in inputs.items()],
+    })
 
 
 def _standard_cog(path):
