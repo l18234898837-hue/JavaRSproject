@@ -52,7 +52,14 @@ def make_fy3h_pair(root: Path, *, time: str = "2335", orbit: int = 3948,
         geolocation = handle.create_group("Geolocation")
         for name in ("Latitude", "Longitude", "SolarZenith", "SolarAzimuth", "SensorZenith", "SensorAzimuth",
                      "Altitude", "LandSeaMask", "LandCover"):
-            geolocation.create_dataset(name, data=np.zeros((ROWS, COLUMNS), dtype=np.float32))
+            values = np.zeros((ROWS, COLUMNS), dtype=np.float32)
+            if name in {"SolarZenith", "SolarAzimuth", "SensorZenith", "SensorAzimuth"}:
+                values = values.astype(np.int16)
+            dataset = geolocation.create_dataset(name, data=values)
+            dataset.attrs["Slope"] = np.array([0.01 if values.dtype == np.int16 else 1.0], dtype=np.float32)
+            dataset.attrs["Intercept"] = np.array([0.0], dtype=np.float32)
+            dataset.attrs["FillValue"] = np.array([-32768 if values.dtype == np.int16 else -9999.9])
+            dataset.attrs["valid_range"] = np.array([0, 18000] if values.dtype == np.int16 else [-10000, 10000])
         geolocation.create_dataset("QA_GEO", data=np.zeros((FRAMES, 1), dtype=np.uint16))
         handle.create_group("Timedata").create_dataset("DayNightFlag", data=np.zeros((FRAMES, 1), dtype=np.uint8))
     return observation, geo
