@@ -1,4 +1,5 @@
 import h5py
+import numpy as np
 import pytest
 
 from fy3h_fixture import make_fy3h_pair
@@ -37,6 +38,44 @@ def test_fy3h_rejects_cross_orbit_pair(tmp_path):
         inspect_manifest(_manifest(observation, geo))
 
 
+@pytest.mark.parametrize(("mismatch", "value"), [
+    ("time", "23:40:00.575"),
+    ("filename_version", "V1"),
+    ("dimensions", (19, 16)),
+])
+def test_fy3h_rejects_mismatched_pair_metadata_or_grid(tmp_path, mismatch, value):
+    observation, geo = make_fy3h_pair(tmp_path)
+    if mismatch == "time":
+        with h5py.File(geo, "r+") as handle:
+            handle.attrs["Observing Beginning Time"] = value
+    elif mismatch == "filename_version":
+        renamed = geo.with_name(geo.name.replace("_V0.HDF", f"_{value}.HDF"))
+        geo.rename(renamed)
+        geo = renamed
+    else:
+        with h5py.File(geo, "r+") as handle:
+            del handle["Geolocation/Latitude"]
+            handle["Geolocation"].create_dataset("Latitude", data=np.zeros(value, dtype=np.float32))
+
+    with pytest.raises(ValueError, match="matching 1000M and GEO1K"):
+        inspect_manifest(_manifest(observation, geo))
+
+
+@pytest.mark.parametrize(("name", "value"), [
+    ("EarthSun Distance Ratio", np.array([], dtype=np.float64)),
+    ("Solar_Irradiance", np.full(19, np.nan, dtype=np.float32)),
+    ("Effect_Center_WaveLength", np.ones(24, dtype=np.float32)),
+    ("TBB_Trans_Coefficient", np.ones(11, dtype=np.float32)),
+])
+def test_fy3h_rejects_invalid_calibration_root_attributes(tmp_path, name, value):
+    observation, geo = make_fy3h_pair(tmp_path)
+    with h5py.File(observation, "r+") as handle:
+        handle.attrs[name] = value
+
+    with pytest.raises(ValueError, match="FY-3H MERSI evidence"):
+        inspect_manifest(_manifest(observation, geo))
+
+
 @pytest.mark.parametrize("name", ["not-a-granule.HDF", "not-a-granule.txt"])
 def test_fy3h_rejects_single_or_non_hdf_evidence(tmp_path, name):
     path = tmp_path / name
@@ -54,5 +93,7 @@ def test_fy3h_real_sample_pair_has_expected_roles_and_geolocation_shape(fy3h_mer
     candidate = candidates[0]
     assert candidate["profileKey"] == PROFILE
     assert [item["role"] for item in candidate["files"]] == ["OBSERVATION", "GEO1K"]
+    with h5py.File(candidate["files"][0]["path"], "r") as handle:
+        assert handle["QA/QA_Frame_Flag"].shape == (200,)
     with h5py.File(candidate["files"][1]["path"], "r") as handle:
         assert handle["Geolocation/Latitude"].shape == (2000, 2048)

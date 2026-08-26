@@ -29,6 +29,10 @@ def make_fy3h_pair(root: Path, *, time: str = "2335", orbit: int = 3948,
     }
     with h5py.File(observation, "w") as handle:
         _write_root_attributes(handle, attributes)
+        handle.attrs["EarthSun Distance Ratio"] = np.array([1.01659817], dtype=np.float64)
+        handle.attrs["Solar_Irradiance"] = np.ones(19, dtype=np.float32)
+        handle.attrs["Effect_Center_WaveLength"] = np.ones(25, dtype=np.float32)
+        handle.attrs["TBB_Trans_Coefficient"] = np.ones(12, dtype=np.float32)
         data = handle.create_group("Data")
         for name, channels in (("EV_250_Aggr.1KM_RefSB", 4),
                                ("EV_250_Aggr.1KM_Emissive", 2),

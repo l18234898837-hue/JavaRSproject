@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import h5py
+import numpy as np
 
 from .base import build_plan, input_paths
 
@@ -42,6 +43,12 @@ PAIR_ATTRIBUTES = (
     "Version Of Calibration Parameter",
     "Version Of Software",
 )
+CALIBRATION_ROOT_ATTRIBUTES = {
+    "EarthSun Distance Ratio": 1,
+    "Solar_Irradiance": 19,
+    "Effect_Center_WaveLength": 25,
+    "TBB_Trans_Coefficient": 12,
+}
 
 
 def inspect_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -99,6 +106,7 @@ def _read_observation(path: Path) -> tuple[dict[str, Any], tuple[int, int]]:
     try:
         with h5py.File(path, "r") as handle:
             metadata = _root_metadata(handle)
+            _validate_calibration_root_attributes(handle)
             _require_datasets(handle, OBSERVATION_DATASETS)
             shapes = [_spatial_shape(handle, dataset) for dataset in OBSERVATION_DATASETS[:4]]
     except OSError as error:
@@ -132,6 +140,16 @@ def _root_metadata(handle: h5py.File) -> dict[str, Any]:
 def _require_datasets(handle: h5py.File, paths: tuple[str, ...]) -> None:
     if any(path not in handle for path in paths):
         raise ValueError("FY-3H MERSI evidence is incomplete")
+
+
+def _validate_calibration_root_attributes(handle: h5py.File) -> None:
+    for name, expected_length in CALIBRATION_ROOT_ATTRIBUTES.items():
+        try:
+            values = np.asarray(handle.attrs[name], dtype=float)
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("FY-3H MERSI evidence has invalid calibration attributes") from error
+        if values.shape != (expected_length,) or not np.all(np.isfinite(values)):
+            raise ValueError("FY-3H MERSI evidence has invalid calibration attributes")
 
 
 def _spatial_shape(handle: h5py.File, path: str) -> tuple[int, int]:
