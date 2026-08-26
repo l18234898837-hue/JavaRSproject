@@ -34,6 +34,7 @@ GEO_DATASETS = (
     "Geolocation/QA_GEO",
     "Timedata/DayNightFlag",
 )
+GEO_NAVIGATION_DATASETS = GEO_DATASETS[:6]
 PAIR_ATTRIBUTES = (
     "Observing Beginning Date",
     "Observing Beginning Time",
@@ -121,10 +122,12 @@ def _read_geo(path: Path) -> tuple[dict[str, Any], tuple[int, int]]:
         with h5py.File(path, "r") as handle:
             metadata = _root_metadata(handle)
             _require_datasets(handle, GEO_DATASETS)
-            shape = _spatial_shape(handle, "Geolocation/Latitude")
+            shapes = [_spatial_shape(handle, dataset) for dataset in GEO_NAVIGATION_DATASETS]
     except OSError as error:
         raise ValueError("FY-3H MERSI evidence is unreadable") from error
-    return metadata, shape
+    if len(set(shapes)) != 1:
+        raise ValueError("matching 1000M and GEO1K files are required")
+    return metadata, shapes[0]
 
 
 def _root_metadata(handle: h5py.File) -> dict[str, Any]:

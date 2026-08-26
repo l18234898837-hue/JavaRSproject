@@ -61,6 +61,16 @@ def test_fy3h_rejects_mismatched_pair_metadata_or_grid(tmp_path, mismatch, value
         inspect_manifest(_manifest(observation, geo))
 
 
+def test_fy3h_rejects_geo_navigation_field_with_different_spatial_dimensions(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path)
+    with h5py.File(geo, "r+") as handle:
+        del handle["Geolocation/Longitude"]
+        handle["Geolocation"].create_dataset("Longitude", data=np.zeros((19, 16), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="matching 1000M and GEO1K"):
+        inspect_manifest(_manifest(observation, geo))
+
+
 @pytest.mark.parametrize(("name", "value"), [
     ("EarthSun Distance Ratio", np.array([], dtype=np.float64)),
     ("Solar_Irradiance", np.full(19, np.nan, dtype=np.float32)),
