@@ -178,7 +178,7 @@ def test_calibrate_mersi_applies_hdf_thermal_coefficients_by_scan_frame(tmp_path
 def test_quality_mask_preserves_reason_bits_and_expands_failed_frame_to_ten_rows():
     result = build_quality_mask(
         raw=np.array([[1], [65534]] + [[1]] * 18, dtype=np.uint16),
-        frame_flags=np.array([0, 1 << 25], dtype=np.uint64),
+        frame_flags=np.array([0, 1 << 25], dtype=np.int64),
         geo_flags=np.zeros((2, 1), dtype=np.uint8),
         rows_per_scan=10,
     )

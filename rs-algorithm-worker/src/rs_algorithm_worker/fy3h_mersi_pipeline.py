@@ -299,6 +299,9 @@ def build_quality_mask(raw: np.ndarray, frame_flags: np.ndarray, geo_flags: np.n
     geo = np.asarray(geo_flags)
     if flags.shape != (frames,) or geo.ndim < 1 or geo.shape[0] != frames:
         raise ValueError("FY-3H MERSI frame quality dimensions are invalid")
+    if not np.issubdtype(flags.dtype, np.integer) or np.any(flags < 0):
+        raise ValueError("FY-3H MERSI frame quality flags are invalid")
+    flags = flags.astype(np.uint64, copy=False)
     bits = np.zeros(values.shape, dtype=np.uint32)
     bits[values == 65535] |= QUALITY_MISSING
     bits[values == 65534] |= QUALITY_SATURATED
