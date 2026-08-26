@@ -170,6 +170,22 @@ def test_execute_hy2d_ssh_stage_uses_only_quality_track(tmp_path):
     assert (ssh_output / "ssh" / "track.npz").is_file()
 
 
+def test_registry_routes_hy2d_downstream_stage_by_profile_code(tmp_path):
+    nc = tmp_path / "sample.nc"
+    _write_nc(nc)
+    package = _archive(tmp_path, [("sample.nc", nc.read_bytes()), ("sample.meta.xml", b"<meta />")])
+    decoded = tmp_path / "decoded"
+    execute_hy2d_stage({"stageKey": "DECODE_ALTIMETER_TRACK", "outputUri": "rs://output/task-1", "parameterSnapshot": {}}, {
+        "inputs": [{"role": "MAIN", "path": str(package)}], "output": {"path": str(decoded)},
+    })
+    result = dispatch({"operation": "execute-stage", "payload": {
+        "profileCode": "HY-2D-ALTIMETER", "stageKey": "APPLY_TRACK_QUALITY", "outputUri": "rs://output/task-1", "parameterSnapshot": {},
+    }}, {"inputs": [{"role": "decoded", "path": str(decoded / "decoded" / "track.npz")}],
+        "output": {"path": str(tmp_path / "quality")}})
+
+    assert result["artifacts"][0]["type"] == "QUALITY_FILTERED_ALTIMETER_TRACK"
+
+
 def test_write_standard_track_output_writes_interoperable_track_artifacts(tmp_path):
     track = TrackData(
         time=np.array([1.0, 2.0, 3.0]),

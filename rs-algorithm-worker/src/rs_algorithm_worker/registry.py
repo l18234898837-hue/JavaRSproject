@@ -43,11 +43,14 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
             "dependsOnStageKeys": [],
         }]}
     if operation == "execute-stage":
+        payload = _payload(request)
+        if payload.get("profileCode") == "HY-2D-ALTIMETER":
+            return execute_hy2d_stage(payload, manifest)
         adapter = _adapter_for_manifest(manifest)
         if adapter is hy2d_altimeter:
-            return execute_hy2d_stage(_payload(request), manifest)
+            return execute_hy2d_stage(payload, manifest)
         if adapter is gf6_wfv_browse:
-            return _execute_gf_browse_stage(_payload(request), manifest)
+            return _execute_gf_browse_stage(payload, manifest)
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": []}
     raise ValueError(f"unsupported operation: {operation}")
 
