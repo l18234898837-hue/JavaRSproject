@@ -61,13 +61,31 @@ def test_fy3h_rejects_mismatched_pair_metadata_or_grid(tmp_path, mismatch, value
         inspect_manifest(_manifest(observation, geo))
 
 
-def test_fy3h_rejects_geo_navigation_field_with_different_spatial_dimensions(tmp_path):
+@pytest.mark.parametrize("field", ["Altitude", "LandSeaMask", "LandCover"])
+def test_fy3h_rejects_geo_navigation_field_with_different_spatial_dimensions(tmp_path, field):
     observation, geo = make_fy3h_pair(tmp_path)
     with h5py.File(geo, "r+") as handle:
-        del handle["Geolocation/Longitude"]
-        handle["Geolocation"].create_dataset("Longitude", data=np.zeros((19, 16), dtype=np.float32))
+        del handle[f"Geolocation/{field}"]
+        handle["Geolocation"].create_dataset(field, data=np.zeros((19, 16), dtype=np.float32))
 
     with pytest.raises(ValueError, match="matching 1000M and GEO1K"):
+        inspect_manifest(_manifest(observation, geo))
+
+
+@pytest.mark.parametrize(("path", "shape"), [
+    ("Data/EV_250_Aggr.1KM_RefSB", (3, 20, 16)),
+    ("Calibration/VIS_Cal_Coeff", (19, 2)),
+    ("Calibration/IR_Cal_Coeff", (6, 4, 1)),
+    ("QA/QA_Frame_Flag", (1,)),
+])
+def test_fy3h_rejects_invalid_observation_channel_calibration_or_frame_layout(tmp_path, path, shape):
+    observation, geo = make_fy3h_pair(tmp_path)
+    with h5py.File(observation, "r+") as handle:
+        del handle[path]
+        parent, name = path.rsplit("/", 1)
+        handle[parent].create_dataset(name, data=np.zeros(shape, dtype=np.float32))
+
+    with pytest.raises(ValueError, match="FY-3H MERSI evidence"):
         inspect_manifest(_manifest(observation, geo))
 
 

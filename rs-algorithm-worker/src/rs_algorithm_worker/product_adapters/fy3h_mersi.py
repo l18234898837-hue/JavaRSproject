@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from types import MappingProxyType
 from pathlib import Path
 from typing import Any
 
@@ -15,26 +16,37 @@ FILENAME = re.compile(
     r"^(?P<identity>FY3H_MERSI_.+)_(?P<kind>1000M|GEO1K)_(?P<version>[^_]+)\.HDF$",
     re.IGNORECASE,
 )
-OBSERVATION_DATASETS = (
-    "Data/EV_250_Aggr.1KM_RefSB",
-    "Data/EV_250_Aggr.1KM_Emissive",
-    "Data/EV_1KM_RefSB",
-    "Data/EV_1KM_Emissive",
+REFLECTIVE_SOURCES = MappingProxyType({
+    "Data/EV_250_Aggr.1KM_RefSB": (1, 2, 3, 4),
+    "Data/EV_1KM_RefSB": tuple(range(5, 20)),
+})
+EMISSIVE_SOURCES = MappingProxyType({
+    "Data/EV_1KM_Emissive": (20, 21, 22, 23),
+    "Data/EV_250_Aggr.1KM_Emissive": (24, 25),
+})
+GEO_FIELDS = MappingProxyType({
+    "latitude": "Geolocation/Latitude",
+    "longitude": "Geolocation/Longitude",
+    "solarZenith": "Geolocation/SolarZenith",
+    "solarAzimuth": "Geolocation/SolarAzimuth",
+    "sensorZenith": "Geolocation/SensorZenith",
+    "sensorAzimuth": "Geolocation/SensorAzimuth",
+    "altitude": "Geolocation/Altitude",
+    "landSeaMask": "Geolocation/LandSeaMask",
+    "landCover": "Geolocation/LandCover",
+    "qaGeo": "Geolocation/QA_GEO",
+    "dayNightFlag": "Timedata/DayNightFlag",
+})
+OBSERVATION_CHANNEL_SOURCES = MappingProxyType(
+    dict(REFLECTIVE_SOURCES) | dict(EMISSIVE_SOURCES)
+)
+OBSERVATION_DATASETS = tuple(OBSERVATION_CHANNEL_SOURCES) + (
     "Calibration/VIS_Cal_Coeff",
     "Calibration/IR_Cal_Coeff",
     "QA/QA_Frame_Flag",
 )
-GEO_DATASETS = (
-    "Geolocation/Latitude",
-    "Geolocation/Longitude",
-    "Geolocation/SolarZenith",
-    "Geolocation/SolarAzimuth",
-    "Geolocation/SensorZenith",
-    "Geolocation/SensorAzimuth",
-    "Geolocation/QA_GEO",
-    "Timedata/DayNightFlag",
-)
-GEO_NAVIGATION_DATASETS = GEO_DATASETS[:6]
+GEO_DATASETS = tuple(GEO_FIELDS.values())
+GEO_NAVIGATION_DATASETS = tuple(GEO_FIELDS.values())[:9]
 PAIR_ATTRIBUTES = (
     "Observing Beginning Date",
     "Observing Beginning Time",
@@ -109,7 +121,8 @@ def _read_observation(path: Path) -> tuple[dict[str, Any], tuple[int, int]]:
             metadata = _root_metadata(handle)
             _validate_calibration_root_attributes(handle)
             _require_datasets(handle, OBSERVATION_DATASETS)
-            shapes = [_spatial_shape(handle, dataset) for dataset in OBSERVATION_DATASETS[:4]]
+            shapes = [_spatial_shape(handle, dataset) for dataset in OBSERVATION_CHANNEL_SOURCES]
+            _validate_observation_layout(handle, shapes[0])
     except OSError as error:
         raise ValueError("FY-3H MERSI evidence is unreadable") from error
     if len(set(shapes)) != 1:
@@ -155,14 +168,34 @@ def _validate_calibration_root_attributes(handle: h5py.File) -> None:
             raise ValueError("FY-3H MERSI evidence has invalid calibration attributes")
 
 
+def _validate_observation_layout(handle: h5py.File, spatial_shape: tuple[int, int]) -> None:
+    for path, channels in OBSERVATION_CHANNEL_SOURCES.items():
+        if _dataset_shape(handle, path)[:1] != (len(channels),):
+            raise ValueError("FY-3H MERSI evidence has invalid observation layout")
+    rows = spatial_shape[0]
+    if rows % 10:
+        raise ValueError("FY-3H MERSI evidence has invalid observation layout")
+    frames = rows // 10
+    if _dataset_shape(handle, "Calibration/VIS_Cal_Coeff") != (19, 3):
+        raise ValueError("FY-3H MERSI evidence has invalid observation layout")
+    if _dataset_shape(handle, "Calibration/IR_Cal_Coeff") != (6, 4, frames):
+        raise ValueError("FY-3H MERSI evidence has invalid observation layout")
+    if _dataset_shape(handle, "QA/QA_Frame_Flag") != (frames,):
+        raise ValueError("FY-3H MERSI evidence has invalid observation layout")
+
+
 def _spatial_shape(handle: h5py.File, path: str) -> tuple[int, int]:
-    dataset = handle[path]
-    if not isinstance(dataset, h5py.Dataset):
-        raise ValueError("FY-3H MERSI evidence has invalid raster dimensions")
-    shape = dataset.shape
+    shape = _dataset_shape(handle, path)
     if len(shape) < 2:
         raise ValueError("FY-3H MERSI evidence has invalid raster dimensions")
     return tuple(shape[-2:])
+
+
+def _dataset_shape(handle: h5py.File, path: str) -> tuple[int, ...]:
+    dataset = handle[path]
+    if not isinstance(dataset, h5py.Dataset):
+        raise ValueError("FY-3H MERSI evidence has invalid raster dimensions")
+    return dataset.shape
 
 
 def _file_entry(role: str, item: dict[str, Any]) -> dict[str, Any]:

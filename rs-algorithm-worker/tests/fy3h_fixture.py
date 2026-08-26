@@ -50,7 +50,8 @@ def make_fy3h_pair(root: Path, *, time: str = "2335", orbit: int = 3948,
     with h5py.File(geo, "w") as handle:
         _write_root_attributes(handle, attributes)
         geolocation = handle.create_group("Geolocation")
-        for name in ("Latitude", "Longitude", "SolarZenith", "SolarAzimuth", "SensorZenith", "SensorAzimuth"):
+        for name in ("Latitude", "Longitude", "SolarZenith", "SolarAzimuth", "SensorZenith", "SensorAzimuth",
+                     "Altitude", "LandSeaMask", "LandCover"):
             geolocation.create_dataset(name, data=np.zeros((ROWS, COLUMNS), dtype=np.float32))
         geolocation.create_dataset("QA_GEO", data=np.zeros((FRAMES, 1), dtype=np.uint16))
         handle.create_group("Timedata").create_dataset("DayNightFlag", data=np.zeros((FRAMES, 1), dtype=np.uint8))
