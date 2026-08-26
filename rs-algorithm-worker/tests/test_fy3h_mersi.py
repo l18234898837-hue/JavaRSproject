@@ -1,19 +1,58 @@
+import h5py
 import pytest
 
+from fy3h_fixture import make_fy3h_pair
 from rs_algorithm_worker.product_adapters.fy3h_mersi import build_plan, inspect_manifest
 
 
+PROFILE = {"productCode": "FY-3H-MERSI", "profileVersion": "L1-1000M-GEO1K-v1"}
+
+
+def _manifest(*paths):
+    return {"inputs": [{"path": str(path), "role": "MAIN", "ordinal": ordinal}
+                       for ordinal, path in enumerate(paths)]}
+
+
+def test_fy3h_recognizes_one_matching_1000m_and_geo1k_pair(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path)
+
+    candidates = inspect_manifest(_manifest(geo, observation))
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["profileKey"] == PROFILE
+    assert [(item["role"], item["ordinal"], item["path"]) for item in candidate["files"]] == [
+        ("OBSERVATION", 1, str(observation)),
+        ("GEO1K", 0, str(geo)),
+    ]
+    assert build_plan(candidate)["stages"][0]["stageCode"] == "VALIDATE_SOURCE"
+
+
+def test_fy3h_rejects_cross_orbit_pair(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path, orbit=3948)
+    with h5py.File(geo, "r+") as handle:
+        handle.attrs["Orbit Number"] = [3949]
+
+    with pytest.raises(ValueError, match="matching 1000M and GEO1K"):
+        inspect_manifest(_manifest(observation, geo))
+
+
+@pytest.mark.parametrize("name", ["not-a-granule.HDF", "not-a-granule.txt"])
+def test_fy3h_rejects_single_or_non_hdf_evidence(tmp_path, name):
+    path = tmp_path / name
+    path.write_text("not HDF", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="matching 1000M and GEO1K|FY-3H MERSI evidence"):
+        inspect_manifest(_manifest(path))
+
+
 @pytest.mark.real_sample
-def test_fy3h_splits_five_granules(fy3h_manifest):
-    candidates = inspect_manifest(fy3h_manifest)
-    assert len(candidates) == 5
-    assert {item["dataShape"] for item in candidates} == {"SWATH_RASTER"}
-    assert {item["supportStatus"] for item in candidates} == {"SUPPORTED"}
-    assert build_plan(candidates[0])["stages"][0]["stageCode"] == "VALIDATE_SOURCE"
+def test_fy3h_real_sample_pair_has_expected_roles_and_geolocation_shape(fy3h_mersi_manifest):
+    candidates = inspect_manifest(fy3h_mersi_manifest)
 
-
-def test_fy3h_rejects_non_hdf_evidence(tmp_path):
-    bad = tmp_path / "not-a-granule.HDF"
-    bad.write_text("not HDF", encoding="utf-8")
-    with pytest.raises(ValueError, match="FY-3H MERSI evidence"):
-        inspect_manifest({"inputs": [{"path": str(bad), "role": "MAIN", "ordinal": 0}]})
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["profileKey"] == PROFILE
+    assert [item["role"] for item in candidate["files"]] == ["OBSERVATION", "GEO1K"]
+    with h5py.File(candidate["files"][1]["path"], "r") as handle:
+        assert handle["Geolocation/Latitude"].shape == (2000, 2048)
