@@ -52,6 +52,19 @@ class StageInputResolverTest {
     }
 
     @Test
+    void resolvesOnlyTheDeclaredFy3hObservationAndGeo1kInputs() {
+        ProcessingStage decode = new ProcessingStage("DECODE_MERSI_L1", "DECODE_MERSI_L1", List.of(), List.of(
+            new StageInput("observation", StageInput.Source.RAW_INPUT, "OBSERVATION", true),
+            new StageInput("geo", StageInput.Source.RAW_INPUT, "GEO1K", true)
+        ), List.of(output("DECODED_MERSI_L1")), "{}");
+        InputAsset observation = input("OBSERVATION", 0, "observation.HDF");
+        InputAsset geo = input("GEO1K", 1, "geo.HDF");
+
+        assertThat(resolver.resolve(task(List.of(decode), List.of(observation, geo, input("UNRELATED", 2, "extra.bin"))), decode,
+            List.of(stage(201L, "DECODE_MERSI_L1")), List.of())).containsExactly(observation, geo);
+    }
+
+    @Test
     void ignoresAnOptionalInputWhenNoMatchingAssetExists() {
         ProcessingStage read = new ProcessingStage("READ", "READ_SOURCE", List.of(), List.of(
             new StageInput("metadata", StageInput.Source.RAW_INPUT, "METADATA", false)

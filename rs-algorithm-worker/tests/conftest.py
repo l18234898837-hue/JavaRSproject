@@ -20,6 +20,24 @@ def fy3h_manifest():
 
 
 @pytest.fixture
+def fy3h_mersi_manifest():
+    root = _path_env("MULTISOURCE_FY3H_MERSI_SAMPLE_ROOT")
+    if root is None or not root.exists():
+        pytest.skip("MULTISOURCE_FY3H_MERSI_SAMPLE_ROOT is not configured")
+    observations = sorted(root.glob("*_1000M_*.HDF"))
+    for observation in observations:
+        geo = observation.with_name(observation.name.replace("_1000M_", "_GEO1K_"))
+        if geo.is_file():
+            return {"inputs": [
+                {"path": str(observation), "role": "MAIN", "ordinal": 0,
+                 "storageUri": f"file:///{observation.name}"},
+                {"path": str(geo), "role": "MAIN", "ordinal": 1,
+                 "storageUri": f"file:///{geo.name}"},
+            ]}
+    pytest.skip("MULTISOURCE_FY3H_MERSI_SAMPLE_ROOT lacks matching GEO1K")
+
+
+@pytest.fixture
 def hy1c_manifest():
     root = _path_env("MULTISOURCE_HY1C_SAMPLE_ROOT")
     if root is None or not root.exists():
