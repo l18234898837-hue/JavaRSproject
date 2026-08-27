@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -185,6 +186,10 @@ def _validate_geo(handle: h5py.File, role: str = "GEO_4000M") -> dict[str, Any]:
 
 def _root_metadata(handle: h5py.File) -> dict[str, Any]:
     attrs = handle.attrs
+    beginning = _iso_time(attrs, "Beginning")
+    ending = _iso_time(attrs, "Ending")
+    if beginning > ending:
+        raise ValueError("FY-4B AGRI observation period has an end before beginning")
     return {
         "identity": (
             _text(attrs.get("Satellite Name")),
@@ -192,8 +197,8 @@ def _root_metadata(handle: h5py.File) -> dict[str, Any]:
             _text(attrs.get("Dataset Name")),
             _text(attrs.get("OBIType")),
         ),
-        "observingBeginning": _iso_time(attrs, "Beginning"),
-        "observingEnding": _iso_time(attrs, "Ending"),
+        "observingBeginning": beginning,
+        "observingEnding": ending,
         "sourceDataQuality": _scalar(attrs.get("Data Quality")),
     }
 
@@ -201,9 +206,16 @@ def _root_metadata(handle: h5py.File) -> dict[str, Any]:
 def _iso_time(attrs: h5py.AttributeManager, suffix: str) -> str:
     date = _text(attrs.get(f"Observing {suffix} Date"))
     time = _text(attrs.get(f"Observing {suffix} Time"))
-    if not date or not time:
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or not re.fullmatch(
+        r"\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?", time
+    ):
         raise ValueError("FY-4B AGRI evidence is missing observation time")
-    return f"{date}T{time}"
+    value = f"{date}T{time}"
+    try:
+        datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("FY-4B AGRI evidence has an invalid observation time") from error
+    return value
 
 
 def _scalar(value: Any) -> Any:

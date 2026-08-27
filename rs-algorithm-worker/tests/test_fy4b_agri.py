@@ -1,4 +1,5 @@
 import pytest
+import h5py
 
 from fy4b_fixture import make_fy4b_package
 from rs_algorithm_worker.product_adapters.fy4b_agri import build_plan, inspect_manifest
@@ -37,6 +38,29 @@ def test_inspect_rejects_fy4b_package_with_a_missing_or_extra_role(tmp_path):
         ]})
     with pytest.raises(ValueError, match="complete five-file package"):
         inspect_manifest({"inputs": manifest["inputs"] + [manifest["inputs"][0]]})
+
+
+@pytest.mark.parametrize(("attribute", "value"), [
+    ("Observing Beginning Date", "2026-02-30"),
+    ("Observing Beginning Time", "25:00:00"),
+    ("Observing Beginning Time", "NaN"),
+])
+def test_inspect_rejects_invalid_observation_timestamp(tmp_path, attribute, value):
+    manifest = make_fy4b_package(tmp_path)
+    with h5py.File(manifest["inputs"][0]["path"], "r+") as handle:
+        handle.attrs[attribute] = value
+
+    with pytest.raises(ValueError, match="observation time"):
+        inspect_manifest(manifest)
+
+
+def test_inspect_rejects_observation_period_with_end_before_beginning(tmp_path):
+    manifest = make_fy4b_package(tmp_path)
+    with h5py.File(manifest["inputs"][0]["path"], "r+") as handle:
+        handle.attrs["Observing Beginning Time"] = "00:15:00"
+
+    with pytest.raises(ValueError, match="observation period"):
+        inspect_manifest(manifest)
 
 
 @pytest.mark.parametrize("missing_dataset", [
