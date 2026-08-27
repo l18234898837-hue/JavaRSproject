@@ -9,6 +9,7 @@ import h5py
 import numpy as np
 
 from .base import input_paths
+from ..fy4b_agri_profile import artifact_input, output, parse_fy4b_parameters, raw_input, snapshot, stage
 
 
 PROFILE_KEY = {"productCode": "FY-4B-AGRI", "profileVersion": "v1"}
@@ -233,12 +234,35 @@ def _text(value: Any) -> str:
     return str(value) if value is not None else ""
 
 
-def build_plan(product: dict[str, Any]) -> dict[str, Any]:
+def build_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     if product.get("profileKey") != PROFILE_KEY or product.get("dataShape") != "GEOSTATIONARY_RASTER":
         raise ValueError("FY-4B AGRI candidate is required")
     if product.get("supportStatus") != "SUPPORTED" or [item.get("role") for item in product.get("files", [])] != list(ROLE_ORDER):
         raise ValueError("complete FY-4B AGRI candidate is required")
-    return {"version": "plan-v1", "stages": [
-        {"stageKey": "VALIDATE_SOURCE", "stageCode": "VALIDATE_SOURCE", "dependsOnStageKeys": []},
-        {"stageKey": "EXTRACT_FEATURES", "stageCode": "EXTRACT_FEATURES", "dependsOnStageKeys": ["VALIDATE_SOURCE"]},
-    ]}
+    params = parse_fy4b_parameters(parameter_snapshot or {})
+    encoded = snapshot(params)
+    raw = [raw_input(role.lower(), role) for role in ROLE_ORDER]
+    native = []
+    gridded = []
+    standard = []
+    for role in CHANNELS_BY_ROLE:
+        resolution = role[3:]
+        native += [output(f"FY4B_NATIVE_{resolution}_RASTER", f"native/{resolution.lower()}.tif", "INTERMEDIATE"), output(f"FY4B_NATIVE_{resolution}_QUALITY", f"native/quality-{resolution.lower()}.tif", "INTERMEDIATE")]
+        gridded += [output(f"FY4B_GRIDDED_{resolution}_RASTER", f"grid/{resolution.lower()}.tif", "INTERMEDIATE"), output(f"FY4B_GRIDDED_{resolution}_QUALITY", f"grid/quality-{resolution.lower()}.tif", "INTERMEDIATE")]
+        standard += [output(f"FY4B_{'RED_500M' if resolution == '0500M' else 'VIS_NIR_1000M' if resolution == '1000M' else 'SPECTRAL_2000M' if resolution == '2000M' else 'MULTISPECTRAL_4000M'}_COG", f"standard/{resolution.lower()}.tif", "FINAL"), output(f"FY4B_{'RED_500M' if resolution == '0500M' else 'VIS_NIR_1000M' if resolution == '1000M' else 'SPECTRAL_2000M' if resolution == '2000M' else 'MULTISPECTRAL_4000M'}_QUALITY_COG", f"standard/quality-{resolution.lower()}.tif", "FINAL")]
+    stages = [
+        stage("VALIDATE_FY4B_PACKAGE", [], raw, [output("FY4B_INPUT_VALIDATION_JSON", "validation/package.json", "INTERMEDIATE")], encoded),
+        stage("BUILD_FY4B_NOMINAL_GRID", ["VALIDATE_FY4B_PACKAGE"], [artifact_input("validation", "FY4B_INPUT_VALIDATION_JSON")], [output("FY4B_NOMINAL_GRID_JSON", "navigation/nominal-grid.json", "INTERMEDIATE")], encoded),
+        stage("CALIBRATE_AND_GEOREFERENCE_FY4B", ["BUILD_FY4B_NOMINAL_GRID"], [artifact_input("nominalGrid", "FY4B_NOMINAL_GRID_JSON")] + raw, native + [output("FY4B_CALIBRATION_SUMMARY_JSON", "calibration/summary.json", "INTERMEDIATE")], encoded),
+        stage("REPROJECT_AND_CROP_FY4B", ["CALIBRATE_AND_GEOREFERENCE_FY4B"], [artifact_input(f"native{resolution}", f"FY4B_NATIVE_{resolution}_RASTER") for resolution in ("0500M", "1000M", "2000M", "4000M")], gridded, encoded),
+        stage("WRITE_FY4B_STANDARD_COG", ["REPROJECT_AND_CROP_FY4B"], [artifact_input(f"grid{resolution}", f"FY4B_GRIDDED_{resolution}_RASTER") for resolution in ("0500M", "1000M", "2000M", "4000M")], standard + [output("FY4B_STANDARD_SUMMARY_JSON", "standard/summary.json", "FINAL")], encoded),
+    ]
+    if params["features"]["enabled"]:
+        stages.append(stage("EXTRACT_FY4B_FEATURES", ["WRITE_FY4B_STANDARD_COG"], [artifact_input("standard", "FY4B_RED_500M_COG")], [output("FY4B_FEATURE_COG", "features/fy4b-features.tif", "FINAL"), output("FY4B_FEATURE_SUMMARY_JSON", "features/summary.json", "FINAL")], encoded))
+    if params["fusion"]["enabled"]:
+        stages.append(stage("FUSE_FY4B_BANDS", ["WRITE_FY4B_STANDARD_COG"], [artifact_input("standard1km", "FY4B_VIS_NIR_1000M_COG")], [output("FY4B_FALSE_COLOR_COG", "fusion/false-color.tif", "FINAL")], encoded))
+    if params["saliency"]["enabled"]:
+        source = params["saliency"]["source"]
+        feature = source in {"toa_nir_red_nd", "btd_c13_c14"}
+        stages.append(stage("DETECT_FY4B_SALIENCY", ["EXTRACT_FY4B_FEATURES" if feature else "WRITE_FY4B_STANDARD_COG"], [artifact_input("features" if feature else "standard", "FY4B_FEATURE_COG" if feature else "FY4B_RED_500M_COG")], [output("FY4B_SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"), output("FY4B_SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"), output("FY4B_SALIENCY_SUMMARY_JSON", "saliency/summary.json", "FINAL")], encoded))
+    return {"version": "plan-v2", "stages": stages}
