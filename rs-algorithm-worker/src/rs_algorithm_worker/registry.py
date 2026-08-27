@@ -8,10 +8,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .product_adapters import fy3h_mersi, fy4b_agri, gf6_wfv_browse, hy1c_czi, hy1c_czi_l2a, hy2d_altimeter
+from .product_adapters import fy3h_mersi, fy4b_agri, gf6_wfv_browse, gf6_wfv_l1a, hy1c_czi, hy1c_czi_l2a, hy2d_altimeter
 from .hy2d_pipeline import execute_hy2d_stage
 from .fy3h_mersi_pipeline import execute_fy3h_stage
 from .fy4b_agri_pipeline import execute_fy4b_stage
+from .gf6_wfv_pipeline import execute_gf6_stage
 
 
 LOGICAL_OUTPUT_URI = re.compile(r"rs://output/[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*/?")
@@ -45,6 +46,9 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
         if adapter is gf6_wfv_browse:
             candidate = _recognized_gf_candidate(manifest, payload.get("candidate", {}).get("packageId"))
             return adapter.build_plan(candidate, _parameter_snapshot(payload))
+        if adapter is gf6_wfv_l1a:
+            candidate = _recognized_gf6_l1a_candidate(manifest, payload.get("candidate", {}).get("packageId"))
+            return adapter.build_plan(candidate, _parameter_snapshot(payload))
         return {"version": "plan-v1", "stages": [{
             "stageKey": "VALIDATE_SOURCE",
             "stageCode": "VALIDATE_SOURCE",
@@ -63,6 +67,8 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
             return execute_hy2d_stage(payload, manifest)
         if adapter is gf6_wfv_browse:
             return _execute_gf_browse_stage(payload, manifest)
+        if adapter is gf6_wfv_l1a:
+            return _execute_gf6_l1a_stage(payload, manifest)
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": []}
     raise ValueError(f"unsupported operation: {operation}")
 
@@ -72,6 +78,8 @@ def _adapter_for_manifest(manifest):
     if {"BROWSE_IMAGE", "GEOREFERENCE", "METADATA"}.issubset(roles):
         return gf6_wfv_browse
     paths = [str(item.get("path", "")).lower() for item in manifest.get("inputs", [])]
+    if any(path.endswith((".tif", ".tiff")) for path in paths) and any(path.endswith(".til") for path in paths) and any(path.endswith(".rpb") for path in paths):
+        return gf6_wfv_l1a
     if any(path.endswith(".tar.gz") for path in paths):
         return hy2d_altimeter
     if any(path.endswith(".h5") for path in paths) and any(path.endswith(".xml") for path in paths):
@@ -134,6 +142,28 @@ def _recognized_gf_candidate(manifest: dict[str, Any], package_id: Any) -> dict[
         if candidate["packageId"] == package_id:
             return candidate
     raise ValueError("recognized GF-6 packageId is required")
+
+
+def _recognized_gf6_l1a_candidate(manifest: dict[str, Any], package_id: Any) -> dict[str, Any]:
+    if not isinstance(package_id, str) or not package_id:
+        raise ValueError("recognized GF-6 L1A packageId is required")
+    for candidate in gf6_wfv_l1a.inspect_manifest(manifest):
+        if candidate["packageId"] == package_id:
+            return candidate
+    raise ValueError("recognized GF-6 L1A packageId is required")
+
+
+def _execute_gf6_l1a_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    paths = [Path(item["path"]) for item in manifest.get("inputs", []) if isinstance(item, dict) and isinstance(item.get("path"), str)]
+    stage_key = payload.get("stageKey")
+    if not isinstance(stage_key, str):
+        raise ValueError("GF6 L1A stage key is required")
+    parameters = _parameter_snapshot(payload)
+    output = manifest.get("output") if isinstance(manifest.get("output"), dict) else {}
+    output_dir = output.get("path")
+    if not isinstance(output_dir, str):
+        raise ValueError("GF6 L1A output directory is required")
+    return execute_gf6_stage(stage_key, paths, parameters, Path(output_dir), _logical_output_uri(payload.get("outputUri")))
 
 
 def _recognized_hy2d_candidate(manifest: dict[str, Any], package_id: Any) -> dict[str, Any]:
