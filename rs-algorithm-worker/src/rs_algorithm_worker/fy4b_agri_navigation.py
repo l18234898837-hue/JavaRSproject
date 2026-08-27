@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 import math
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 from affine import Affine
@@ -34,19 +32,3 @@ def apparent_reflectance(rho: np.ndarray, *, earth_sun_distance_ratio: float, so
     with np.errstate(divide="ignore", invalid="ignore"):
         result = rho * earth_sun_distance_ratio ** 2 / np.cos(np.deg2rad(angle))
     return np.where((angle >= 0) & (angle < 90) & np.isfinite(result), result, np.nan).astype(np.float32)
-
-def evaluate_coast_controls(control_file: str | Path, inverse_project):
-    payload = json.loads(Path(control_file).read_text(encoding="utf-8"))
-    controls = payload.get("controls") if isinstance(payload, dict) else None
-    if payload.get("version") != "1" or not isinstance(controls, list) or len(controls) < 8: raise ValueError("at least eight coastline controls are required")
-    ids = [item.get("id") for item in controls]
-    if len(set(ids)) != len(ids) or any(not isinstance(item, dict) for item in controls): raise ValueError("coastline controls are invalid")
-    residuals = []
-    for item in controls:
-        vals = [item.get(k) for k in ("longitude", "latitude", "observedLine500m", "observedColumn500m")]
-        if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in vals) or vals[2] < 0 or vals[3] < 0: raise ValueError("coastline controls are invalid")
-        line, column = inverse_project(float(vals[0]), float(vals[1]))
-        residuals.append((float(line) - vals[2], float(column) - vals[3]))
-    errors = np.asarray(residuals, dtype=np.float64)
-    distances = np.hypot(errors[:, 0], errors[:, 1])
-    return {"count": len(residuals), "maxPixels": float(distances.max()), "rmsePixels": float(np.sqrt(np.mean(distances ** 2))), "controls": [{"id": item["id"], "lineResidualPixels": e[0], "columnResidualPixels": e[1]} for item, e in zip(controls, errors)]}

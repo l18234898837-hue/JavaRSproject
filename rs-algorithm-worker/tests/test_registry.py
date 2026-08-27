@@ -7,6 +7,7 @@ import pytest
 from rs_algorithm_worker.product_adapters.gf6_wfv_browse import inspect_manifest
 from rs_algorithm_worker.registry import dispatch
 from fy3h_fixture import make_fy3h_pair
+from fy4b_fixture import make_fy4b_package
 
 
 def _fy3h_manifest(*paths):
@@ -28,6 +29,27 @@ def test_registry_builds_fy3h_plan_v2_for_recognized_pair(tmp_path):
 
     assert response["version"] == "plan-v2"
     assert response["stages"][0]["stageKey"] == "VALIDATE_FY3H_PAIR"
+
+
+def test_registry_routes_only_recognized_fy4b_package_and_returns_logical_artifact(tmp_path):
+    manifest = make_fy4b_package(tmp_path)
+    manifest["output"] = {"path": str(tmp_path / "output")}
+    candidate = dispatch({"operation": "inspect"}, manifest)["candidates"][0]
+
+    plan = dispatch({"operation": "build-plan", "payload": {
+        "candidate": candidate,
+        "parameterSnapshot": {"schemaVersion": "1", "targetCrs": "EPSG:4326"},
+    }}, manifest)
+    response = dispatch({"operation": "execute-stage", "payload": {
+        "profileCode": "FY-4B-AGRI", "stageKey": "VALIDATE_FY4B_PACKAGE",
+        "outputUri": "rs://output/fy4b-validation", "parameterSnapshot": {"schemaVersion": "1", "targetCrs": "EPSG:4326"},
+    }}, manifest)
+
+    assert plan["stages"][0]["stageKey"] == "VALIDATE_FY4B_PACKAGE"
+    artifact = response["artifacts"][0]
+    assert artifact["uri"] == "rs://output/fy4b-validation/validation/package.json"
+    assert artifact["checksum"].startswith("sha256:")
+    assert str(tmp_path) not in json.dumps(response)
 
 
 @pytest.mark.real_sample

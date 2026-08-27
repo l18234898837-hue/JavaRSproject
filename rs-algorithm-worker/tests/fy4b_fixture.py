@@ -41,7 +41,7 @@ def make_fy4b_package(
     return {"inputs": paths}
 
 
-def make_fy4b_channel_fixture(root: Path, *, channel: int = 2) -> Path:
+def make_fy4b_channel_fixture(root: Path, *, channel: int = 2, thermal: bool = False) -> Path:
     """Create a small channel fixture for non-adapter windowed-read tests.
 
     This intentionally has a 3 x 3 grid and must never be passed to
@@ -55,11 +55,22 @@ def make_fy4b_channel_fixture(root: Path, *, channel: int = 2) -> Path:
             f"NOMChannel{channel:02d}", data=np.arange(9, dtype=np.uint16).reshape(3, 3), chunks=(3, 3),
         )
         dataset.attrs["FillValue"] = np.uint16(65535)
-        dataset.attrs["valid_range"] = np.array([0, 4095], dtype=np.uint16)
+        dataset.attrs["valid_range"] = np.array([0, 7], dtype=np.uint16)
+        dataset.attrs["Slope"] = np.float32(0.5)
+        dataset.attrs["Intercept"] = np.float32(1.0)
         calibration = handle.create_group("Calibration")
-        calibration.create_dataset(f"CALChannel{channel:02d}", data=np.arange(4096, dtype=np.float32))
-        calibration.attrs["CALIBRATION_COEF(SCALE+OFFSET)"] = np.array([1.0, 0.0], dtype=np.float32)
+        calibration.create_dataset(f"CALChannel{channel:02d}", data=np.arange(8, dtype=np.float32) * 0.1)
+        calibration.attrs["CALIBRATION_COEF(SCALE+OFFSET)"] = np.array([0.5, 1.0], dtype=np.float32)
         calibration.attrs["ESUN"] = np.array([1000.0], dtype=np.float32)
+        qa = handle.create_group("QA")
+        qa.create_dataset("CalQualityFlag", data=np.zeros((15,), dtype=np.uint8))
+        qa.create_dataset("NavQualityFlag", data=np.zeros((15,), dtype=np.uint8))
+        navigation = handle.create_group("Navigation")
+        navigation.create_dataset("NOMSunZenith", data=np.array([[30, 95, 30], [30, 30, 30], [30, 30, 30]], dtype=np.float32))
+        handle.attrs["Earth/Sun Distance Ratio"] = np.float32(1.0)
+        if thermal:
+            dataset.attrs["Slope"] = np.float32(2.0)
+            dataset.attrs["Intercept"] = np.float32(10.0)
     return path
 
 

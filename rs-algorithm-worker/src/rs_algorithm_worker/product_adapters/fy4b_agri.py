@@ -254,15 +254,20 @@ def build_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | Non
         stage("VALIDATE_FY4B_PACKAGE", [], raw, [output("FY4B_INPUT_VALIDATION_JSON", "validation/package.json", "INTERMEDIATE")], encoded),
         stage("BUILD_FY4B_NOMINAL_GRID", ["VALIDATE_FY4B_PACKAGE"], [artifact_input("validation", "FY4B_INPUT_VALIDATION_JSON")], [output("FY4B_NOMINAL_GRID_JSON", "navigation/nominal-grid.json", "INTERMEDIATE")], encoded),
         stage("CALIBRATE_AND_GEOREFERENCE_FY4B", ["BUILD_FY4B_NOMINAL_GRID"], [artifact_input("nominalGrid", "FY4B_NOMINAL_GRID_JSON")] + raw, native + [output("FY4B_CALIBRATION_SUMMARY_JSON", "calibration/summary.json", "INTERMEDIATE")], encoded),
-        stage("REPROJECT_AND_CROP_FY4B", ["CALIBRATE_AND_GEOREFERENCE_FY4B"], [artifact_input(f"native{resolution}", f"FY4B_NATIVE_{resolution}_RASTER") for resolution in ("0500M", "1000M", "2000M", "4000M")], gridded, encoded),
-        stage("WRITE_FY4B_STANDARD_COG", ["REPROJECT_AND_CROP_FY4B"], [artifact_input(f"grid{resolution}", f"FY4B_GRIDDED_{resolution}_RASTER") for resolution in ("0500M", "1000M", "2000M", "4000M")], standard + [output("FY4B_STANDARD_SUMMARY_JSON", "standard/summary.json", "FINAL")], encoded),
+        stage("REPROJECT_AND_CROP_FY4B", ["CALIBRATE_AND_GEOREFERENCE_FY4B"], [artifact_input(f"native{resolution}", f"FY4B_NATIVE_{resolution}_{kind}") for resolution in ("0500M", "1000M", "2000M", "4000M") for kind in ("RASTER", "QUALITY")], gridded, encoded),
+        stage("WRITE_FY4B_STANDARD_COG", ["REPROJECT_AND_CROP_FY4B"], [artifact_input(f"grid{resolution}", f"FY4B_GRIDDED_{resolution}_{kind}") for resolution in ("0500M", "1000M", "2000M", "4000M") for kind in ("RASTER", "QUALITY")], standard + [output("FY4B_STANDARD_SUMMARY_JSON", "standard/summary.json", "FINAL")], encoded),
     ]
     if params["features"]["enabled"]:
-        stages.append(stage("EXTRACT_FY4B_FEATURES", ["WRITE_FY4B_STANDARD_COG"], [artifact_input("standard", "FY4B_RED_500M_COG")], [output("FY4B_FEATURE_COG", "features/fy4b-features.tif", "FINAL"), output("FY4B_FEATURE_SUMMARY_JSON", "features/summary.json", "FINAL")], encoded))
+        stages.append(stage("EXTRACT_FY4B_FEATURES", ["WRITE_FY4B_STANDARD_COG"], [artifact_input("standard500m", "FY4B_RED_500M_COG"), artifact_input("standard1km", "FY4B_VIS_NIR_1000M_COG"), artifact_input("standard4km", "FY4B_MULTISPECTRAL_4000M_COG")], [output("FY4B_FEATURE_COG", "features/fy4b-features.tif", "FINAL"), output("FY4B_FEATURE_SUMMARY_JSON", "features/summary.json", "FINAL")], encoded))
     if params["fusion"]["enabled"]:
         stages.append(stage("FUSE_FY4B_BANDS", ["WRITE_FY4B_STANDARD_COG"], [artifact_input("standard1km", "FY4B_VIS_NIR_1000M_COG")], [output("FY4B_FALSE_COLOR_COG", "fusion/false-color.tif", "FINAL")], encoded))
     if params["saliency"]["enabled"]:
         source = params["saliency"]["source"]
         feature = source in {"toa_nir_red_nd", "btd_c13_c14"}
-        stages.append(stage("DETECT_FY4B_SALIENCY", ["EXTRACT_FY4B_FEATURES" if feature else "WRITE_FY4B_STANDARD_COG"], [artifact_input("features" if feature else "standard", "FY4B_FEATURE_COG" if feature else "FY4B_RED_500M_COG")], [output("FY4B_SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"), output("FY4B_SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"), output("FY4B_SALIENCY_SUMMARY_JSON", "saliency/summary.json", "FINAL")], encoded))
+        if feature:
+            saliency_input = artifact_input("features", "FY4B_FEATURE_COG")
+        else:
+            source_type = "FY4B_VIS_NIR_1000M_COG" if source.startswith("C03_") else "FY4B_MULTISPECTRAL_4000M_COG" if source.startswith("C13_") else "FY4B_RED_500M_COG"
+            saliency_input = artifact_input("standard", source_type)
+        stages.append(stage("DETECT_FY4B_SALIENCY", ["EXTRACT_FY4B_FEATURES" if feature else "WRITE_FY4B_STANDARD_COG"], [saliency_input], [output("FY4B_SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"), output("FY4B_SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"), output("FY4B_SALIENCY_SUMMARY_JSON", "saliency/summary.json", "FINAL")], encoded))
     return {"version": "plan-v2", "stages": stages}

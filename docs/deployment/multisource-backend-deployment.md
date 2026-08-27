@@ -1008,10 +1008,3 @@ ORDER BY installed_rank;
 每次 Worker 操作都会在调用前生成新的文件授权。预检、任务建计划和阶段执行不会复用其他操作的授权，也不会把 Worker grant 持久化到预检会话中。
 
 当 Worker 明确返回 `INVALID_ASSET_MANIFEST` 且消息为 `manifest is expired` 时，当前操作会刷新授权并自动重试一次。其他 Worker 错误不会自动重试；第二次尝试仍失败时，接口只向用户返回稳定的业务提示，详细错误和 `requestId` 保留在后端日志中。前端主流程只需点击一次“开始处理”，系统会自动完成预检、建任务和启动。
-FY-4B AGRI 真实样例验收可通过以下测试变量启用：
-
-- `MULTISOURCE_FY4B_SAMPLE_ROOT`：包含完整五文件观测包的只读目录。
-- `MULTISOURCE_FY4B_SAMPLE_PACKAGE_ID`：目录包含多个时次时的精确包 ID。
-- `MULTISOURCE_FY4B_COAST_CONTROL_FILE`：独立人工海岸线控制点 JSON；仅用于测试验收，不参与生产任务。
-
-验收阈值为控制点最大残差不超过 2.0 个 500M 像素、RMSE 不超过 1.0 个像素，属于本项目工程标准，不代表卫星官方定位精度。未配置变量时真实样例测试应明确跳过，不能将 skip 视为通过。

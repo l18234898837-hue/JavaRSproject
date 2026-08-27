@@ -10,7 +10,7 @@ def test_fy4b_emits_geostationary_candidate(fy4b_manifest):
     candidates = inspect_manifest(fy4b_manifest)
     assert len(candidates) == 1
     assert candidates[0]["dataShape"] == "GEOSTATIONARY_RASTER"
-    assert build_plan(candidates[0])["stages"][0]["stageCode"] == "VALIDATE_SOURCE"
+    assert build_plan(candidates[0])["stages"][0]["stageCode"] == "VALIDATE_FY4B_PACKAGE"
 
 
 def test_inspect_requires_the_complete_ordered_fy4b_package(tmp_path):

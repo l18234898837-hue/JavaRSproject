@@ -5,6 +5,12 @@ from pathlib import Path
 import pytest
 
 
+# Rasterio must use the compatible PROJ database bundled with this test venv.
+_PROJ_DATA = Path(__file__).parents[1] / ".venv" / "Lib" / "site-packages" / "rasterio" / "proj_data"
+if _PROJ_DATA.is_dir():
+    os.environ["PROJ_LIB"] = str(_PROJ_DATA)
+
+
 FY4B_FILENAME = re.compile(
     r"^FY4B-_AGRI--_N_DISK_(?P<subsat>[^_]+)_L1-_(?P<kind>FDI|GEO)-_MULT_NOM_"
     r"(?P<start>\d{14})_(?P<end>\d{14})_(?P<resolution>0500M|500M|1000M|2000M|4000M)_"
