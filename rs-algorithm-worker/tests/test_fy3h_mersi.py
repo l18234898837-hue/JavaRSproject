@@ -54,6 +54,10 @@ def test_fy3h_plan_declares_the_fixed_pair_processing_contract(tmp_path):
     assert {output["artifactType"] for output in stages["WRITE_MERSI_STANDARD_COG"]["outputs"]} == {
         "STANDARD_MERSI_COG", "STANDARD_MERSI_QUALITY_COG", "STANDARD_MERSI_SUMMARY_JSON",
     }
+    assert stages["WRITE_MERSI_STANDARD_COG"]["inputs"] == [
+        {"key": "grid", "source": "UPSTREAM_ARTIFACT", "artifactType": "GRIDDED_MERSI_RASTER", "required": True},
+        {"key": "qualityGrid", "source": "UPSTREAM_ARTIFACT", "artifactType": "GRIDDED_MERSI_QUALITY_MASK", "required": True},
+    ]
     snapshots = {stage["parameterSnapshot"] for stage in stages.values()}
     assert len(snapshots) == 1
     snapshot = snapshots.pop()

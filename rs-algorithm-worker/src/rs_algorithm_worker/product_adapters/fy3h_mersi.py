@@ -145,8 +145,8 @@ def build_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any] | N
                    _output("GRIDDED_MERSI_QUALITY_MASK", "grid/quality-mask.npz", "INTERMEDIATE"),
                ], snapshot),
         _stage("WRITE_MERSI_STANDARD_COG", ["GRID_MERSI_SWATH"], [
-            _input("gridded", "UPSTREAM_ARTIFACT", "GRIDDED_MERSI_RASTER"),
-            _input("qualityMask", "UPSTREAM_ARTIFACT", "GRIDDED_MERSI_QUALITY_MASK"),
+            _input("grid", "UPSTREAM_ARTIFACT", "GRIDDED_MERSI_RASTER"),
+            _input("qualityGrid", "UPSTREAM_ARTIFACT", "GRIDDED_MERSI_QUALITY_MASK"),
         ], [
             _output("STANDARD_MERSI_COG", "standard/mersi.tif", "FINAL"),
             _output("STANDARD_MERSI_QUALITY_COG", "standard/quality.tif", "FINAL"),
