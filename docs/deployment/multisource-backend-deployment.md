@@ -955,6 +955,7 @@ Worker 环境正确
 输入和输出目录权限正确
 只有这些条件全部满足后，才能认定后端部署完成。
 ```
+
 ## Flyway 数据库迁移
 
 后端现在使用 PostgreSQL + Flyway 管理增量迁移。Flyway 迁移源码位于 `script/sql/migrations/`，构建时会复制到 `htht-admin` 的 `classpath:db/migration`。
@@ -971,6 +972,7 @@ java -jar htht-admin\target\htht-admin.jar `
   --spring.flyway.baseline-on-migrate=true `
   --spring.flyway.baseline-version=0
 ```
+
 4. 启动日志显示迁移完成后，检查：
 
 ```sql
