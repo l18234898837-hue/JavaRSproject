@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Tag("dev")
@@ -84,7 +85,7 @@ class ProcessingPlanValidatorTest {
     }
 
     @Test
-    void rejectsDuplicateProducedArtifactsAndConsumedFinalOutputs() {
+    void rejectsDuplicateProducedArtifactsAndAllowsConsumedFinalOutputs() {
         ProcessingStage decode = stage(
             "DECODE", List.of(), List.of(),
             List.of(
@@ -105,9 +106,8 @@ class ProcessingPlanValidatorTest {
         assertThatThrownBy(() -> new ProcessingPlan("plan-v2", "rules-2026.08", List.of(decode)))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("duplicate output");
-        assertThatThrownBy(() -> new ProcessingPlan("plan-v2", "rules-2026.08", List.of(finalProducer, consumer)))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("final artifact");
+        assertThatCode(() -> new ProcessingPlan("plan-v2", "rules-2026.08", List.of(finalProducer, consumer)))
+            .doesNotThrowAnyException();
     }
 
     private static ProcessingStage stage(

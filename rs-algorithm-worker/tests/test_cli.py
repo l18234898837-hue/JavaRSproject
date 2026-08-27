@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from PIL import Image
 
 from fy3h_fixture import make_fy3h_pair
+from fy4b_fixture import make_fy4b_package
 
 
 def test_cli_writes_response_atomically(tmp_path):
@@ -68,6 +69,29 @@ def test_cli_runs_fy3h_inspect_build_plan_and_declared_validation_stage(tmp_path
     assert artifact["type"] == "FY3H_INPUT_VALIDATION_JSON"
     assert artifact["uri"] == "rs://output/fy3h-validation/validation/pair.json"
     assert str(tmp_path) not in json.dumps(validated)
+
+
+def test_cli_runs_fy4b_inspect_build_plan_and_declared_validation_stage(tmp_path):
+    package = make_fy4b_package(tmp_path)
+    inputs = [
+        {"storageUri": f"rs://input/fy4b/{index}", "role": item["role"], "ordinal": item["ordinal"],
+         "path": item["path"], "checksum": f"sha256:{index}"}
+        for index, item in enumerate(package["inputs"])
+    ]
+    inspect = _invoke_cli(tmp_path, "inspect", {"inputs": [{"storageUriSnapshot": {"value": item["storageUri"]}} for item in inputs]}, inputs)
+    candidate = inspect["payload"]["candidates"][0]
+    assert candidate["profileKey"]["productCode"] == "FY-4B-AGRI"
+    plan = _invoke_cli(tmp_path, "build-plan", {"candidate": candidate, "parameterSnapshot": {"schemaVersion": "1", "targetCrs": "EPSG:4326"}}, inputs)
+    assert plan["payload"]["stages"][0]["stageKey"] == "VALIDATE_FY4B_PACKAGE"
+    response = _invoke_cli(tmp_path, "execute-stage", {
+        "profileCode": "FY-4B-AGRI", "stageKey": "VALIDATE_FY4B_PACKAGE", "outputUri": "rs://output/fy4b-validation",
+        "parameterSnapshot": {"schemaVersion": "1", "targetCrs": "EPSG:4326"},
+        "inputs": [{"storageUriSnapshot": {"value": item["storageUri"]}} for item in inputs],
+    }, inputs)
+    artifact = response["payload"]["artifacts"][0]
+    assert artifact["type"] == "FY4B_INPUT_VALIDATION_JSON"
+    assert artifact["uri"] == "rs://output/fy4b-validation/validation/package.json"
+    assert str(tmp_path) not in json.dumps(response)
 
 
 def _invoke_cli(tmp_path, operation, payload, inputs):
