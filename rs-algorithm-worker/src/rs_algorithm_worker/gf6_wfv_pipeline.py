@@ -11,6 +11,7 @@ import rasterio
 from rasterio.transform import from_bounds
 
 from .models_gf6 import Gf6ProductEvidence
+from .gf6_processing import calibrate_gf6, detect_gf6_saliency, extract_gf6_features, fuse_gf6_bands
 from .operators.gf6_mosaic import iter_gf6_mosaic_windows, read_gf6_window
 from .operators.gf6_rpc import build_nominal_rpc_grid
 from .product_adapters.gf6_wfv_l1a import inspect_paths
@@ -68,9 +69,9 @@ def _write_streaming_raster(evidence: Gf6ProductEvidence, path: Path, *, calibra
         for window in iter_gf6_mosaic_windows(evidence, (256, 256)):
             values = read_gf6_window(evidence, window)
             if calibrated:
-                values = values.astype(np.float32)
-                for index, band in enumerate(evidence.bands):
-                    values[index] = values[index] * np.float32(band.gain) + np.float32(band.offset)
+                values = calibrate_gf6(values, gains=[band.gain for band in evidence.bands],
+                                       offsets=[band.offset for band in evidence.bands],
+                                       fill_value=evidence.calibration.fill_value)
                 values[~np.isfinite(values)] = nodata
             dataset.write(values, window=rasterio.windows.Window(window.col_off, window.row_off, window.width, window.height))
         for index, band in enumerate(evidence.bands, start=1):
@@ -88,12 +89,8 @@ def _write_fusion(evidence: Gf6ProductEvidence, path: Path, parameters: dict[str
         with rasterio.open(path, "w", **profile) as dst:
             for window in (rasterio.windows.Window(w.col_off, w.row_off, w.width, w.height) for w in iter_gf6_mosaic_windows(evidence, (256, 256))):
                 raw = src.read(selection, window=window).astype(np.float32)
-                out = np.zeros(raw.shape, dtype=np.uint8)
-                for i in range(3):
-                    finite = np.isfinite(raw[i])
-                    if finite.any():
-                        low, high = np.percentile(raw[i][finite], [2, 98])
-                        out[i] = np.clip((raw[i] - low) * 255 / max(high - low, 1e-6), 0, 255).astype(np.uint8)
+                raw[raw == src.nodata] = np.nan
+                out = fuse_gf6_bands(raw, rgb=(0, 1, 2))
                 dst.write(out, window=window)
     source.unlink(missing_ok=True)
 
@@ -102,12 +99,16 @@ def _write_features(evidence: Gf6ProductEvidence, path: Path, parameters: dict[s
     source = path.with_name(".features-source.tif")
     _write_streaming_raster(evidence, source, calibrated=True, parameters=parameters)
     with rasterio.open(source) as src:
-        profile = src.profile.copy(); profile.update(count=1, dtype="float32", nodata=-9999.0)
+        profile = src.profile.copy(); profile.update(count=2, dtype="float32", nodata=-9999.0)
         with rasterio.open(path, "w", **profile) as dst:
             for window in (rasterio.windows.Window(w.col_off, w.row_off, w.width, w.height) for w in iter_gf6_mosaic_windows(evidence, (256, 256))):
-                values = src.read(1, window=window).astype(np.float32)
+                values = src.read([1, 2], window=window).astype(np.float32)
                 values[values == src.nodata] = np.nan
-                dst.write(np.nan_to_num(values, nan=-9999.0), 1, window=window)
+                features = extract_gf6_features(values, metrics=("gradient", "local_variance"))
+                dst.write(np.nan_to_num(features["gradient"][0], nan=-9999.0), 1, window=window)
+                dst.write(np.nan_to_num(features["local_variance"][0], nan=-9999.0), 2, window=window)
+            dst.set_band_description(1, "B1_gradient")
+            dst.set_band_description(2, "B1_local_variance")
     source.unlink(missing_ok=True)
 
 
@@ -119,12 +120,10 @@ def _write_saliency(evidence: Gf6ProductEvidence, path: Path, parameters: dict[s
         with rasterio.open(path, "w", **profile) as dst:
             for window in (rasterio.windows.Window(w.col_off, w.row_off, w.width, w.height) for w in iter_gf6_mosaic_windows(evidence, (256, 256))):
                 values = src.read(1, window=window).astype(np.float32)
-                finite = np.isfinite(values) & (values != src.nodata)
-                score = np.zeros(values.shape, dtype=np.float32)
-                if finite.any():
-                    low, high = np.percentile(values[finite], [2, 98])
-                    score[finite] = np.clip((values[finite] - low) / max(high - low, 1e-6), 0, 1)
-                dst.write(np.where(finite, score, -9999.0), 1, window=window)
+                values[values == src.nodata] = np.nan
+                score, _ = detect_gf6_saliency(values, window_size=int(parameters.get("saliency", {}).get("windowSize", 9)),
+                                                threshold=float(parameters.get("saliency", {}).get("threshold", 0.95)))
+                dst.write(np.where(np.isfinite(values), score, -9999.0), 1, window=window)
     source.unlink(missing_ok=True)
 
 
