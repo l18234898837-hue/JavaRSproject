@@ -56,9 +56,6 @@ final class ProcessingPlanValidator {
                     .filter(candidate -> candidate.artifactType().equals(input.artifactType()))
                     .findFirst()
                     .orElseThrow();
-                if (output.retention() == StageOutput.Retention.FINAL) {
-                    throw new IllegalArgumentException("Processing plan final artifact cannot be consumed downstream.");
-                }
             }
         }
         Set<String> outputTypes = new HashSet<>();
