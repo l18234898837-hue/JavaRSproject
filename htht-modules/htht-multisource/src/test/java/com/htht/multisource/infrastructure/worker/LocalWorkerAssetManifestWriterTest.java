@@ -35,8 +35,19 @@ class LocalWorkerAssetManifestWriterTest {
     @Test
     void writesManifestOnlyForAuthorizedFilesAndCreatesInvocationOutput() throws Exception {
         Path assetRoot = Files.createDirectory(tempRoot.resolve("assets"));
-        Path image = Files.writeString(assetRoot.resolve("image.jpg"), "image");
-        LocalWorkerAssetManifestWriter writer = writer(assetRoot, Map.of("rs://input/image.jpg", image));
+        Path image = Files.writeString(assetRoot.resolve("4f149f87-e9c2-4d0a-83d1-49319cd48f6d.jpg"), "image");
+        LocalWorkerAssetResolver resolver = new LocalWorkerAssetResolver() {
+            @Override
+            public Path resolve(String grantReference, StorageUri storageUri) {
+                return image;
+            }
+
+            @Override
+            public String originalFileName(String grantReference, StorageUri storageUri, Path resolvedPath) {
+                return "GF6_WFV_SAMPLE-1.tif";
+            }
+        };
+        LocalWorkerAssetManifestWriter writer = writer(assetRoot, resolver);
 
         Path manifestFile = writer.write("inspect-01", grant(), List.of(asset("BROWSE_IMAGE", 0, "rs://input/image.jpg")));
 
@@ -46,6 +57,32 @@ class LocalWorkerAssetManifestWriterTest {
         JsonNode manifest = new ObjectMapper().readTree(Files.readString(manifestFile));
         assertThat(manifest.path("inputs").get(0).path("storageUri").asText()).isEqualTo("rs://input/image.jpg");
         assertThat(manifest.path("inputs").get(0).path("path").asText()).isEqualTo(image.toRealPath().toString());
+        assertThat(manifest.path("inputs").get(0).path("originalFileName").asText()).isEqualTo("GF6_WFV_SAMPLE-1.tif");
+        assertThat(manifest.path("inputs").get(0).path("required").asBoolean()).isTrue();
+    }
+
+    @Test
+    void rejectsUnsafeOriginalFileNamesWithoutMaterializingASecondAsset() throws Exception {
+        Path assetRoot = Files.createDirectory(tempRoot.resolve("assets"));
+        Path image = Files.writeString(assetRoot.resolve("physical.hdf"), "image");
+        for (String unsafeName : List.of("../escape.hdf", "directory\\escape.hdf", "bad\u0001.hdf")) {
+            LocalWorkerAssetResolver resolver = new LocalWorkerAssetResolver() {
+                @Override
+                public Path resolve(String grantReference, StorageUri storageUri) {
+                    return image;
+                }
+
+                @Override
+                public String originalFileName(String grantReference, StorageUri storageUri, Path resolvedPath) {
+                    return unsafeName;
+                }
+            };
+            LocalWorkerAssetManifestWriter writer = writer(assetRoot, resolver);
+
+            assertThatThrownBy(() -> writer.write("inspect-01", grant(),
+                List.of(asset("MAIN", 0, "rs://input/image.jpg"))))
+                .isInstanceOf(WorkerProtocolException.class).hasMessageContaining("original filename");
+        }
     }
 
     @Test
@@ -93,8 +130,12 @@ class LocalWorkerAssetManifestWriterTest {
     }
 
     private LocalWorkerAssetManifestWriter writer(Path assetRoot, Map<String, Path> paths) {
+        return writer(assetRoot, (grantReference, storageUri) -> paths.get(storageUri.value()));
+    }
+
+    private LocalWorkerAssetManifestWriter writer(Path assetRoot, LocalWorkerAssetResolver resolver) {
         return new LocalWorkerAssetManifestWriter(
-            tempRoot.resolve("work"), assetRoot, (grantReference, storageUri) -> paths.get(storageUri.value()),
+            tempRoot.resolve("work"), assetRoot, resolver,
             Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }

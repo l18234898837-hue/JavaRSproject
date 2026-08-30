@@ -81,6 +81,10 @@ public class ProcessingTaskControllerTest {
 
         assertThat(preflightResponse.getStatusCodeValue()).isEqualTo(200);
         assertThat(preflightResponse.getBody().getData().preflightToken()).isEqualTo("token-1");
+        assertThat(preflightResponse.getBody().getData().candidates()).singleElement().satisfies(preflightCandidate -> {
+            assertThat(preflightCandidate.profileKey().productCode()).isEqualTo("FY-3H-MERSI");
+            assertThat(preflightCandidate.profileKey().profileVersion()).isEqualTo("v1");
+        });
         assertThat(createResponse.getStatusCodeValue()).isEqualTo(201);
         assertThat(createResponse.getBody().getData().taskId()).isEqualTo(101L);
         verify(lease).commit();

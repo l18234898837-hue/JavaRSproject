@@ -1,233 +1,94 @@
-# FY-4B AGRI 与 GF-6 WFV L1A 单阶段接入设计
+# FY4B AGRI 与 GF6 WFV L1A 单阶段接入设计
 
 ## 目标
 
-在不改变 HY-1C CZI L2A、HY-2D 高度计和 FY-3H MERSI 现有执行契约的前提下，将源仓库中的 FY-4B AGRI 全圆盘 L1 与 GF-6 WFV L1A 工程处理能力接入当前 Java 后端和多源卫星前端。
+在不改变现有 HY-1C CZI L2A、HY-2D 高度计和 FY-3H MERSI 行为契约的前提下，将源仓库中的 FY-4B AGRI 全圆盘 L1 与 GF-6 WFV L1A 工程处理能力接入当前后端，并在现有“多源卫星数据处理”前端中提供对应产品入口。
 
-两个新增产品都使用当前后端已经验证过的“一个 Java 任务阶段对应一次完整 Worker 调用”模式。Worker 内部仍按各自真实数据流程顺序执行，但只向 Java 返回最终产物。这样不要求升级共享的 Java 多阶段输入解析器，也不会改变三个既有产品的 profile、stage、artifact 或重试行为。
+## 约束与现状
 
-## 现状与约束
+- 当前后端对 HY-1C、HY-2D、FY-3H 实际采用单阶段整合执行；`DispatchNextStageService` 会把候选原始文件整体下发，并未按计划中的上游产物解析阶段输入。
+- 源 FY-4B 实现是多阶段 DAG，不能原样交给当前 Java 调度器。
+- 源 GF-6 L1A 计划缺少 Java `plan-v2` 所需的输入、输出和阶段参数声明，且多个名义阶段重复执行完整 RPC 重采样。
+- 当前前端的 GF-6 Browse（JPG/JGW/JSON）与真实 GF-6 WFV L1A 样本不匹配；历史后端 Browse 兼容代码和数据仍需保留。
+- 两个工作树已有大量用户未提交修改，所有接入必须增量合并，不得覆盖或回退既有改动。
 
-- 当前后端工作树包含尚未提交的 HY-1C、HY-2D、FY-3H 实现，这些文件属于既有在途成果，接入时必须做增量合并，不能以源仓库文件整份覆盖。
-- 当前 `DispatchNextStageService` 为每个阶段授权并下发候选产品的原始文件，不会把上一阶段产物解析成下一阶段输入。HY-1C、HY-2D、FY-3H 因此都使用单阶段整合计划。
-- 源仓库 FY-4B 使用完整多阶段 DAG；直接复制到当前后端会在第二阶段开始缺少上游产物。
-- 源仓库 GF-6 L1A 的阶段计划缺少当前 Java 强制要求的 `inputs`、`outputs` 和 `parameterSnapshot`，并且多个阶段重复执行同一次完整 RPC 重采样，不能原样接入。
-- 前端现有 GF-6 入口是 JPG/JGW/JSON 浏览产品，与真实 GF-6 WFV L1A 样本不匹配。历史 Browse 后端代码和历史任务保留，但前端入口改为 L1A 工程处理。
-- 样本中的 GF-6 第二块 TIFF 大于 6 GB，当前 Spring 5,000 MB 和 Nginx 100 MB 限制不足以完成上传。
-- 本次验证以代码逻辑为主，不运行 FY-4B 全圆盘或 GF-6 约 14 GB 数据的完整算法链。
+## 后端架构
 
-## 总体架构
+### FY-4B AGRI
 
-```text
-Vue 产品模板与参数抽屉
-  -> 逐文件上传，取得 SYS_FILE id
-  -> preflight(assets: id + role + ordinal)
-  -> Worker inspect，返回精确 profile candidate
-  -> create(parameterSnapshot)
-  -> dispatch 单一整合 stage
-  -> Worker 内部执行产品专属流水线
-  -> Java 校验最终 artifact type/URI/size/SHA-256
-  -> progress / retry / cancel / result.zip
-```
+新增独立产品 `FY-4B-AGRI/v1`，预检要求同一星下点、观测起止时间和版本的五个 HDF：
 
-Java 的 REST API、预检 token、授权 manifest、任务状态、结果 ZIP 和权限校验继续复用现有实现。新增逻辑集中在 Python 产品适配器、整合管线、registry 精确路由、profile migration、前端产品模板和参数模块中。
+1. `L1_0500M`
+2. `L1_1000M`
+3. `L1_2000M`
+4. `L1_4000M`
+5. `GEO_4000M`
 
-## FY-4B AGRI 产品设计
-
-### 身份与输入
-
-- `productCode`: `FY-4B-AGRI`
-- `profileVersion`: `v1`
-- `stageKey` / `stageCode`: `STANDARDIZE_FY4B_AGRI`
-- 固定五个必需输入，角色和 ordinal 如下：
-
-| 前端槽位 | Worker role | ordinal | 文件 |
-| --- | --- | ---: | --- |
-| 500 米 FDI | `L1_0500M` | 0 | `...FDI...0500M...HDF` |
-| 1000 米 FDI | `L1_1000M` | 0 | `...FDI...1000M...HDF` |
-| 2000 米 FDI | `L1_2000M` | 0 | `...FDI...2000M...HDF` |
-| 4000 米 FDI | `L1_4000M` | 0 | `...FDI...4000M...HDF` |
-| 4000 米 GEO | `GEO_4000M` | 0 | `...GEO...4000M...HDF` |
-
-文件名必须属于同一星下点、观测起止时间和版本。Worker 继续执行源实现中的 HDF 根属性、通道、标定表、导航数组和全圆盘 shape 检查，前端文件名校验只用于提前给出提示，后端 inspect 是权威结论。
-
-### 参数
-
-参数快照沿用源仓库 `schemaVersion=1` 契约：
-
-- `targetCrs`: 仅 `EPSG:4326` 或 `EPSG:4490`；
-- `roi`: 可空，或 WGS84 `[minLon,minLat,maxLon,maxLat]`；
-- `features`: `statistics`、`gradient`、`local_variance`、`toa_nir_red_nd`、`btd_c13_c14`；
-- `fusion`: 固定 `NIR_RED_BLUE`，百分位范围合法；
-- `saliency`: 固定白名单 source、`0..1` 阈值、大于等于 3 的奇数窗口；
-- 显著性使用派生特征时，参数构建器自动启用并补齐相应 feature。
-
-前后端分别校验同一契约。任务创建后使用不可变 JSON 快照，不允许调用方覆盖标定表、质量位、导航常量或物理波段定义。
-
-### Worker 内部顺序
+对源仓库的文件识别、HDF 结构验证、参数白名单、定标、名义静止卫星网格、重投影、COG、特征、伪彩和显著性内核做兼容性迁移。对 Java 只暴露一个 `STANDARDIZE_FY4B_AGRI` 阶段；Worker 在同一受控 invocation 中按 tile/window 流式执行并只返回声明的最终产物，禁止把 500m 全圆盘波段一次性拼入内存：
 
 ```text
-五文件证据检查
-  -> 构建名义静止卫星网格
-  -> 四分辨率 DN 定标、质量掩膜和名义地理参考
-  -> 按目标 CRS 重投影并按可选 ROI 裁剪
-  -> 写四组 science/quality COG 和摘要
-  -> 可选特征
-  -> 可选 C03/C02/C01 近红外伪彩
-  -> 可选显著性候选
+验证五文件包
+  -> 构建名义网格
+  -> 定标与地理参考
+  -> 重投影和可选 ROI
+  -> 四分辨率 science/quality COG 与摘要
+  -> 可选特征、NIR_RED_BLUE 伪彩、显著性候选
 ```
 
-整合执行器在一次受授权的 Worker invocation 中调用源仓库的 FY-4B 算法函数。阶段间文件只存在于本次 invocation 的 output 临时目录，作为内部输入使用，不返回给 Java；完成后删除 native/grid 等中间目录。响应中只能出现 `rs://output/...` URI、文件大小和 SHA-256。
+导航状态必须继续表述为 `NOMINAL_UNVERIFIED`，不得宣称测绘级几何校正。反射通道从 GEO 文件的 `NOMSunZenith` 读取太阳天顶角并应用 Earth/Sun 距离修正；合法夜间像元、导航无效和圆盘外像元使用不同质量位，夜间与盘外 science 值均保持 NoData，GEO 的填充值/有效范围优先于仅依靠行列号的判断。
 
-### 最终产物
+### GF-6 WFV L1A
 
-基础产物全部声明为 `FINAL`：
+新增独立产品 `GF-6-WFV-L1A/v1`。必需输入为三块按 `-1/-2/-3` 排序的 8 波段 UInt16 TIFF、产品 XML、主 RPB、NAV 和 TIL；SHP/DBF/SHX 可选，但只能整组提供。浏览 JPG、缩略图、tile 级 RPB 和 `.aux.xml` 不属于任务输入。
 
-- `FY4B_RED_500M_COG`
-- `FY4B_RED_500M_QUALITY_COG`
-- `FY4B_VIS_NIR_1000M_COG`
-- `FY4B_VIS_NIR_1000M_QUALITY_COG`
-- `FY4B_SPECTRAL_2000M_COG`
-- `FY4B_SPECTRAL_2000M_QUALITY_COG`
-- `FY4B_MULTISPECTRAL_4000M_COG`
-- `FY4B_MULTISPECTRAL_4000M_QUALITY_COG`
-- `FY4B_STANDARD_SUMMARY_JSON`
-
-按参数追加：
-
-- `FY4B_FEATURE_COG`、`FY4B_FEATURE_SUMMARY_JSON`
-- `FY4B_FALSE_COLOR_COG`
-- `FY4B_SALIENCY_SCORE_COG`、`FY4B_SALIENCY_MASK_COG`、`FY4B_SALIENCY_SUMMARY_JSON`
-
-输出只能表述为名义导航和候选显著性，不声明官方高精度定位、云检测或地物识别。
-
-## GF-6 WFV L1A 产品设计
-
-### 身份与输入
-
-- `productCode`: `GF-6-WFV-L1A`
-- `profileVersion`: `v1`
-- `stageKey` / `stageCode`: `STANDARDIZE_GF6_WFV_L1A`
-- 七个必需输入：
-
-| 前端槽位 | Worker role | ordinal | 文件 |
-| --- | --- | ---: | --- |
-| TIFF 分块 1 | `MAIN_TIFF_TILE` | 0 | `产品名-1.tiff` |
-| TIFF 分块 2 | `MAIN_TIFF_TILE` | 1 | `产品名-2.tiff` |
-| TIFF 分块 3 | `MAIN_TIFF_TILE` | 2 | `产品名-3.tiff` |
-| 产品 XML | `METADATA_XML` | 0 | `产品名.xml` |
-| 主 RPC | `RPC_RPB` | 0 | `产品名.rpb` |
-| 导航文件 | `NAV` | 0 | `产品名.nav` |
-| 分块索引 | `TILE_INDEX_TIL` | 0 | `产品名.til` |
-
-当前科学流水线不消费 SHP/DBF/SHX，因此本次不把它们列为任务输入。样本目录中的浏览 JPG、缩略图、每块 TIFF 的独立 RPB 和 `.aux.xml` 也不进入任务。前端说明必须帮助用户选择不带 `-1/-2/-3` 的主 RPB。
-
-前端先去掉 TIFF 的 `-1/-2/-3` 后比较产品基名，并验证三个 tile 编号齐全且唯一。Worker 再权威校验 XML 中 `GF6/WFV/LEVEL1A`、ProductID、8 波段增益/偏移、三个 8-band UInt16 TIFF、TIL 文件名与偏移以及主 RPB 系数。
-
-样本 XML 声明尺寸与 TIL 覆盖相差少量边界像元。接入时以 XML 声明画布为准，未被 TIL 覆盖的边缘保持 NoData，并在结果元数据中记录 `tileCoverageDimensions` 与 `declaredDimensions`，不把补零区域当作有效 DN。
-
-### 参数
-
-- `schemaVersion`: 固定 `gf6-wfv-l1a-v1`；
-- `targetCrs`: 本版仅 `EPSG:4326` 或 `EPSG:4490`；
-- `resolution`: 正有限数；
-- `rpcHeightMode`: 固定 `CONSTANT`；
-- `rpcHeight`: 默认 `0.0` 米；
-- `roi`: 可空，或合法 WGS84 bbox；
-- `bands`: 1–8 的非空、无重复子集；
-- `features`: 可选 `statistics`、`gradient`、`local_variance`；
-- `fusion`: RGB 波段必须已选，百分位合法；
-- `saliency`: source 必须是已选波段，阈值合法，窗口为大于等于 3 的奇数。
-
-页面固定提示“无 DEM 的名义 RPC”“定位精度未验证”“显著性仅为候选区域”。不提供 DEM、正射精度、任意算法或大气校正选项。
-
-### Worker 内部顺序
+对 Java 只暴露一个 `STANDARDIZE_GF6_WFV_L1A` 阶段，内部执行：
 
 ```text
-产品证据、XML/RPB/TIL/TIFF 检查
-  -> TIL 驱动的三块 TIFF 虚拟拼接
-  -> 构建 constant-height 名义 RPC 目标网格
-  -> 一次窗口化 RPC 重采样、AGain/AOffset 定标和 ROI 裁剪
-  -> 写 8 波段标准 COG 与名义 RPC 网格摘要
-  -> 从同一个标准 COG 生成可选特征、RGB 融合和显著性
+验证产品身份、TIL 排列、RPC 与定标元数据
+  -> 构建轻量 VRT/TIL 镶嵌
+  -> 固定高程 0m 的名义 RPC 网格
+  -> 窗口化 RPC 重采样、辐射定标和可选 ROI
+  -> 8 波段标准 COG
+  -> 可选特征、RGB 融合和显著性候选
 ```
 
-与源仓库不同，定标、配准、裁剪和标准 COG 不拆成四次重复的全量重采样。临时 VRT 在 finally 中删除，可选算法直接消费本次已经生成的标准 COG，不重新处理约 14 GB 原始 TIFF。
+标准 COG 只生成一次，可选算法复用该产物，不重复对原始 14GB 影像执行完整 RPC 重采样。派生特征和显著性按带 halo 的窗口计算并裁回中心块，避免 256 像元块边界接缝，同时严格保留原始 NoData；统计摘要使用流式合并，不积累整幅像元。RGB 融合先对整幅进行确定性稀疏采样并计算一组全局百分位，所有输出块复用同一拉伸参数；RGB 的有效 0 值通过内嵌 dataset mask 与无效像元区分，不产生旁车文件。显著性掩膜约定 `0=非显著、1=显著、255=NoData`。标准与派生 COG 均允许按需写 BigTIFF。输出继续标记 `NOMINAL_RPC_NO_DEM`、`UNVALIDATED`，显著性标记为候选结果。
 
-### 最终产物
+### Java 与 Worker 集成边界
 
-基础产物：
-
-- `GF6_STANDARD_COG`
-- `GF6_NOMINAL_RPC_GRID_JSON`
-
-按参数追加：
-
-- `GF6_FEATURES_COG`、`GF6_FEATURES_SUMMARY_JSON`
-- `GF6_RGB_FUSION_COG`、`GF6_FUSION_SUMMARY_JSON`
-- `GF6_SALIENCY_SCORE_COG`、`GF6_SALIENCY_MASK_COG`、`GF6_SALIENCY_SUMMARY_JSON`
-
-历史 `GF-6-WFV-BROWSE/v1` adapter、migration 和任务记录不删除；registry 先识别新的 L1A 七文件证据，再识别旧 Browse 三文件证据。前端只展示新的 L1A 模板。
-
-## Java 与配置改动边界
-
-- 不改 REST endpoint、DTO、数据库核心表、预检 token、任务生命周期或下载 ticket 协议。
-- 不改 HY-1C、HY-2D、FY-3H 的 profile key、registry 分支、stage、参数或 artifact。
-- 只新增 GF-6 WFV L1A profile migration；FY-4B AGRI `v1` 已由现有 profile migration 发布。
-- registry 以精确输入证据路由，新增 L1A 与 FY-4B 分支必须位于默认 FY-3H fallback 之前。
-- Spring `max-file-size` 和 `max-request-size` 提高到至少 10 GB；Nginx `client_max_body_size` 同步为 10 GB，并关闭大文件代理请求缓冲。该改动只放宽上限，不改变既有上传 API。
-- Worker 超时继续由 `MULTISOURCE_WORKER_TIMEOUT` 外部配置，不在代码中写死新的超时。
+- 保持现有 REST、预检 token、任务创建、单阶段 dispatch、取消、重试、进度和 ZIP 下载接口不变。
+- 在 Python registry 中先识别 GF-6 L1A 和 FY-4B，再进入现有 HY-2D/HY-1C/FY-3H 分支；现有三产品 profile key、stage code、artifact type 和路径不得改变。
+- 每个新阶段声明完整 raw inputs、final outputs 与规范化 parameter snapshot，使现有 `StageOutputContractValidator` 可做精确校验。
+- 系统文件物理存储名可能是 UUID；Java 授权 manifest 必须同时携带受校验的 `originalFileName` 与 `required`，Worker 以逻辑原名识别包、以授权绝对路径读取数据。旧 manifest 缺少逻辑原名时仍回退到物理 basename。
+- Worker 响应只返回 `rs://output/...` URI、artifact type、size 和 SHA-256；不得暴露本地路径。
+- 新增 GF-6 L1A 数据库 profile seed；保留 GF-6 Browse seed。
+- 将 Spring 单文件和请求上传限制设为 `10000MB`，部署 nginx 上限设为 `10g`，以容纳样本中约 6.8GB 的 tile。
 
 ## 前端设计
 
-- 保留现有产品下拉框和 H1C、H2D、FY3H 模块。
-- 将旧 `GF6_WFV_BROWSE_TEMPLATE` 前端入口替换成 `GF6_WFV_L1A_TEMPLATE`，并新增 `FY4B_AGRI_TEMPLATE`。
-- `ProductFileSlot` 增加可选 `ordinal`；构建预检 assets 时使用 `slot.ordinal ?? 0`，从而支持三个相同 role 的 GF-6 TIFF。
-- FY-4B 与 GF-6 各有独立的文件配对校验、参数模型、参数抽屉和单元测试文件，继续复用现有抽屉样式和任务 composable。
-- 主组件只增加产品条件分支、摘要和中文 stage label，不把新产品逻辑堆入现有 H1C/H2D/FY3H 参数文件。
-- 预检候选必须精确匹配 productCode/profileVersion；GF-6 L1A 不使用旧 Browse packageId 前缀兼容匹配。
-- 任务切换、轮询、取消、重试和 ZIP 下载继续复用现有行为；终态后停止轮询。
+沿用现有深蓝任务控制台的布局、字体、色彩、文件槽位和参数抽屉，不引入新的视觉体系。产品选择器继续保留 HY-1C、HY-2D、FY-3H，并新增 FY-4B；旧 GF-6 Browse 入口替换为 GF-6 WFV L1A。
+
+- FY-4B：五个固定 HDF 槽位，文件名解析必须验证 FDI/GEO、分辨率、时次、星下点和版本一致。
+- GF-6：七个必需槽位与三个可选足迹槽位；三 TIFF 去除 `-1/-2/-3` 后与 XML/RPB/NAV/TIL 基名一致，足迹三件套必须全有或全无。
+- 两个产品分别使用独立参数模型、校验器和参数抽屉；参数快照在任务创建后锁定。
+- 进度区域增加两个单阶段的中文名称，同时保留对未知 stage code 的安全回退。
+- GF-6 页面明确显示“无 DEM 名义 RPC、定位精度未验证、显著性仅为候选区域”；FY-4B 显示“名义定位未验证”。
+
+现有视觉语言已经针对卫星数据操作设计：深海蓝、青色信号线、等宽技术标签和紧凑任务阶段结构。新增模块只强化产品专属的输入说明和工程限制，不增加模板化卡片或装饰性动效。
 
 ## 错误处理
 
-- 文件扩展名、产品基名、角色缺失和参数问题在前端立即显示中文提示并禁用开始按钮。
-- Worker inspect/build/execute 的 `ValueError` 保留可操作的错误文本，经 Java `WorkerProtocolException` 和 progress DTO 传给前端；不返回 Python traceback、服务器路径或 manifest 内容。
-- ROI 不相交、输入包不完整、HDF/TIFF 元数据不一致、RPC/TIL 无效分别使用稳定错误前缀，便于前端翻译。
-- Worker 失败只使当前新产品任务失败，不改变其他产品 registry 路由或已有任务状态。
-- 中间文件不登记为 FINAL，也不进入结果 ZIP。
+- 文件缺失、角色错误、产品标识不一致和参数错误在前端先提示，后端预检仍为权威判断。
+- Python 普通输入错误保留可行动的原始消息，由现有 Java/前端错误转换边界展示；协议错误仍使用稳定错误码。
+- GF-6 预计像元数和标准/特征/融合/显著性总输出在任何 VRT/COG 创建前统一预算，预算包含 overview 与 RGB 内嵌 1-bit 有效掩膜；超出限制时使用稳定的 `GF6_OUTPUT_LIMIT_EXCEEDED`，Java 只对该白名单错误返回安全文案，不透传任意 Worker 文本或物理路径。
+- GF-6 特征与显著性窗口必须为 3–255 的奇数；前后端采用同一硬上限，防止参数触发不可控内存分配。
+- GF-6 TIL 覆盖尺寸与 XML 声明存在少量差异时，以 TIL 实际覆盖范围为数据范围，未覆盖区视为 NoData，并在 metadata summary 中记录差异，避免对真实样本做无依据拒绝。
+- ROI 不相交、输出过大或依赖缺失应产生明确错误，不得返回空成功产物。
 
-## 测试与验收
+## 验证策略
 
-所有行为改动采用测试先行。
-
-### Worker
-
-- FY-4B：五文件角色/时间/版本配对、参数、单阶段 plan、registry 路由、整合执行器最终产物集合。
-- GF-6：七文件识别、三个 TIFF ordinal、主 RPB 选择、TIL/XML 边界差异的 NoData 策略、参数、单阶段 plan、只执行一次标准化、可选产物集合。
-- 使用合成小 HDF/TIFF 夹具验证算法和 artifact contract；真实样本只执行只读 inspect/metadata smoke，不生成完整输出。
-- 运行新增测试和现有 H1C/H2D/FY3H 回归测试。
-
-### Java
-
-- migration 内容与幂等测试；
-- plan/worker artifact exact contract 的现有测试继续通过；
-- 不新增共享调度语义，不要求数据库迁移核心表。
-- 使用指定 Maven 3.8.8、用户 settings 和本地仓库执行聚焦模块测试。
-
-### 前端
-
-- 两个模板的 profile、角色、ordinal、扩展名与结果文件名；
-- FY-4B 五文件同组校验；
-- GF-6 `-1/-2/-3` 归一化与七文件同产品校验；
-- 两套参数默认值、依赖补齐、边界错误与快照序列化；
-- 既有 H1C/H2D/FY3H 模板和任务规则回归；
-- `pnpm test:multisource` 和 `pnpm typecheck`。若完整 Vite build 受现有项目问题影响，报告实际错误而不修改无关代码。
-
-## 完成标准
-
-1. 前端同时显示并可选择 H1C、H2D、FY3H、FY4B AGRI 和 GF-6 WFV L1A。
-2. 提供的 FY-4B 五文件和 GF-6 七个核心文件能够通过前端文件校验及 Worker 真实只读预检。
-3. 两个新产品创建的计划都只有一个整合 stage，声明的最终产物与 Worker 响应严格一致。
-4. 新增聚焦测试及既有三个产品回归测试通过；Maven 与前端类型检查有新鲜验证记录。
-5. 未覆盖或删除用户现有未提交改动，未改变 H1C、H2D、FY3H 的可观察行为。
-6. 未声称完整 FY-4B 全圆盘或 GF-6 14 GB 算法任务已在本机完成；真实重数据验收由用户重启后端后执行。
+- 新增合成小 HDF/TIFF/XML/RPB/TIL fixtures，覆盖文件识别、参数规范化、单阶段计划、registry 路由和输出契约的 RED/GREEN 测试。
+- 使用真实目录只做只读预检/metadata smoke；不运行完整 FY-4B 全圆盘或 GF-6 14GB 处理。
+- 运行 Worker 针对性测试以及既有 HY-1C/HY-2D/FY-3H 回归。
+- 使用指定 Maven 安装、settings 和本地仓库执行相关 Java 模块测试/编译。
+- 运行前端 multisource 单元测试、TypeScript/Vue 类型检查和构建。

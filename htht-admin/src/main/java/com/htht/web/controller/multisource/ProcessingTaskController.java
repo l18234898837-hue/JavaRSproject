@@ -65,7 +65,10 @@ public class ProcessingTaskController {
         PreflightSession session = sessionStore.open(subject, assets, result.candidates());
         PreflightResponse response = new PreflightResponse(result.rulePackageVersion(), session.token(), session.expiresAt(),
             session.candidates().stream().map(item -> new PreflightResponse.CandidateResponse(
-                item.id(), item.candidate().packageId(), item.candidate().supportStatus().name(), item.candidate().confidence()
+                item.id(), item.candidate().packageId(), item.candidate().supportStatus().name(), item.candidate().confidence(),
+                new PreflightResponse.ProfileKeyResponse(
+                    item.candidate().profileKey().productCode(), item.candidate().profileKey().profileVersion()
+                )
             )).toList());
         return ResponseEntity.ok(R.ok(response));
     }

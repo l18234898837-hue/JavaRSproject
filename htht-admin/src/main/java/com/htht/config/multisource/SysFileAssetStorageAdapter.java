@@ -51,15 +51,23 @@ public final class SysFileAssetStorageAdapter implements AssetStorage, LocalWork
 
     @Override
     public Path resolve(String grantReference, StorageUri storageUri) {
-        if (storageUri == null || !storageUri.value().matches("rs://sys-file/[1-9][0-9]*")) {
-            throw new IllegalArgumentException("Unsupported sys file storage URI.");
+        return resolveSysFile(authorizedSysFile(grantReference, storageUri));
+    }
+
+    @Override
+    public String originalFileName(String grantReference, StorageUri storageUri, Path resolvedPath) {
+        SysFile file = authorizedSysFile(grantReference, storageUri);
+        Path authorizedPath = resolveSysFile(file);
+        try {
+            if (resolvedPath == null || !authorizedPath.equals(resolvedPath.toRealPath())) {
+                throw new IllegalArgumentException("Resolved sys file does not match the authorized asset.");
+            }
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Resolved sys file cannot be read.", exception);
         }
-        GrantScope scope = grants.get(grantReference);
-        if (scope == null || !scope.expiresAt.isAfter(Instant.now()) || !scope.storageUris.contains(storageUri.value())) {
-            throw new IllegalArgumentException("Sys file is not authorized by the grant.");
-        }
-        String id = storageUri.value().substring("rs://sys-file/".length());
-        return resolveReference(new AssetReference("SYS_FILE", id));
+        String baseName = file.getFileName();
+        String extension = file.getExtension();
+        return extension == null || extension.isBlank() ? baseName : baseName + "." + extension;
     }
 
     @Override
@@ -97,10 +105,29 @@ public final class SysFileAssetStorageAdapter implements AssetStorage, LocalWork
         if (reference == null || !"SYS_FILE".equals(reference.sourceType()) || !reference.sourceId().matches("[1-9][0-9]*")) {
             throw new IllegalArgumentException("Only positive SYS_FILE references are supported.");
         }
-        SysFile file = sysFileService.getById(Long.parseLong(reference.sourceId()));
+        return resolveSysFile(requireSysFile(reference.sourceId()));
+    }
+
+    private SysFile authorizedSysFile(String grantReference, StorageUri storageUri) {
+        if (storageUri == null || !storageUri.value().matches("rs://sys-file/[1-9][0-9]*")) {
+            throw new IllegalArgumentException("Unsupported sys file storage URI.");
+        }
+        GrantScope scope = grants.get(grantReference);
+        if (scope == null || !scope.expiresAt.isAfter(Instant.now()) || !scope.storageUris.contains(storageUri.value())) {
+            throw new IllegalArgumentException("Sys file is not authorized by the grant.");
+        }
+        return requireSysFile(storageUri.value().substring("rs://sys-file/".length()));
+    }
+
+    private SysFile requireSysFile(String id) {
+        SysFile file = sysFileService.getById(Long.parseLong(id));
         if (file == null || file.getFilePath() == null || file.getFilePath().isBlank()) {
             throw new IllegalArgumentException("Sys file does not exist.");
         }
+        return file;
+    }
+
+    private Path resolveSysFile(SysFile file) {
         try {
             Path path = Path.of(file.getFilePath()).toRealPath();
             if (!path.startsWith(uploadRoot) || !Files.isRegularFile(path) || !Files.isReadable(path)) {

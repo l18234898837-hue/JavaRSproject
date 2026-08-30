@@ -19,6 +19,7 @@ public final class FixtureWorker {
             }
         }
         if ("sleep".equals(mode)) {
+            Files.writeString(response.getParent().resolve("worker.pid"), Long.toString(ProcessHandle.current().pid()));
             Thread.sleep(5_000L);
             return;
         }

@@ -76,7 +76,7 @@ def validate_source_against_mapping(h5_path: str | Path, mapping: ReviewedL2AMap
     with h5py.File(h5_path, "r") as handle:
         for name, expected in mapping.required_global_attributes.items():
             value = _attribute_value(handle.attrs, name)
-            if value != expected:
+            if not _matches_expected_attribute(value, expected):
                 raise ValueError(f"HY-1C CZI L2A global attribute {name!r} does not match reviewed mapping")
 
         shape = None
@@ -139,6 +139,21 @@ def inspect_l2a_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def inspect_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    return [inspect_l2a_manifest(manifest)]
+
+
+def has_l2a_product_evidence(manifest: dict[str, Any]) -> bool:
+    try:
+        paths_by_role = _manifest_paths_by_role(manifest)
+        main = _single_role_path(paths_by_role, "MAIN", {".h5", ".hdf5"})
+        with h5py.File(main, "r") as handle:
+            product_name = _decode(_attribute_value(handle.attrs, "Product Name"))
+        return isinstance(product_name, str) and "_CZI_L2A_" in product_name
+    except (OSError, ValueError):
+        return False
+
+
 def build_l2a_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any]) -> dict[str, Any]:
     if candidate.get("profileKey") != {"productCode": "HY-1C-CZI", "profileVersion": "L2A-v1"}:
         raise ValueError("HY-1C CZI L2A candidate is required")
@@ -152,42 +167,30 @@ def build_l2a_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any]
     raw_main = _input("main", "RAW_INPUT", "MAIN")
     raw_metadata = _input("metadata", "RAW_INPUT", "METADATA")
     raw_browse = _input("browse", "RAW_INPUT", "BROWSE")
-    stages = [
-        _stage("VALIDATE_SOURCE", [], [raw_main, raw_metadata, raw_browse],
-               [_output("VALIDATION_METADATA_JSON", "validation/source.json", "INTERMEDIATE")], stage_snapshot),
-        _stage("DECODE_SCALE_AND_NODATA", ["VALIDATE_SOURCE"], [raw_main],
-               [_output("DECODED_CZI_RASTER", "decoded/czi-raster.npz", "INTERMEDIATE")], stage_snapshot),
-        _stage("APPLY_L2_FLAGS", ["DECODE_SCALE_AND_NODATA"],
-               [_input("decoded", "UPSTREAM_ARTIFACT", "DECODED_CZI_RASTER"), raw_main],
-               [_output("QUALITY_MASKED_CZI_RASTER", "quality/masked-czi-raster.npz", "INTERMEDIATE"),
-                _output("VALID_MASK", "quality/valid-mask.npz", "INTERMEDIATE")], stage_snapshot),
-        _stage("GEOLOCATE_AND_GRID", ["APPLY_L2_FLAGS"],
-               [_input("masked", "UPSTREAM_ARTIFACT", "QUALITY_MASKED_CZI_RASTER"), raw_main],
-               [_output("GRIDDED_CZI_RASTER", "grid/czi-raster.npz", "INTERMEDIATE")], stage_snapshot),
-        _stage("CROP_OPTIONAL", ["GEOLOCATE_AND_GRID"],
-               [_input("gridded", "UPSTREAM_ARTIFACT", "GRIDDED_CZI_RASTER")],
-               [_output("CROPPED_CZI_RASTER", "crop/czi-raster.npz", "INTERMEDIATE")], stage_snapshot),
-        _stage("WRITE_STANDARD_COG", ["CROP_OPTIONAL", "APPLY_L2_FLAGS"],
-               [_input("cropped", "UPSTREAM_ARTIFACT", "CROPPED_CZI_RASTER"),
-                _input("validMask", "UPSTREAM_ARTIFACT", "VALID_MASK")],
-               [_output("STANDARD_COG", "standard/czi-l2a.tif", "FINAL"),
-                _output("STANDARD_METADATA_JSON", "standard/czi-l2a.json", "FINAL")], stage_snapshot),
+    outputs = [
+        _output("STANDARD_COG", "standard/czi-l2a.tif", "FINAL"),
+        _output("STANDARD_METADATA_JSON", "standard/czi-l2a.json", "FINAL"),
     ]
-    if parameters.algorithms.get("features", {}).get("enabled"):
-        stages.append(_stage("EXTRACT_CZI_FEATURES", ["CROP_OPTIONAL", "APPLY_L2_FLAGS"],
-            [_input("cropped", "UPSTREAM_ARTIFACT", "CROPPED_CZI_RASTER"), _input("validMask", "UPSTREAM_ARTIFACT", "VALID_MASK")],
-            [_output("FEATURE_COG", "features/czi-features.tif", "FINAL"),
-             _output("FEATURE_METADATA_JSON", "features/czi-features.json", "FINAL")], stage_snapshot))
+    features = parameters.algorithms.get("features", {})
+    if features.get("enabled"):
+        metrics = features.get("metrics", [])
+        if any(metric in {"gradient", "local_variance"} for metric in metrics):
+            outputs.append(_output("FEATURE_COG", "features/czi-features.tif", "FINAL"))
+        outputs.append(_output("FEATURE_METADATA_JSON", "features/czi-features.json", "FINAL"))
     if parameters.algorithms.get("fusion", {}).get("enabled"):
-        stages.append(_stage("FUSE_CZI_BANDS", ["CROP_OPTIONAL", "APPLY_L2_FLAGS"],
-            [_input("cropped", "UPSTREAM_ARTIFACT", "CROPPED_CZI_RASTER"), _input("validMask", "UPSTREAM_ARTIFACT", "VALID_MASK")],
-            [_output("FUSION_COG", "fusion/czi-rgb.tif", "FINAL"), _output("FUSION_PREVIEW_PNG", "fusion/czi-rgb.png", "FINAL")], stage_snapshot))
+        outputs.extend([
+            _output("FUSION_COG", "fusion/czi-rgb.tif", "FINAL"),
+            _output("FUSION_PREVIEW_PNG", "fusion/czi-rgb.png", "FINAL"),
+        ])
     if parameters.algorithms.get("saliency", {}).get("enabled"):
-        stages.append(_stage("DETECT_CZI_SALIENCY", ["CROP_OPTIONAL", "APPLY_L2_FLAGS"],
-            [_input("cropped", "UPSTREAM_ARTIFACT", "CROPPED_CZI_RASTER"), _input("validMask", "UPSTREAM_ARTIFACT", "VALID_MASK")],
-            [_output("SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"), _output("SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"),
-             _output("SALIENCY_PREVIEW_PNG", "saliency/preview.png", "FINAL")], stage_snapshot))
-    return {"version": "plan-v2", "stages": stages}
+        outputs.extend([
+            _output("SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"),
+            _output("SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"),
+            _output("SALIENCY_PREVIEW_PNG", "saliency/preview.png", "FINAL"),
+        ])
+    return {"version": "plan-v2", "stages": [
+        _stage("STANDARDIZE_L2A", [], [raw_main, raw_metadata, raw_browse], outputs, stage_snapshot)
+    ]}
 
 
 def _stage(key: str, dependencies: list[str], inputs: list[dict[str, Any]], outputs: list[dict[str, Any]], snapshot: str) -> dict[str, Any]:
@@ -263,6 +266,17 @@ def _attribute_value(attributes: h5py.AttributeManager, name: str) -> Any:
     if name not in attributes:
         raise ValueError(f"HY-1C CZI L2A attribute is missing: {name}")
     return _decode(attributes[name])
+
+
+def _matches_expected_attribute(value: Any, expected: Any) -> bool:
+    if value == expected:
+        return True
+    if isinstance(expected, int) and not isinstance(expected, bool):
+        try:
+            return float(value) == expected
+        except (TypeError, ValueError):
+            return False
+    return False
 
 
 def _decode(value: Any) -> Any:

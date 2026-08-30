@@ -11,6 +11,7 @@ import com.htht.multisource.application.port.out.model.ExecutionGrant;
 import com.htht.multisource.application.port.out.model.ExecutionGrantRequest;
 import com.htht.multisource.application.port.out.model.StageClaim;
 import com.htht.multisource.application.port.out.model.StageExecutionRequest;
+import com.htht.multisource.application.port.out.model.StageOutput;
 import com.htht.multisource.application.usecase.service.DispatchNextStageService;
 import com.htht.multisource.application.usecase.service.AcceptWorkerEventService;
 import com.htht.multisource.domain.model.AccessSubject;
@@ -44,6 +45,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -53,6 +56,67 @@ class DispatchNextStageUseCaseTest {
     private static final TaskId TASK_ID = TaskId.of(101L);
     private static final Instant NOW = Instant.parse("2026-08-21T09:00:00Z");
     private static final Instant LEASE_EXPIRES_AT = Instant.parse("2026-08-21T09:05:00Z");
+
+    @Test
+    void returnsRunningStageBeforeScheduledWorkerExecutionCompletes() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "READ")), Map.of("READ", List.of())
+        );
+        EmptyRecordingDispatcher dispatcher = new EmptyRecordingDispatcher();
+        AtomicReference<Runnable> scheduled = new AtomicReference<>();
+        Executor controlledExecutor = command -> {
+            if (!scheduled.compareAndSet(null, command)) {
+                throw new IllegalStateException("only one dispatch was expected");
+            }
+        };
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            new SingleTaskRepository(task(TaskLifecycleStatus.CREATED)), stages, dispatcher,
+            new RecordingAssetStorage(), () -> new ExecutionId("exec-01"), () -> NOW,
+            java.time.Duration.ofMinutes(5),
+            new AcceptWorkerEventService(stages, new InMemoryExecutionEventRepository()),
+            (taskId, stageId, executionId, outputUri, candidate) -> { }, controlledExecutor
+        );
+
+        var result = useCase.dispatch(TASK_ID);
+
+        assertThat(result).contains(new DispatchNextStageUseCase.DispatchResult(201L, "exec-01"));
+        assertThat(dispatcher.request).isNull();
+        assertThat(stages.findById(new StageId(201L))).get().extracting(TaskStage::status)
+            .isEqualTo(StageExecutionStatus.RUNNING);
+
+        scheduled.get().run();
+
+        assertThat(dispatcher.request).isNotNull();
+        assertThat(stages.findById(new StageId(201L))).get().extracting(TaskStage::status)
+            .isEqualTo(StageExecutionStatus.SUCCEEDED);
+    }
+
+    @Test
+    void doesNotStartQueuedWorkerAfterStageWasCanceled() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "READ")), Map.of("READ", List.of())
+        );
+        EmptyRecordingDispatcher dispatcher = new EmptyRecordingDispatcher();
+        AtomicReference<Runnable> scheduled = new AtomicReference<>();
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            new SingleTaskRepository(task(TaskLifecycleStatus.CREATED)), stages, dispatcher,
+            new RecordingAssetStorage(), () -> new ExecutionId("exec-01"), () -> NOW,
+            java.time.Duration.ofMinutes(5),
+            new AcceptWorkerEventService(stages, new InMemoryExecutionEventRepository()),
+            (taskId, stageId, executionId, outputUri, candidate) -> { }, scheduled::set
+        );
+
+        assertThat(useCase.dispatch(TASK_ID))
+            .contains(new DispatchNextStageUseCase.DispatchResult(201L, "exec-01"));
+        TaskStage running = stages.findById(new StageId(201L)).orElseThrow();
+        stages.save(running.cancel(NOW));
+
+        scheduled.get().run();
+
+        assertThat(dispatcher.request).isNull();
+        assertThat(stages.findById(new StageId(201L))).get().extracting(TaskStage::status)
+            .isEqualTo(StageExecutionStatus.SKIPPED);
+    }
 
     @Test
     void claimsOnlyPendingStageWhoseDependenciesHaveSucceeded() {
@@ -167,6 +231,134 @@ class DispatchNextStageUseCaseTest {
     }
 
     @Test
+    void recordsInvalidWorkerInputAsTerminalFailureAfterDispatchAcceptance() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "STANDARDIZE_L2A")), Map.of("STANDARDIZE_L2A", List.of())
+        );
+        InMemoryExecutionEventRepository events = new InMemoryExecutionEventRepository();
+        WorkerProtocolException invalidInput = new WorkerProtocolException(
+            "exec-01", WorkerOperation.EXECUTE_STAGE,
+            "INVALID_REQUEST", "L2A ROI bounds are invalid", false
+        );
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            new SingleTaskRepository(taskWithDeclaredOutput()), stages,
+            new TaskDispatcher() {
+                @Override
+                public DispatchReceipt dispatch(StageExecutionRequest request) {
+                    throw invalidInput;
+                }
+
+                @Override
+                public void cancel(ExecutionId executionId) {
+                    throw new UnsupportedOperationException();
+                }
+            }, new RecordingAssetStorage(), () -> new ExecutionId("exec-01"), () -> NOW,
+            java.time.Duration.ofMinutes(5), new AcceptWorkerEventService(stages, events)
+        );
+
+        assertThat(useCase.dispatch(TASK_ID))
+            .contains(new DispatchNextStageUseCase.DispatchResult(201L, "exec-01"));
+        assertThat(stages.findById(new StageId(201L))).get().satisfies(stage -> {
+            assertThat(stage.status()).isEqualTo(StageExecutionStatus.FAILED);
+            assertThat(stage.execution().errorCode()).isEqualTo("INVALID_REQUEST");
+            assertThat(stage.execution().errorMessage()).isEqualTo("L2A ROI bounds are invalid");
+        });
+    }
+
+    @Test
+    void recordsGf6OutputLimitAsFixedSafeProgressMessage() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "STANDARDIZE_L2A")), Map.of("STANDARDIZE_L2A", List.of())
+        );
+        WorkerProtocolException outputLimit = new WorkerProtocolException(
+            "exec-01", WorkerOperation.EXECUTE_STAGE,
+            "GF6_OUTPUT_LIMIT_EXCEEDED", "output grid C:\\secret\\work\\grid.tif is too large", false
+        );
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            new SingleTaskRepository(taskWithDeclaredOutput()), stages, dispatcherThrowing(outputLimit),
+            new RecordingAssetStorage(), () -> new ExecutionId("exec-01"), () -> NOW,
+            java.time.Duration.ofMinutes(5), new AcceptWorkerEventService(stages, new InMemoryExecutionEventRepository())
+        );
+
+        assertThat(useCase.dispatch(TASK_ID)).contains(new DispatchNextStageUseCase.DispatchResult(201L, "exec-01"));
+        assertThat(stages.findById(new StageId(201L))).get().satisfies(stage -> {
+            assertThat(stage.execution().errorCode()).isEqualTo("GF6_OUTPUT_LIMIT_EXCEEDED");
+            assertThat(stage.execution().errorMessage()).isEqualTo(
+                "GF6_OUTPUT_LIMIT_EXCEEDED: 输出网格超过服务端安全上限，请增大输出分辨率、缩小 ROI、减少波段或关闭部分衍生产物"
+            );
+            assertThat(stage.execution().errorMessage()).doesNotContain("C:\\secret");
+        });
+    }
+
+    @Test
+    void recordsUnknownWorkerFailureWithGenericProgressMessage() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "STANDARDIZE_L2A")), Map.of("STANDARDIZE_L2A", List.of())
+        );
+        WorkerProtocolException workerFailure = new WorkerProtocolException(
+            "exec-01", WorkerOperation.EXECUTE_STAGE,
+            "UNEXPECTED_WORKER_ERROR", "failed to read C:\\secret\\work\\input.tif", false
+        );
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            new SingleTaskRepository(taskWithDeclaredOutput()), stages, dispatcherThrowing(workerFailure),
+            new RecordingAssetStorage(), () -> new ExecutionId("exec-01"), () -> NOW,
+            java.time.Duration.ofMinutes(5), new AcceptWorkerEventService(stages, new InMemoryExecutionEventRepository())
+        );
+
+        assertThat(useCase.dispatch(TASK_ID)).contains(new DispatchNextStageUseCase.DispatchResult(201L, "exec-01"));
+        assertThat(stages.findById(new StageId(201L))).get().satisfies(stage -> {
+            assertThat(stage.execution().errorCode()).isEqualTo("WORKER_DISPATCH_FAILED");
+            assertThat(stage.execution().errorMessage()).isEqualTo("Worker 执行失败，请稍后重试");
+            assertThat(stage.execution().errorMessage()).doesNotContain("C:\\secret");
+        });
+    }
+
+    @Test
+    void recordsWorkerStageTimeoutWithFixedSafeProgressMessage() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "STANDARDIZE_L2A")), Map.of("STANDARDIZE_L2A", List.of())
+        );
+        WorkerProtocolException timeout = new WorkerProtocolException(
+            "worker-request-01", WorkerOperation.EXECUTE_STAGE,
+            "WORKER_STAGE_TIMEOUT", "execute-stage process exceeded configured timeout", true
+        );
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            new SingleTaskRepository(taskWithDeclaredOutput()), stages, dispatcherThrowing(timeout),
+            new RecordingAssetStorage(), () -> new ExecutionId("exec-01"), () -> NOW,
+            java.time.Duration.ofMinutes(5), new AcceptWorkerEventService(stages, new InMemoryExecutionEventRepository())
+        );
+
+        assertThat(useCase.dispatch(TASK_ID)).contains(new DispatchNextStageUseCase.DispatchResult(201L, "exec-01"));
+        assertThat(stages.findById(new StageId(201L))).get().satisfies(stage -> {
+            assertThat(stage.execution().errorCode()).isEqualTo("WORKER_STAGE_TIMEOUT");
+            assertThat(stage.execution().errorMessage()).isEqualTo(
+                "处理阶段超过服务端执行时限，请调整输出范围或联系管理员后重试"
+            );
+            assertThat(stage.execution().errorMessage()).doesNotContain("execute-stage");
+        });
+    }
+
+    @Test
+    void marksStageFailedWhenWorkerOmitsDeclaredOutputArtifacts() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "STANDARDIZE_L2A")), Map.of("STANDARDIZE_L2A", List.of())
+        );
+        InMemoryExecutionEventRepository events = new InMemoryExecutionEventRepository();
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            new SingleTaskRepository(taskWithDeclaredOutput()), stages, new EmptyDispatcher(), new RecordingAssetStorage(),
+            () -> new ExecutionId("exec-01"), () -> NOW, java.time.Duration.ofMinutes(5),
+            new AcceptWorkerEventService(stages, events)
+        );
+
+        assertThat(useCase.dispatch(TASK_ID)).contains(new DispatchNextStageUseCase.DispatchResult(201L, "exec-01"));
+        assertThat(stages.findById(new StageId(201L))).get().extracting(TaskStage::status)
+            .isEqualTo(StageExecutionStatus.FAILED);
+        assertThat(events.events.values()).singleElement().satisfies(event ->
+            assertThat(event.type()).isEqualTo(com.htht.multisource.application.port.out.model.ExecutionEvent.Type.FAILED)
+        );
+    }
+
+    @Test
     void refreshesExecutionGrantOnceWhenManifestExpires() {
         InMemoryStageRepository stages = new InMemoryStageRepository(
             List.of(pending(201L, "READ")), Map.of("READ", List.of())
@@ -205,6 +397,35 @@ class DispatchNextStageUseCaseTest {
             "{\"mode\":\"standard\"}", new StorageUri("rs://output/7/task-01"),
             new ProcessingPlan("plan-v1", "worker-1.2.3", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of()))),
             new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate)), List.of(candidate));
+    }
+
+    private static ProcessingTask taskWithDeclaredOutput() {
+        InputAsset input = new InputAsset("MAIN", 0, new AssetReference("SYS_FILE", "42"),
+            new StorageUri("rs://sys-file/42"), "sha256:input", true);
+        ProductCandidate candidate = new ProductCandidate("package-01", new ProductProfileKey("HY-1C-CZI", "L2A-v1"),
+            ProductDataShape.SWATH_RASTER, ProductSupportStatus.SUPPORTED, List.of(input), "{}", 0.91);
+        ProcessingStage stage = new ProcessingStage(
+            "STANDARDIZE_L2A", "STANDARDIZE_L2A", List.of(), List.of(),
+            List.of(new StageOutput("STANDARD_COG", "standard/czi-l2a.tif", StageOutput.Retention.FINAL)), "{}"
+        );
+        return new ProcessingTask(TASK_ID, "task-01", new AccessSubject(7L), TaskLifecycleStatus.CREATED,
+            QualityStatus.NOT_CHECKED, "{\"mode\":\"standard\"}", new StorageUri("rs://output/7/task-01"),
+            new ProcessingPlan("plan-v2", "worker-1.2.3", List.of(stage)),
+            new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate)), List.of(candidate));
+    }
+
+    private static TaskDispatcher dispatcherThrowing(RuntimeException failure) {
+        return new TaskDispatcher() {
+            @Override
+            public DispatchReceipt dispatch(StageExecutionRequest request) {
+                throw failure;
+            }
+
+            @Override
+            public void cancel(ExecutionId executionId) {
+                throw new UnsupportedOperationException();
+            }
+        };
     }
 
     private static final class InMemoryStageRepository implements TaskStageRepository {
@@ -359,6 +580,33 @@ class DispatchNextStageUseCaseTest {
         @Override
         public DispatchReceipt dispatch(StageExecutionRequest request) {
             throw new IllegalStateException("Worker process exited with code 1");
+        }
+
+        @Override
+        public void cancel(ExecutionId executionId) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class EmptyRecordingDispatcher implements TaskDispatcher {
+        private StageExecutionRequest request;
+
+        @Override
+        public DispatchReceipt dispatch(StageExecutionRequest request) {
+            this.request = request;
+            return new DispatchReceipt("worker-local", true, List.of());
+        }
+
+        @Override
+        public void cancel(ExecutionId executionId) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class EmptyDispatcher implements TaskDispatcher {
+        @Override
+        public DispatchReceipt dispatch(StageExecutionRequest request) {
+            return new DispatchReceipt("worker-local", true, List.of());
         }
 
         @Override

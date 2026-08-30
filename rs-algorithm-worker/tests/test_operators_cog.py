@@ -24,7 +24,7 @@ def test_write_cog_writes_readable_tiled_raster_with_metadata(tmp_path):
         assert dataset.count == 1
         assert dataset.descriptions == ("B1",)
         assert dataset.nodata == -9999.0
-        assert dataset.block_shapes == [(128, 128)]
+        assert dataset.block_shapes == [(512, 512)]
     assert result.sha256
     assert result.valid_pixel_count == 1024
 

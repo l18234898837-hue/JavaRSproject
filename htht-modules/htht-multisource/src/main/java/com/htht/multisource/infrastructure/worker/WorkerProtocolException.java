@@ -42,6 +42,10 @@ public final class WorkerProtocolException extends RuntimeException {
         return retryable;
     }
 
+    public String workerMessage() {
+        return workerMessage;
+    }
+
     public boolean isManifestExpired() {
         return "INVALID_ASSET_MANIFEST".equals(code) && "manifest is expired".equals(workerMessage);
     }

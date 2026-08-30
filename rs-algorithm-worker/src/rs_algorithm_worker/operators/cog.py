@@ -2,11 +2,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import importlib.util
 import os
 from pathlib import Path
 import tempfile
 
 import numpy as np
+
+# Rasterio loads PROJ when it is imported.  The backend process may inherit
+# PROJ_LIB from PostgreSQL/PostGIS, whose proj.db is not compatible with the
+# GDAL bundled by Rasterio.  Prefer the matching data files shipped with the
+# installed Rasterio package before that import happens.
+_rasterio_spec = importlib.util.find_spec("rasterio")
+if _rasterio_spec is not None and _rasterio_spec.origin is not None:
+    _rasterio_proj_data = Path(_rasterio_spec.origin).resolve().parent / "proj_data"
+    if _rasterio_proj_data.is_dir():
+        os.environ["PROJ_DATA"] = str(_rasterio_proj_data)
+        os.environ["PROJ_LIB"] = str(_rasterio_proj_data)
+
 import rasterio
 
 from rs_algorithm_worker.models import RasterData
@@ -50,8 +63,10 @@ def write_cog(raster: RasterData, output_path: Path, *, compression: str = "defl
             crs=crs,
             transform=transform,
             nodata=raster.nodata,
-            BLOCKSIZE=128,
+            BLOCKSIZE=512,
             COMPRESS="DEFLATE",
+            NUM_THREADS="ALL_CPUS",
+            BIGTIFF="IF_SAFER",
         ) as dataset:
             dataset.write(values)
             for index, metadata in enumerate(raster.band_metadata, start=1):

@@ -51,6 +51,8 @@ class CapabilityRegistry:
 
 COMMON_CAPABILITIES = CapabilityRegistry((
     CapabilitySpec("features", "statistics-v1", frozenset({"RASTER_GRID", "SWATH_RASTER"}), ()),
+    CapabilitySpec("features", "track-statistics-v1", frozenset({"ALONG_TRACK_OBSERVATION"}), ()),
+    CapabilitySpec("anomaly", "track-mad-v1", frozenset({"ALONG_TRACK_OBSERVATION"}), ()),
     CapabilitySpec("fusion", "percentile-rgb-v1", frozenset({"RASTER_GRID"}), ("B1", "B2", "B3")),
     CapabilitySpec("saliency", "contrast-v1", frozenset({"RASTER_GRID"}), ()),
 ))

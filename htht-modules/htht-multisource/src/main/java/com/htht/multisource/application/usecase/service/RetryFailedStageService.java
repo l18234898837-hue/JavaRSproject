@@ -36,8 +36,7 @@ public class RetryFailedStageService implements RetryFailedStageUseCase {
             .orElseThrow(() -> new NoSuchElementException("Processing stage not found."));
         if (task.lifecycleStatus() == TaskLifecycleStatus.CANCELING
             || task.lifecycleStatus() == TaskLifecycleStatus.CANCELED
-            || task.lifecycleStatus() == TaskLifecycleStatus.SUCCEEDED
-            || task.lifecycleStatus() == TaskLifecycleStatus.FAILED) {
+            || task.lifecycleStatus() == TaskLifecycleStatus.SUCCEEDED) {
             throw new IllegalStateException("Processing task cannot retry a stage in its current lifecycle state.");
         }
         if (stage.attempt() >= maxAttempts) {

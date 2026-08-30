@@ -40,4 +40,7 @@ def _stretch(values: np.ndarray, parameters: FusionParameters) -> np.ndarray:
     lower, upper = np.percentile(finite, [parameters.low_percentile, parameters.high_percentile])
     if upper <= lower:
         return np.zeros(values.shape, dtype=np.uint8)
-    return np.clip((values - lower) * 255.0 / (upper - lower), 0, 255).astype(np.uint8)
+    result = np.zeros(values.shape, dtype=np.uint8)
+    valid = np.isfinite(values)
+    result[valid] = np.clip((values[valid] - lower) * 255.0 / (upper - lower), 0, 255).astype(np.uint8)
+    return result

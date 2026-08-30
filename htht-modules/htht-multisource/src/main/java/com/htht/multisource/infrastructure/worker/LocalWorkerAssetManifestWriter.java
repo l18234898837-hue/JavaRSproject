@@ -83,8 +83,10 @@ public final class LocalWorkerAssetManifestWriter {
             }
             Path resolved = resolver.resolve(grantReference, asset.storageUriSnapshot());
             Path real = requireAssetFile(requestId, resolved);
+            String originalFileName = requireOriginalFileName(requestId,
+                resolver.originalFileName(grantReference, asset.storageUriSnapshot(), real));
             return new WorkerAssetManifest.Input(asset.storageUriSnapshot().value(), asset.role(), asset.ordinal(),
-                real, asset.checksum());
+                real, originalFileName, asset.checksum(), asset.required());
         }).toList();
 
         if (directoryKey == null || !directoryKey.matches("[A-Za-z0-9][A-Za-z0-9._-]*")) {
@@ -110,7 +112,9 @@ public final class LocalWorkerAssetManifestWriter {
                 node.put("role", input.role());
                 node.put("ordinal", input.ordinal());
                 node.put("path", input.path().toString());
+                node.put("originalFileName", input.originalFileName());
                 node.put("checksum", input.checksum());
+                node.put("required", input.required());
             });
             root.putObject("output").put("path", manifest.outputPath().toString());
             Path manifestFile = invocationDirectory.resolve("asset-manifest.json");
@@ -137,6 +141,15 @@ public final class LocalWorkerAssetManifestWriter {
         } catch (IOException exception) {
             throw failure(requestId, "asset could not be resolved", exception);
         }
+    }
+
+    private static String requireOriginalFileName(String requestId, String name) {
+        if (name == null || name.isBlank() || name.length() > 255 || name.equals(".") || name.equals("..")
+            || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0
+            || name.codePoints().anyMatch(Character::isISOControl)) {
+            throw failure(requestId, "asset original filename is invalid");
+        }
+        return name;
     }
 
     private static Path absoluteDirectory(Path path, String name) {

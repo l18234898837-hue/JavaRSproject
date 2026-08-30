@@ -13,6 +13,7 @@ public class MultiSourceWorkerProperties {
     private List<String> command = new ArrayList<>();
     private Path workRoot;
     private Duration timeout;
+    private Duration stageTimeout;
     private String processorVersion;
 
     public List<String> getCommand() {
@@ -37,6 +38,14 @@ public class MultiSourceWorkerProperties {
 
     public void setTimeout(Duration timeout) {
         this.timeout = timeout;
+    }
+
+    public Duration getStageTimeout() {
+        return stageTimeout;
+    }
+
+    public void setStageTimeout(Duration stageTimeout) {
+        this.stageTimeout = stageTimeout;
     }
 
     public String getProcessorVersion() {
@@ -64,6 +73,10 @@ public class MultiSourceWorkerProperties {
         if (timeout == null || timeout.isZero() || timeout.isNegative()) {
             throw new IllegalStateException("multisource.worker.timeout must be configured through MULTISOURCE_WORKER_TIMEOUT as a positive duration.");
         }
-        return new LocalProcessWorkerProperties(command, workRoot, timeout);
+        Duration resolvedStageTimeout = stageTimeout == null ? timeout : stageTimeout;
+        if (resolvedStageTimeout.isZero() || resolvedStageTimeout.isNegative()) {
+            throw new IllegalStateException("multisource.worker.stage-timeout must be a positive duration.");
+        }
+        return new LocalProcessWorkerProperties(command, workRoot, timeout, resolvedStageTimeout);
     }
 }

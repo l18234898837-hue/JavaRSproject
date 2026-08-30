@@ -14,6 +14,7 @@ import com.htht.multisource.domain.model.ProcessingPlan;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
 
 public final class LocalProcessWorkerGateway implements ProductInspector, ProcessingPlanner, TaskDispatcher {
@@ -23,7 +24,8 @@ public final class LocalProcessWorkerGateway implements ProductInspector, Proces
     private final WorkerProcessLauncher launcher;
     private final LocalWorkerAssetManifestWriter manifestWriter;
     private final Supplier<String> requestIdSupplier;
-    private final Map<ExecutionId, String> runningRequests = new ConcurrentHashMap<>();
+    private final Map<ExecutionId, ReservedRequest> executionRequests = new ConcurrentHashMap<>();
+    private final Object executionMonitor = new Object();
 
     public LocalProcessWorkerGateway(
         WorkerContractCodec codec,
@@ -63,9 +65,22 @@ public final class LocalProcessWorkerGateway implements ProductInspector, Proces
     }
 
     @Override
-    public DispatchReceipt dispatch(StageExecutionRequest request) {
+    public void reserve(ExecutionId executionId) {
+        Objects.requireNonNull(executionId, "executionId");
         String requestId = nextRequestId(WorkerOperation.EXECUTE_STAGE);
-        runningRequests.put(request.executionId(), requestId);
+        synchronized (executionMonitor) {
+            if (executionRequests.containsKey(executionId)) {
+                throw new IllegalStateException("Worker execution is already reserved: " + executionId.value());
+            }
+            launcher.reserve(requestId);
+            executionRequests.put(executionId, new ReservedRequest(requestId, false));
+        }
+    }
+
+    @Override
+    public DispatchReceipt dispatch(StageExecutionRequest request) {
+        DispatchRequest dispatchRequest = requestForDispatch(request.executionId());
+        String requestId = dispatchRequest.requestId();
         try {
             return translator.toDispatchReceipt(invoke(
                 requestId, WorkerOperation.EXECUTE_STAGE, codec.encodeStageExecution(requestId, request),
@@ -73,15 +88,62 @@ public final class LocalProcessWorkerGateway implements ProductInspector, Proces
                     requestId, request.executionGrant(), request.inputs(), request.outputUri())
             ));
         } finally {
-            runningRequests.remove(request.executionId(), requestId);
+            if (dispatchRequest.implicitReservation()) {
+                release(request.executionId(), requestId);
+            }
         }
     }
 
     @Override
     public void cancel(ExecutionId executionId) {
-        String requestId = runningRequests.remove(executionId);
+        String requestId = null;
+        synchronized (executionMonitor) {
+            ReservedRequest request = executionRequests.get(executionId);
+            if (request != null) {
+                executionRequests.put(executionId, request.canceledRequest());
+                requestId = request.requestId();
+            }
+        }
         if (requestId != null) {
             launcher.cancel(requestId);
+        }
+    }
+
+    @Override
+    public void release(ExecutionId executionId) {
+        synchronized (executionMonitor) {
+            ReservedRequest request = executionRequests.remove(executionId);
+            if (request != null) {
+                launcher.release(request.requestId());
+            }
+        }
+    }
+
+    private DispatchRequest requestForDispatch(ExecutionId executionId) {
+        synchronized (executionMonitor) {
+            ReservedRequest request = executionRequests.get(executionId);
+            if (request == null) {
+                String requestId = nextRequestId(WorkerOperation.EXECUTE_STAGE);
+                launcher.reserve(requestId);
+                executionRequests.put(executionId, new ReservedRequest(requestId, false));
+                return new DispatchRequest(requestId, true);
+            }
+            if (request.canceled()) {
+                executionRequests.remove(executionId);
+                launcher.release(request.requestId());
+                throw new CancellationException("Worker execution was canceled before process start.");
+            }
+            return new DispatchRequest(request.requestId(), false);
+        }
+    }
+
+    private void release(ExecutionId executionId, String requestId) {
+        synchronized (executionMonitor) {
+            ReservedRequest current = executionRequests.get(executionId);
+            if (current != null && current.requestId().equals(requestId)) {
+                executionRequests.remove(executionId);
+                launcher.release(requestId);
+            }
         }
     }
 
@@ -101,5 +163,14 @@ public final class LocalProcessWorkerGateway implements ProductInspector, Proces
             throw new WorkerProtocolException(String.valueOf(requestId), operation, "requestId supplier returned blank value");
         }
         return requestId;
+    }
+
+    private record ReservedRequest(String requestId, boolean canceled) {
+        private ReservedRequest canceledRequest() {
+            return canceled ? this : new ReservedRequest(requestId, true);
+        }
+    }
+
+    private record DispatchRequest(String requestId, boolean implicitReservation) {
     }
 }

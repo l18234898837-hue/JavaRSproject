@@ -8,7 +8,13 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .product_adapters import fy3h_mersi, fy4b_agri, gf6_wfv_browse, hy1c_czi, hy1c_czi_l2a, hy2d_altimeter
+from .fy3h_mersi_pipeline import execute_fy3h_product
+from .fy4b_agri_pipeline import execute_fy4b_product
+from .gf6_wfv_pipeline import execute_gf6_product
+from .hy2d_pipeline import execute_hy2d_product
+from .l2a_pipeline import execute_l2a_product
+from .product_adapters import fy3h_mersi, fy4b_agri, gf6_wfv_browse, gf6_wfv_l1a, hy1c_czi, hy1c_czi_l2a, hy2d_altimeter
+from .product_adapters.base import logical_file_name
 
 
 LOGICAL_OUTPUT_URI = re.compile(r"rs://output/[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*/?")
@@ -30,6 +36,18 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
                 raise ValueError("recognized HY-1C CZI L2A packageId is required")
             return hy1c_czi_l2a.build_l2a_plan(candidate, _parameter_snapshot(payload))
         adapter = _adapter_for_manifest(manifest)
+        if adapter is fy3h_mersi:
+            candidate = _recognized_fy3h_candidate(manifest, payload.get("candidate", {}).get("packageId"))
+            return fy3h_mersi.build_integrated_plan(candidate, _parameter_snapshot(payload))
+        if adapter is hy2d_altimeter:
+            candidate = _recognized_hy2d_candidate(manifest, payload.get("candidate", {}).get("packageId"))
+            return hy2d_altimeter.build_integrated_plan(candidate, _parameter_snapshot(payload))
+        if adapter is fy4b_agri:
+            candidate = _recognized_fy4b_candidate(manifest, payload.get("candidate", {}).get("packageId"))
+            return fy4b_agri.build_integrated_plan(candidate, _parameter_snapshot(payload))
+        if adapter is gf6_wfv_l1a:
+            candidate = _recognized_gf6_l1a_candidate(manifest, payload.get("candidate", {}).get("packageId"))
+            return gf6_wfv_l1a.build_integrated_plan(candidate, _parameter_snapshot(payload))
         if adapter is gf6_wfv_browse:
             candidate = _recognized_gf_candidate(manifest, payload.get("candidate", {}).get("packageId"))
             return adapter.build_plan(candidate, _parameter_snapshot(payload))
@@ -39,31 +57,93 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
             "dependsOnStageKeys": [],
         }]}
     if operation == "execute-stage":
+        payload = _payload(request)
+        if _is_l2a_execution(payload):
+            return {
+                "workerId": "worker-local",
+                "status": "SUCCEEDED",
+                "artifacts": execute_l2a_product(manifest, _parameter_snapshot(payload), _logical_output_uri(payload.get("outputUri"))),
+            }
+        if payload.get("profileCode") == "FY-4B-AGRI":
+            if payload.get("stageKey") != "STANDARDIZE_FY4B_AGRI":
+                raise ValueError("unsupported FY-4B AGRI stage")
+            return execute_fy4b_product(payload, manifest)
+        if payload.get("profileCode") == "GF-6-WFV-L1A":
+            if payload.get("stageKey") != "STANDARDIZE_GF6_WFV_L1A":
+                raise ValueError("unsupported GF6 L1A stage")
+            return execute_gf6_product(payload, manifest)
+        if payload.get("profileCode") == "FY-3H-MERSI":
+            if payload.get("stageKey") != "STANDARDIZE_MERSI_L1":
+                raise ValueError("unsupported FY-3H MERSI stage")
+            return execute_fy3h_product(payload, manifest)
+        if payload.get("profileCode") == "HY-2D-ALTIMETER":
+            if payload.get("stageKey") != "STANDARDIZE_ALTIMETER_TRACK":
+                raise ValueError("unsupported HY-2D stage")
+            return execute_hy2d_product(payload, manifest)
         adapter = _adapter_for_manifest(manifest)
+        if adapter is hy2d_altimeter:
+            if payload.get("stageKey") != "STANDARDIZE_ALTIMETER_TRACK":
+                raise ValueError("unsupported HY-2D stage")
+            return execute_hy2d_product(payload, manifest)
         if adapter is gf6_wfv_browse:
-            return _execute_gf_browse_stage(_payload(request), manifest)
+            return _execute_gf_browse_stage(payload, manifest)
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": []}
     raise ValueError(f"unsupported operation: {operation}")
 
 
 def _adapter_for_manifest(manifest):
     roles = {item.get("role") for item in manifest.get("inputs", [])}
+    if _has_gf6_l1a_evidence(manifest, roles):
+        return gf6_wfv_l1a
     if {"BROWSE_IMAGE", "GEOREFERENCE", "METADATA"}.issubset(roles):
         return gf6_wfv_browse
-    paths = [str(item.get("path", "")).lower() for item in manifest.get("inputs", [])]
-    if any(path.endswith(".tar.gz") for path in paths):
+    paths = [_manifest_input_name(item).lower() for item in manifest.get("inputs", [])]
+    if any(path.endswith((".tar.gz", ".tgz", ".gz")) for path in paths):
         return hy2d_altimeter
     if any(path.endswith(".h5") for path in paths) and any(path.endswith(".xml") for path in paths):
+        if hy1c_czi_l2a.has_l2a_product_evidence(manifest):
+            return hy1c_czi_l2a
         return hy1c_czi
-    if any("fy4b" in path or "agri" in path for path in paths):
+    if _has_fy4b_agri_evidence(manifest, roles):
         return fy4b_agri
     return fy3h_mersi
+
+
+def _has_gf6_l1a_evidence(manifest: dict[str, Any], roles: set[Any]) -> bool:
+    required_roles = {"METADATA_XML", "RPC_RPB", "NAV", "TILE_INDEX_TIL"}
+    if required_roles.issubset(roles) and sum(item.get("role") == "MAIN_TIFF_TILE" for item in manifest.get("inputs", [])) == 3:
+        return True
+    suffixes = [Path(_manifest_input_name(item)).suffix.lower() for item in manifest.get("inputs", [])]
+    return suffixes.count(".tif") + suffixes.count(".tiff") == 3 and {".xml", ".rpb", ".nav", ".til"}.issubset(suffixes)
+
+
+def _has_fy4b_agri_evidence(manifest: dict[str, Any], roles: set[Any]) -> bool:
+    required_roles = {"L1_0500M", "L1_1000M", "L1_2000M", "L1_4000M", "GEO_4000M"}
+    if required_roles.issubset(roles):
+        return True
+    names = [_manifest_input_name(item).upper() for item in manifest.get("inputs", [])]
+    role_patterns = {
+        "L1_0500M": r"^FY4B-_AGRI--_N_DISK_.+_L1-_FDI-_MULT_NOM_\d{14}_\d{14}_(?:0500M|500M)_V[^.]+\.HDF$",
+        "L1_1000M": r"^FY4B-_AGRI--_N_DISK_.+_L1-_FDI-_MULT_NOM_\d{14}_\d{14}_1000M_V[^.]+\.HDF$",
+        "L1_2000M": r"^FY4B-_AGRI--_N_DISK_.+_L1-_FDI-_MULT_NOM_\d{14}_\d{14}_2000M_V[^.]+\.HDF$",
+        "L1_4000M": r"^FY4B-_AGRI--_N_DISK_.+_L1-_FDI-_MULT_NOM_\d{14}_\d{14}_4000M_V[^.]+\.HDF$",
+        "GEO_4000M": r"^FY4B-_AGRI--_N_DISK_.+_L1-_GEO-_MULT_NOM_\d{14}_\d{14}_4000M_V[^.]+\.HDF$",
+    }
+    return all(sum(re.fullmatch(pattern, name) is not None for name in names) == 1 for pattern in role_patterns.values())
 
 
 def _is_l2a_candidate(candidate: Any) -> bool:
     return isinstance(candidate, dict) and candidate.get("profileKey") == {
         "productCode": "HY-1C-CZI", "profileVersion": "L2A-v1"
     }
+
+
+def _is_l2a_execution(payload: dict[str, Any]) -> bool:
+    return (
+        payload.get("profileCode") == "HY-1C-CZI"
+        and payload.get("profileVersion") == "L2A-v1"
+        and payload.get("stageKey") == "STANDARDIZE_L2A"
+    )
 
 
 def _to_response_candidate(item, manifest):
@@ -75,12 +155,21 @@ def _to_response_candidate(item, manifest):
             raise ValueError("adapter file is not declared by manifest")
         files.append({
             "role": file["role"], "ordinal": file["ordinal"],
-            "reference": {"sourceType": "LOCAL_FILE", "sourceId": Path(file["path"]).name},
+            "reference": {"sourceType": "LOCAL_FILE", "sourceId": file.get("originalFileName", Path(file["path"]).name)},
             "storageUriSnapshot": {"value": entry["storageUri"]},
             "checksum": entry.get("checksum", "sha256:manifest-authorized"),
-            "required": True,
+            "required": file.get("required", True),
         })
     return {key: value for key, value in item.items() if key != "files"} | {"files": files}
+
+
+def _manifest_input_name(item: Any) -> str:
+    if not isinstance(item, dict):
+        return ""
+    path = item.get("path")
+    if not isinstance(path, str):
+        return ""
+    return logical_file_name(Path(path), item)
 
 
 def _payload(request: dict[str, Any]) -> dict[str, Any]:
@@ -113,6 +202,42 @@ def _recognized_gf_candidate(manifest: dict[str, Any], package_id: Any) -> dict[
         if candidate["packageId"] == package_id:
             return candidate
     raise ValueError("recognized GF-6 packageId is required")
+
+
+def _recognized_fy3h_candidate(manifest: dict[str, Any], package_id: Any) -> dict[str, Any]:
+    if not isinstance(package_id, str) or not package_id:
+        raise ValueError("recognized FY-3H MERSI packageId is required")
+    for candidate in fy3h_mersi.inspect_manifest(manifest):
+        if candidate["packageId"] == package_id:
+            return candidate
+    raise ValueError("recognized FY-3H MERSI packageId is required")
+
+
+def _recognized_hy2d_candidate(manifest: dict[str, Any], package_id: Any) -> dict[str, Any]:
+    if not isinstance(package_id, str) or not package_id:
+        raise ValueError("recognized HY-2D packageId is required")
+    for candidate in hy2d_altimeter.inspect_manifest(manifest):
+        if candidate["packageId"] == package_id:
+            return candidate
+    raise ValueError("recognized HY-2D packageId is required")
+
+
+def _recognized_fy4b_candidate(manifest: dict[str, Any], package_id: Any) -> dict[str, Any]:
+    if not isinstance(package_id, str) or not package_id:
+        raise ValueError("recognized FY-4B AGRI packageId is required")
+    for candidate in fy4b_agri.inspect_manifest(manifest):
+        if candidate["packageId"] == package_id:
+            return candidate
+    raise ValueError("recognized FY-4B AGRI packageId is required")
+
+
+def _recognized_gf6_l1a_candidate(manifest: dict[str, Any], package_id: Any) -> dict[str, Any]:
+    if not isinstance(package_id, str) or not package_id:
+        raise ValueError("recognized GF6 L1A packageId is required")
+    for candidate in gf6_wfv_l1a.inspect_manifest(manifest):
+        if candidate["packageId"] == package_id:
+            return candidate
+    raise ValueError("recognized GF6 L1A packageId is required")
 
 
 def _execute_gf_browse_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:

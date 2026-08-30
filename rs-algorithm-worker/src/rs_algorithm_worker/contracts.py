@@ -52,6 +52,7 @@ def validate_invocation(
         role = item.get("role")
         ordinal = item.get("ordinal")
         path = item.get("path")
+        original_file_name = item.get("originalFileName")
         if not isinstance(uri, str) or not uri:
             raise ProtocolError("manifest storageUri is required")
         if not isinstance(role, str) or not role:
@@ -60,6 +61,8 @@ def validate_invocation(
             raise ProtocolError("manifest ordinal is invalid")
         if not isinstance(path, str) or not Path(path).is_absolute():
             raise ProtocolError("manifest input path must be absolute")
+        if "originalFileName" in item and not _safe_original_file_name(original_file_name):
+            raise ProtocolError("manifest originalFileName is invalid")
         if uri in manifest_uris:
             raise ProtocolError("duplicate manifest storageUri")
         coordinate = (role, ordinal)
@@ -136,6 +139,18 @@ def _within(path: Path, parent: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _safe_original_file_name(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value.strip())
+        and len(value) <= 255
+        and value not in {".", ".."}
+        and "/" not in value
+        and "\\" not in value
+        and not any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in value)
+    )
 
 
 def _require_object(value: Any, label: str) -> None:

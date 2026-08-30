@@ -6,7 +6,13 @@ import com.htht.multisource.domain.model.ExecutionId;
 
 public interface TaskDispatcher {
 
+    default void reserve(ExecutionId executionId) {
+    }
+
     DispatchReceipt dispatch(StageExecutionRequest request);
 
     void cancel(ExecutionId executionId);
+
+    default void release(ExecutionId executionId) {
+    }
 }

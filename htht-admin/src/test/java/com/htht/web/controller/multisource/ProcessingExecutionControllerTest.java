@@ -85,6 +85,49 @@ class ProcessingExecutionControllerTest {
         verify(details).get(TASK_ID, OWNER);
     }
 
+    @Test
+    void progressReturnsActionableStageFailureDetails() {
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        when(details.get(TASK_ID, OWNER)).thenReturn(new TaskDetailView(
+            TASK_ID, 33L, TaskLifecycleStatus.FAILED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-1", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of()))), List.of(),
+            List.of(new TaskStageView(STAGE_ID, "READ", StageExecutionStatus.FAILED, 1,
+                "INVALID_REQUEST", "L2A ROI bounds are invalid")), List.of()
+        ));
+        ProcessingExecutionController controller = controller(details, mock(DispatchNextStageUseCase.class),
+            mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class));
+
+        var response = controller.progress(101L);
+
+        assertThat(response.getBody().getData().stages()).singleElement().satisfies(stage -> {
+            assertThat(stage.errorCode()).isEqualTo("INVALID_REQUEST");
+            assertThat(stage.errorMessage()).isEqualTo("L2A ROI bounds are invalid");
+        });
+    }
+
+    @Test
+    void progressFailsClosedForHistoricalUnsafeWorkerErrorDetails() {
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        when(details.get(TASK_ID, OWNER)).thenReturn(new TaskDetailView(
+            TASK_ID, 33L, TaskLifecycleStatus.FAILED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-1", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of()))), List.of(),
+            List.of(new TaskStageView(STAGE_ID, "READ", StageExecutionStatus.FAILED, 1,
+                "C:\\secret\\worker-error", "failed to read C:\\secret\\work\\input.tif\nstack detail")), List.of()
+        ));
+        ProcessingExecutionController controller = controller(details, mock(DispatchNextStageUseCase.class),
+            mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class));
+
+        var response = controller.progress(101L);
+
+        assertThat(response.getBody().getData().stages()).singleElement().satisfies(stage -> {
+            assertThat(stage.errorCode()).isEqualTo("WORKER_DISPATCH_FAILED");
+            assertThat(stage.errorMessage()).isEqualTo("Worker 执行失败，请稍后重试");
+            assertThat(stage.errorCode()).doesNotContain("C:\\secret");
+            assertThat(stage.errorMessage()).doesNotContain("C:\\secret");
+            assertThat(stage.errorMessage()).doesNotContain("stack detail");
+        });
+    }
+
     private ProcessingExecutionController controller(GetTaskDetailUseCase details, DispatchNextStageUseCase dispatch,
                                                      CancelProcessingTaskUseCase cancel, RetryFailedStageUseCase retry) {
         return new ProcessingExecutionController(() -> OWNER, details, dispatch, cancel, retry);

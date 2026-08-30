@@ -35,6 +35,17 @@ class RetryFailedStageUseCaseTest {
     }
 
     @Test
+    void ownerCanRetryAStageWhenTheTaskLifecycleIsFailed() {
+        RecordingStages stages = new RecordingStages(failed(1));
+
+        new RetryFailedStageService(new SingleTaskRepository(TaskLifecycleStatus.FAILED), stages, 3)
+            .retry(new StageId(201L), OWNER);
+
+        assertThat(stages.stage.status()).isEqualTo(StageExecutionStatus.RETRYING);
+        assertThat(stages.stage.attempt()).isEqualTo(2);
+    }
+
+    @Test
     void rejectsRetryWhenStageHasReachedTotalAttemptLimitOrCallerIsNotOwner() {
         assertThatThrownBy(() -> new RetryFailedStageService(new SingleTaskRepository(), new RecordingStages(failed(3)), 3)
             .retry(new StageId(201L), OWNER)).isInstanceOf(IllegalStateException.class);

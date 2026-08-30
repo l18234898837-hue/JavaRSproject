@@ -65,6 +65,7 @@ import com.htht.multisource.infrastructure.worker.WorkerResultTranslator;
 import com.htht.system.service.ISysFileService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -73,6 +74,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 @Configuration
@@ -244,6 +249,16 @@ public class MultiSourceAdapterConfiguration {
         return new AcceptWorkerEventService(stageRepository, eventRepository, artifactRegistration, taskRepository);
     }
 
+    @Bean(name = "multisourceStageExecutor", destroyMethod = "shutdown")
+    public ExecutorService multisourceStageExecutor() {
+        AtomicInteger threadNumber = new AtomicInteger();
+        return Executors.newFixedThreadPool(2, command -> {
+            Thread thread = new Thread(command, "multisource-stage-" + threadNumber.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
     @Bean
     public DispatchNextStageUseCase dispatchNextStageUseCase(ProcessingTaskRepository taskRepository,
                                                              TaskStageRepository stageRepository,
@@ -251,9 +266,12 @@ public class MultiSourceAdapterConfiguration {
                                                              SysFileAssetStorageAdapter assetStorage,
                                                              ExecutionIdGenerator executionIdGenerator,
                                                              ExecutionClock executionClock,
-                                                             AcceptWorkerEventUseCase eventUseCase) {
+                                                             AcceptWorkerEventUseCase eventUseCase,
+                                                             ArtifactValidator artifactValidator,
+                                                             @Qualifier("multisourceStageExecutor") Executor dispatchExecutor) {
         return new DispatchNextStageService(taskRepository, stageRepository, workerGateway, assetStorage,
-            executionIdGenerator, executionClock, EXECUTION_LEASE_DURATION, eventUseCase);
+            executionIdGenerator, executionClock, EXECUTION_LEASE_DURATION, eventUseCase, artifactValidator,
+            dispatchExecutor);
     }
 
     @Bean

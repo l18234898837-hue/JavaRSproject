@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+import rs_algorithm_worker  # Configure Rasterio before test modules import it.
+
 
 def _path_env(name):
     value = os.getenv(name)

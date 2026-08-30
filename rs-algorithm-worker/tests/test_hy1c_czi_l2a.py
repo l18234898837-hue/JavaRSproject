@@ -1,6 +1,9 @@
+import json
+
 import pytest
 import h5py
 import numpy as np
+from PIL import Image
 
 from rs_algorithm_worker.l2a_profile import parse_l2a_parameters
 from rs_algorithm_worker.product_adapters.hy1c_czi_l2a import (
@@ -10,7 +13,7 @@ from rs_algorithm_worker.product_adapters.hy1c_czi_l2a import (
     validate_source_against_mapping,
 )
 from rs_algorithm_worker.registry import dispatch
-from rs_algorithm_worker.l2a_pipeline import execute_l2a_stage
+from rs_algorithm_worker.l2a_pipeline import _validate_output_grid, execute_l2a_stage
 
 
 def test_reviewed_l2a_mapping_declares_bands_navigation_and_quality():
@@ -21,6 +24,15 @@ def test_reviewed_l2a_mapping_declares_bands_navigation_and_quality():
     assert mapping.latitude_path.startswith("/")
     assert mapping.quality_flags_path.startswith("/")
     assert mapping.default_bad_flag_names
+
+
+def test_full_swath_50m_grid_fits_disk_backed_work_budget():
+    _validate_output_grid(21_257, 11_372, 4)
+
+
+def test_grid_exceeding_disk_backed_work_budget_is_rejected():
+    with pytest.raises(ValueError, match="output grid is too large"):
+        _validate_output_grid(30_000, 30_000, 4)
 
 
 @pytest.mark.real_sample
@@ -48,7 +60,26 @@ def test_l2a_rejects_fusion_band_not_selected():
             "schemaVersion": "1", "operation": "STANDARDIZE_L2A", "bands": ["B460", "B560"],
             "grid": {"targetCrs": "AUTO_UTM", "resolutionMeters": 50, "scienceResampling": "nearest"},
             "quality": {"policy": "default"},
-            "algorithms": {"fusion": {"enabled": True, "red": "B650", "green": "B560", "blue": "B460"}},
+            "algorithms": {"fusion": {
+                "enabled": True, "red": "B650", "green": "B560", "blue": "B460",
+                "lowPercentile": 2, "highPercentile": 98,
+            }},
+        }, centre_longitude=120.0, centre_latitude=30.0)
+
+
+@pytest.mark.parametrize(("name", "configuration", "message"), [
+    ("features", {"enabled": True, "metrics": ["unknown"], "windowSize": 3}, "feature metrics"),
+    ("fusion", {"enabled": True, "red": "B650", "green": "B560", "blue": "B460",
+                "lowPercentile": 98, "highPercentile": 2}, "fusion percentiles"),
+    ("saliency", {"enabled": True, "source": "B560", "threshold": 1.1, "windowSize": 5}, "saliency threshold"),
+])
+def test_l2a_rejects_invalid_enabled_algorithm_configuration(name, configuration, message):
+    with pytest.raises(ValueError, match=message):
+        parse_l2a_parameters({
+            "schemaVersion": "1", "operation": "STANDARDIZE_L2A",
+            "bands": ["B460", "B560", "B650", "B825"],
+            "grid": {"targetCrs": "AUTO_UTM", "resolutionMeters": 50, "scienceResampling": "nearest"},
+            "quality": {"policy": "default"}, "algorithms": {name: configuration},
         }, centre_longitude=120.0, centre_latitude=30.0)
 
 
@@ -93,9 +124,12 @@ def test_registry_routes_selected_l2a_candidate_to_the_l2a_plan(hy1c_l2a_manifes
 def synthetic_l2a_h5(tmp_path):
     path = tmp_path / "synthetic-l2a.h5"
     with h5py.File(path, "w") as handle:
+        handle.attrs["Product Name"] = "H1C_OPER_CZI_L2A_SYNTHETIC"
         handle.attrs["Satellite Name"] = "HY-1C"
         handle.attrs["Sensor Name"] = "CZI"
-        handle.attrs["Number of Bands"] = 4
+        handle.attrs["Number of Bands"] = "4"
+        handle.attrs["Scene Center Longitude"] = "120.0"
+        handle.attrs["Scene Center Latitude"] = "30.0"
         geo = handle.create_group("Geophysical Data")
         for wavelength in (460, 560, 650, 825):
             dataset = geo.create_dataset(f"Rrc{wavelength}", data=np.array([[np.nan, 0.02], [0.2, 0.03]], dtype=np.float32))
@@ -109,6 +143,95 @@ def synthetic_l2a_h5(tmp_path):
         sensor = handle.create_group("Sensor Band parameters")
         sensor.create_dataset("Wavelength", data=np.array([[460], [560], [650], [825]], dtype=np.int32))
     return path
+
+
+@pytest.fixture
+def synthetic_l2a_manifest(synthetic_l2a_h5, tmp_path):
+    metadata = tmp_path / "synthetic-l2a.xml"
+    metadata.write_text("<ProductMetadata />", encoding="utf-8")
+    browse = tmp_path / "synthetic-l2a.jpg"
+    Image.new("RGB", (2, 2), (10, 20, 30)).save(browse)
+    return {
+        "inputs": [
+            {"path": str(synthetic_l2a_h5), "role": "MAIN", "ordinal": 0,
+             "storageUri": "rs://input/synthetic-l2a.h5"},
+            {"path": str(metadata), "role": "METADATA", "ordinal": 0,
+             "storageUri": "rs://input/synthetic-l2a.xml"},
+            {"path": str(browse), "role": "BROWSE", "ordinal": 0,
+             "storageUri": "rs://input/synthetic-l2a.jpg"},
+        ]
+    }
+
+
+def test_registry_inspection_identifies_a_valid_l2a_package(synthetic_l2a_manifest):
+    response = dispatch({"operation": "inspect", "payload": {}}, synthetic_l2a_manifest)
+
+    assert response["candidates"][0]["profileKey"] == {
+        "productCode": "HY-1C-CZI", "profileVersion": "L2A-v1"
+    }
+    assert [file["role"] for file in response["candidates"][0]["files"]] == [
+        "MAIN", "METADATA", "BROWSE"
+    ]
+
+
+def _standard_l2a_snapshot():
+    return {
+        "schemaVersion": "1", "operation": "STANDARDIZE_L2A",
+        "bands": ["B460", "B560", "B650", "B825"],
+        "grid": {"targetCrs": "AUTO_UTM", "resolutionMeters": 50, "scienceResampling": "nearest"},
+        "quality": {"policy": "default"},
+        "algorithms": {
+            "features": {"enabled": False, "metrics": ["statistics"], "windowSize": 3},
+            "fusion": {"enabled": False, "red": "B650", "green": "B560", "blue": "B460",
+                       "lowPercentile": 2, "highPercentile": 98},
+            "saliency": {"enabled": False, "source": "B560", "threshold": 0.5, "windowSize": 5},
+        },
+    }
+
+
+def test_l2a_plan_has_one_executable_standardization_stage(synthetic_l2a_manifest):
+    candidate = inspect_l2a_manifest(synthetic_l2a_manifest)
+
+    plan = build_l2a_plan(candidate, _standard_l2a_snapshot())
+
+    assert plan["version"] == "plan-v2"
+    assert [stage["stageKey"] for stage in plan["stages"]] == ["STANDARDIZE_L2A"]
+    assert {output["artifactType"] for output in plan["stages"][0]["outputs"]} == {
+        "STANDARD_COG", "STANDARD_METADATA_JSON"
+    }
+
+
+def test_registry_standardizes_l2a_into_archiveable_output_artifacts(synthetic_l2a_manifest, tmp_path):
+    snapshot = _standard_l2a_snapshot()
+    snapshot["roiWgs84"] = {"minLon": 119.999, "minLat": 29.999, "maxLon": 120.011, "maxLat": 30.011}
+    snapshot["algorithms"] = {
+        "features": {"enabled": True, "metrics": ["statistics", "gradient", "local_variance"], "windowSize": 3},
+        "fusion": {"enabled": True, "red": "B650", "green": "B560", "blue": "B460",
+                   "lowPercentile": 2, "highPercentile": 98},
+        "saliency": {"enabled": True, "source": "B560", "threshold": 0.5, "windowSize": 5},
+    }
+    output_dir = tmp_path / "output"
+    manifest = synthetic_l2a_manifest | {"output": {"path": str(output_dir)}}
+
+    response = dispatch({
+        "operation": "execute-stage",
+        "payload": {
+            "profileCode": "HY-1C-CZI", "profileVersion": "L2A-v1", "stageKey": "STANDARDIZE_L2A",
+            "parameterSnapshot": json.dumps(snapshot), "outputUri": "rs://output/task-101",
+        },
+    }, manifest)
+
+    assert response["status"] == "SUCCEEDED"
+    assert {artifact["type"] for artifact in response["artifacts"]} == {
+        "STANDARD_COG", "STANDARD_METADATA_JSON", "FEATURE_COG", "FEATURE_METADATA_JSON",
+        "FUSION_COG", "FUSION_PREVIEW_PNG", "SALIENCY_SCORE_COG", "SALIENCY_MASK_COG",
+        "SALIENCY_PREVIEW_PNG",
+    }
+    assert all(artifact["uri"].startswith("rs://output/task-101/") for artifact in response["artifacts"])
+    assert all(artifact["sizeBytes"] > 0 and artifact["checksum"].startswith("sha256:")
+               for artifact in response["artifacts"])
+    assert (output_dir / "standard" / "czi-l2a.tif").is_file()
+    assert (output_dir / "standard" / "czi-l2a.json").is_file()
 
 
 def test_decode_masks_fill_and_out_of_range_values(synthetic_l2a_h5, tmp_path):

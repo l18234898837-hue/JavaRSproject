@@ -87,14 +87,33 @@ class AcceptWorkerEventUseCaseTest {
         assertThat(stages.stage.execution().errorCode()).isEqualTo("WORKER_FAILED");
     }
 
+    @Test
+    void appliesStructuredWorkerFailureCodeAndMessage() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(runningStage());
+        AcceptWorkerEventUseCase useCase = new AcceptWorkerEventService(stages, new InMemoryEventRepository());
+
+        assertThat(useCase.accept(event(new ExecutionId("exec-01"), ExecutionEvent.Type.FAILED, 1,
+            "INVALID_REQUEST", "L2A ROI bounds are invalid")))
+            .isEqualTo(AcceptWorkerEventUseCase.Result.APPLIED);
+
+        assertThat(stages.stage.execution().errorCode()).isEqualTo("INVALID_REQUEST");
+        assertThat(stages.stage.execution().errorMessage()).isEqualTo("L2A ROI bounds are invalid");
+    }
+
     private static TaskStage runningStage() {
         return new TaskStage(STAGE_ID, TASK_ID, "READ", StageExecutionStatus.PENDING, 1)
             .start(new ExecutionId("exec-01"), "worker-local", STARTED_AT, STARTED_AT.plusSeconds(300));
     }
 
     private static ExecutionEvent event(ExecutionId executionId, ExecutionEvent.Type type, long sequence) {
+        return event(executionId, type, sequence, "WORKER_FAILED", "processor failed");
+    }
+
+    private static ExecutionEvent event(ExecutionId executionId, ExecutionEvent.Type type, long sequence,
+                                       String code, String message) {
         return new ExecutionEvent(TASK_ID, STAGE_ID, executionId, 1, sequence, type,
-            "{\"code\":\"WORKER_FAILED\",\"message\":\"processor failed\"}", FINISHED_AT, ExecutionEvent.Acceptance.APPLIED);
+            "{\"code\":\"" + code + "\",\"message\":\"" + message + "\"}",
+            FINISHED_AT, ExecutionEvent.Acceptance.APPLIED);
     }
 
     private static final class InMemoryStageRepository implements TaskStageRepository {
