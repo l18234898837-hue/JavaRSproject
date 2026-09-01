@@ -74,6 +74,22 @@ def test_accepts_authorized_asset_root_outside_invocation_directory(tmp_path):
     validate_invocation(request(), manifest_value, manifest_path=invocation / "asset-manifest.json")
 
 
+def test_accepts_safe_optional_original_filename(tmp_path):
+    manifest_value = manifest(root=str(tmp_path))
+    manifest_value["inputs"][0]["originalFileName"] = "GF6_WFV_SAMPLE-1.tif"
+
+    validate_invocation(request(), manifest_value)
+
+
+@pytest.mark.parametrize("original_name", ["../escape.hdf", "directory\\escape.hdf", "bad\u0001.hdf", ""])
+def test_rejects_unsafe_original_filename(tmp_path, original_name):
+    manifest_value = manifest(root=str(tmp_path))
+    manifest_value["inputs"][0]["originalFileName"] = original_name
+
+    with pytest.raises(ProtocolError, match="originalFileName"):
+        validate_invocation(request(), manifest_value)
+
+
 def test_build_plan_reads_inputs_from_product_package(tmp_path):
     value = request()
     value["operation"] = "build-plan"

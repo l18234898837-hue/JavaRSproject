@@ -79,8 +79,15 @@ def _decode_netcdf(path: Path, meta_bytes: bytes) -> TrackData:
             "dimensions": {name: len(dim) for name, dim in dataset.dimensions.items()},
             "meta_xml_bytes": len(meta_bytes),
             "quality_fields": [name for name in _QUALITY if name in fields],
+            "mission_name": str(getattr(dataset, "Mission_Name", "")),
+            "sensor_name": str(getattr(dataset, "Altimeter_Sensor_Name", "")),
+            "file_data_type": str(getattr(dataset, "File_Data_Type", "")),
+            "longitude_normalization": "[-180,180)",
         }
-        return TrackData(time=time, longitude=core["lon"], latitude=core["lat"],
+        longitude = np.asarray(core["lon"], dtype=np.float64).copy()
+        finite_longitude = np.isfinite(longitude)
+        longitude[finite_longitude] = (longitude[finite_longitude] + 180.0) % 360.0 - 180.0
+        return TrackData(time=time, longitude=longitude, latitude=core["lat"],
                          fields={**fields, "alt": core["alt"], "range_ku": core["range_ku"]},
                          quality=quality, metadata=metadata)
 
@@ -88,14 +95,14 @@ def _decode_netcdf(path: Path, meta_bytes: bytes) -> TrackData:
 def decode_tar_gz(package: str | Path) -> TrackData:
     """Safely decode one HY-2D IDR/IGDR tar.gz package."""
     package_path = Path(package)
-    if not package_path.is_file() or not package_path.name.lower().endswith(".tar.gz"):
-        raise ValueError("HY-2D input must be a .tar.gz package")
+    if not package_path.is_file():
+        raise ValueError("HY-2D input package does not exist")
     try:
         with tarfile.open(package_path, "r:gz") as archive:
             members = archive.getmembers()
             for member in members:
                 _validate_member(member.name)
-                if not member.isfile():
+                if not member.isfile() and not member.isdir():
                     raise ValueError("unsafe archive member: only regular files are supported")
             nc_members = [member for member in members if member.name.lower().endswith(".nc")]
             meta_members = [member for member in members if member.name.lower().endswith(".meta.xml")]

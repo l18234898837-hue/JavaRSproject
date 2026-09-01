@@ -107,7 +107,7 @@ def write_track_grid_outputs(result: TrackGridResult, output_dir: Path) -> Track
     paths = {
         "netcdf": _safe_child(destination, "track-grid.nc"),
         "cog": _safe_child(destination, "track-grid.tif"),
-        "summary": _safe_child(destination, "track-grid-summary.json"),
+        "summary": _safe_child(destination, "summary.json"),
     }
     write_track_grid_netcdf(result, paths["netcdf"])
     write_track_grid_cog(result, paths["cog"])

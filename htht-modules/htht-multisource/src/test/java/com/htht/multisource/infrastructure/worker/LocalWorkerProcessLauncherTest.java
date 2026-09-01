@@ -11,9 +11,13 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @Tag("dev")
 class LocalWorkerProcessLauncherTest {
@@ -107,14 +111,93 @@ class LocalWorkerProcessLauncherTest {
         assertThat(workRoot.resolve("req-timeout").resolve("request.json")).isRegularFile();
     }
 
+    @Test
+    void reportsExecuteStageTimeoutWithAStableRetryableCode() {
+        LocalWorkerProcessLauncher launcher = launcher(
+            "sleep", Duration.ofSeconds(2), Duration.ofMillis(100)
+        );
+
+        WorkerProtocolException failure = assertThrows(
+            WorkerProtocolException.class,
+            () -> launcher.launch(new WorkerInvocation("req-stage-timeout", WorkerOperation.EXECUTE_STAGE, "{}"))
+        );
+
+        assertThat(failure.code()).isEqualTo(WorkerFailurePresentation.WORKER_STAGE_TIMEOUT);
+        assertThat(failure.workerMessage()).isEqualTo("execute-stage process exceeded configured timeout");
+        assertThat(failure.retryable()).isTrue();
+        assertThat(workRoot.resolve("req-stage-timeout").resolve("request.json")).isRegularFile();
+    }
+
+    @Test
+    void canceledReservationDoesNotStartAWorkerProcess() {
+        LocalWorkerProcessLauncher launcher = launcher("sleep", Duration.ofSeconds(2));
+        launcher.reserve("req-canceled-before-start");
+        launcher.cancel("req-canceled-before-start");
+
+        assertThatThrownBy(() -> launcher.launch(new WorkerInvocation(
+            "req-canceled-before-start", WorkerOperation.EXECUTE_STAGE, "{}"
+        ))).isInstanceOf(CancellationException.class);
+
+        assertThat(workRoot.resolve("req-canceled-before-start")).doesNotExist();
+        launcher.release("req-canceled-before-start");
+    }
+
+    @Test
+    void interruptedWaitTerminatesWorkerProcess() throws Exception {
+        LocalWorkerProcessLauncher launcher = launcher("sleep", Duration.ofSeconds(30));
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicBoolean interruptRestored = new AtomicBoolean();
+        Thread launchThread = new Thread(() -> {
+            try {
+                launcher.launch(new WorkerInvocation("req-interrupted", WorkerOperation.EXECUTE_STAGE, "{}"));
+            } catch (Throwable error) {
+                failure.set(error);
+                interruptRestored.set(Thread.currentThread().isInterrupted());
+            }
+        });
+
+        launchThread.start();
+        Path pidFile = workRoot.resolve("req-interrupted").resolve("worker.pid");
+        for (int attempt = 0; attempt < 100 && !Files.isRegularFile(pidFile); attempt++) {
+            Thread.sleep(50L);
+        }
+        assertThat(pidFile).isRegularFile();
+        long workerPid = Long.parseLong(Files.readString(pidFile));
+
+        launchThread.interrupt();
+        launchThread.join(5_000L);
+
+        assertThat(launchThread.isAlive()).isFalse();
+        assertThat(failure.get()).isInstanceOf(WorkerProtocolException.class)
+            .hasMessageContaining("process wait was interrupted");
+        assertThat(interruptRestored.get()).isTrue();
+        assertThat(ProcessHandle.of(workerPid).map(ProcessHandle::isAlive).orElse(false)).isFalse();
+    }
+
+    @Test
+    void usesDedicatedStageTimeoutForExecuteStage() {
+        LocalProcessWorkerProperties properties = new LocalProcessWorkerProperties(
+            List.of("python"), workRoot, Duration.ofMinutes(10), Duration.ofHours(12)
+        );
+
+        assertThat(properties.timeoutFor(WorkerOperation.INSPECT)).isEqualTo(Duration.ofMinutes(10));
+        assertThat(properties.timeoutFor(WorkerOperation.BUILD_PLAN)).isEqualTo(Duration.ofMinutes(10));
+        assertThat(properties.timeoutFor(WorkerOperation.EXECUTE_STAGE)).isEqualTo(Duration.ofHours(12));
+    }
+
     private LocalWorkerProcessLauncher launcher(String mode, Duration timeout) {
+        return launcher(mode, timeout, timeout);
+    }
+
+    private LocalWorkerProcessLauncher launcher(String mode, Duration timeout, Duration stageTimeout) {
         return new LocalWorkerProcessLauncher(new LocalProcessWorkerProperties(
             List.of(
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-cp", System.getProperty("java.class.path"), FixtureWorker.class.getName(), mode
             ),
             workRoot,
-            timeout
+            timeout,
+            stageTimeout
         ));
     }
 }

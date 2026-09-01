@@ -4,78 +4,109 @@ import json
 import math
 from typing import Any
 
-DEFAULT_PARAMETERS = {
-    "schemaVersion": "1",
-    "targetCrs": "EPSG:4326",
-    "roi": None,
-    "features": {"enabled": False, "metrics": ["statistics"], "windowSize": 3},
-    "fusion": {"enabled": False, "mode": "NIR_RED_BLUE", "percentiles": [2.0, 98.0]},
-    "saliency": {"enabled": False, "source": "C02_REFLECTANCE_500M", "threshold": 0.5, "windowSize": 3},
-}
-_TOP = {"schemaVersion", "targetCrs", "roi", "features", "fusion", "saliency"}
+
+_TOP_LEVEL_FIELDS = {"schemaVersion", "targetCrs", "roi", "features", "fusion", "saliency"}
+_FEATURE_FIELDS = {"enabled", "metrics", "windowSize"}
+_FUSION_FIELDS = {"enabled", "mode", "percentiles"}
+_SALIENCY_FIELDS = {"enabled", "source", "threshold", "windowSize"}
 _METRICS = {"statistics", "gradient", "local_variance", "toa_nir_red_nd", "btd_c13_c14"}
-_SOURCES = {"C02_REFLECTANCE_500M", "C03_REFLECTANCE_1000M", "C13_BRIGHTNESS_TEMPERATURE_4000M", "toa_nir_red_nd", "btd_c13_c14"}
+_PHYSICAL_SOURCES = {"C02_REFLECTANCE_500M", "C03_REFLECTANCE_1000M", "C13_BRIGHTNESS_TEMPERATURE_4000M"}
+
 
 def parse_fy4b_parameters(raw: dict[str, Any] | None) -> dict[str, Any]:
-    if raw is None: raw = {}
-    if not isinstance(raw, dict) or set(raw) - _TOP:
+    """Validate the FY-4B Worker snapshot and fill its stable defaults."""
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict) or set(raw).difference(_TOP_LEVEL_FIELDS):
         raise ValueError("FY-4B parameter object is invalid")
-    schema = raw.get("schemaVersion", "1")
-    if schema != "1": raise ValueError("FY-4B parameter schemaVersion is invalid")
-    crs = raw.get("targetCrs", "EPSG:4326")
-    if crs not in {"EPSG:4326", "EPSG:4490"}: raise ValueError("FY-4B parameter targetCrs is invalid")
-    roi = raw.get("roi")
-    if roi is not None:
-        if not isinstance(roi, (list, tuple)) or len(roi) != 4 or any(isinstance(v, bool) or not isinstance(v, (int,float)) or not math.isfinite(v) for v in roi):
-            raise ValueError("FY-4B parameter roi is invalid")
-        roi = [float(v) for v in roi]
-        if not (-180 <= roi[0] < roi[2] <= 180 and -90 <= roi[1] < roi[3] <= 90): raise ValueError("FY-4B parameter roi is invalid")
+    schema_version = raw.get("schemaVersion", "1")
+    if schema_version != "1":
+        raise ValueError("FY-4B parameter schemaVersion is invalid")
+    target_crs = raw.get("targetCrs", "EPSG:4326")
+    if not isinstance(target_crs, str) or target_crs not in {"EPSG:4326", "EPSG:4490"}:
+        raise ValueError("FY-4B parameter targetCrs is invalid")
     features = _features(raw.get("features", {}))
-    fusion = _fusion(raw.get("fusion", {}))
-    saliency = _saliency(raw.get("saliency", {}), features)
-    return {"schemaVersion": "1", "targetCrs": crs, "roi": roi, "features": features, "fusion": fusion, "saliency": saliency}
+    return {
+        "schemaVersion": "1", "targetCrs": target_crs, "roi": _roi(raw.get("roi")),
+        "features": features, "fusion": _fusion(raw.get("fusion", {})),
+        "saliency": _saliency(raw.get("saliency", {}), features),
+    }
 
-def _odd(value: Any, label: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 3 or value % 2 == 0: raise ValueError(f"FY-4B parameter {label} windowSize is invalid")
-    return value
-
-def _features(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) - {"enabled", "metrics", "windowSize"}: raise ValueError("FY-4B parameter features is invalid")
-    enabled = value.get("enabled", False)
-    metrics = value.get("metrics", ["statistics"])
-    if not isinstance(enabled, bool) or not isinstance(metrics, list) or len(set(metrics)) != len(metrics) or any(m not in _METRICS for m in metrics): raise ValueError("FY-4B parameter features is invalid")
-    if enabled and not metrics: raise ValueError("FY-4B parameter features requires metrics")
-    result = {"enabled": enabled, "metrics": list(metrics)}
-    if "local_variance" in metrics: result["windowSize"] = _odd(value.get("windowSize", 3), "features")
-    return result
-
-def _fusion(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) - {"enabled", "mode", "percentiles"}: raise ValueError("FY-4B parameter fusion is invalid")
-    enabled = value.get("enabled", False)
-    if not isinstance(enabled, bool): raise ValueError("FY-4B parameter fusion is invalid")
-    if not enabled: return {"enabled": False, "mode": "NIR_RED_BLUE", "percentiles": [2.0, 98.0]}
-    if value.get("mode", "NIR_RED_BLUE") != "NIR_RED_BLUE": raise ValueError("FY-4B parameter fusion mode is invalid")
-    p = value.get("percentiles", [2.0, 98.0])
-    if not isinstance(p, (list, tuple)) or len(p) != 2 or any(isinstance(v, bool) or not isinstance(v, (int,float)) or not math.isfinite(v) for v in p) or not 0 <= p[0] < p[1] <= 100: raise ValueError("FY-4B parameter percentiles are invalid")
-    return {"enabled": True, "mode": "NIR_RED_BLUE", "percentiles": [float(p[0]), float(p[1])]}
-
-def _saliency(value: Any, features: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) - {"enabled", "source", "threshold", "windowSize"}: raise ValueError("FY-4B parameter saliency is invalid")
-    enabled = value.get("enabled", False)
-    if not isinstance(enabled, bool): raise ValueError("FY-4B parameter saliency is invalid")
-    if not enabled: return {"enabled": False, "source": "C02_REFLECTANCE_500M", "threshold": 0.5, "windowSize": 3}
-    source = value.get("source", "C02_REFLECTANCE_500M")
-    feature_sources = {f"{m}:C02_REFLECTANCE_500M" for m in features.get("metrics", []) if m in {"gradient", "local_variance"}}
-    feature_sources |= {m for m in features.get("metrics", []) if m in {"toa_nir_red_nd", "btd_c13_c14"}}
-    if source not in _SOURCES and source not in feature_sources: raise ValueError("FY-4B parameter saliency source is invalid")
-    threshold = value.get("threshold", 0.5)
-    if isinstance(threshold, bool) or not isinstance(threshold, (int,float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1: raise ValueError("FY-4B parameter saliency threshold is invalid")
-    return {"enabled": True, "source": source, "threshold": float(threshold), "windowSize": _odd(value.get("windowSize", 3), "saliency")}
 
 def snapshot(parameters: dict[str, Any]) -> str:
     return json.dumps(parameters, sort_keys=True, separators=(",", ":"))
 
-def raw_input(key: str, artifact_type: str) -> dict[str, Any]: return {"key": key, "source": "RAW_INPUT", "artifactType": artifact_type, "required": True}
-def artifact_input(key: str, artifact_type: str) -> dict[str, Any]: return {"key": key, "source": "UPSTREAM_ARTIFACT", "artifactType": artifact_type, "required": True}
-def output(artifact_type: str, relative_path: str, retention: str) -> dict[str, Any]: return {"artifactType": artifact_type, "relativePath": relative_path, "retention": retention}
-def stage(key: str, deps: list[str], inputs: list[dict[str, Any]], outputs: list[dict[str, Any]], params: str) -> dict[str, Any]: return {"stageKey": key, "stageCode": key, "dependsOnStageKeys": deps, "inputs": inputs, "outputs": outputs, "parameterSnapshot": params}
+
+def _roi(value: Any) -> list[float] | None:
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)) or len(value) != 4 or any(not _finite_number(item) for item in value):
+        raise ValueError("FY-4B parameter roi is invalid")
+    roi = [float(item) for item in value]
+    if not (-180 <= roi[0] < roi[2] <= 180 and -90 <= roi[1] < roi[3] <= 90):
+        raise ValueError("FY-4B parameter roi is invalid")
+    return roi
+
+
+def _features(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value).difference(_FEATURE_FIELDS):
+        raise ValueError("FY-4B parameter features is invalid")
+    enabled, metrics = value.get("enabled", False), value.get("metrics", ["statistics"])
+    if (not isinstance(enabled, bool) or not isinstance(metrics, list)
+            or any(not isinstance(metric, str) or metric not in _METRICS for metric in metrics)
+            or len(metrics) != len(set(metrics)) or enabled and not metrics):
+        raise ValueError("FY-4B parameter features is invalid")
+    result = {"enabled": enabled, "metrics": list(metrics)}
+    if "local_variance" in metrics:
+        result["windowSize"] = _odd_window(value.get("windowSize", 3), "features")
+    elif "windowSize" in value:
+        raise ValueError("FY-4B parameter features windowSize is invalid")
+    return result
+
+
+def _fusion(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value).difference(_FUSION_FIELDS):
+        raise ValueError("FY-4B parameter fusion is invalid")
+    enabled, mode, percentiles = value.get("enabled", False), value.get("mode", "NIR_RED_BLUE"), value.get("percentiles", [2.0, 98.0])
+    if not isinstance(enabled, bool):
+        raise ValueError("FY-4B parameter fusion is invalid")
+    if not enabled:
+        return {"enabled": False, "mode": "NIR_RED_BLUE", "percentiles": [2.0, 98.0]}
+    if mode != "NIR_RED_BLUE":
+        raise ValueError("FY-4B parameter fusion mode is invalid")
+    if (not isinstance(percentiles, (list, tuple)) or len(percentiles) != 2
+            or any(not _finite_number(item) for item in percentiles)
+            or not 0 <= percentiles[0] < percentiles[1] <= 100):
+        raise ValueError("FY-4B parameter percentiles are invalid")
+    return {"enabled": True, "mode": "NIR_RED_BLUE", "percentiles": [float(percentiles[0]), float(percentiles[1])]}
+
+
+def _saliency(value: Any, features: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value).difference(_SALIENCY_FIELDS):
+        raise ValueError("FY-4B parameter saliency is invalid")
+    enabled, source, threshold = value.get("enabled", False), value.get("source", "C02_REFLECTANCE_500M"), value.get("threshold", 0.5)
+    if not isinstance(enabled, bool) or not isinstance(source, str):
+        raise ValueError("FY-4B parameter saliency is invalid")
+    if not enabled:
+        return {"enabled": False, "source": "C02_REFLECTANCE_500M", "threshold": 0.5, "windowSize": 3}
+    feature_sources = {
+        f"{metric}:C02_REFLECTANCE_500M" for metric in features["metrics"]
+        if metric in {"gradient", "local_variance"}
+    }
+    feature_sources.update(metric for metric in features["metrics"] if metric in {"toa_nir_red_nd", "btd_c13_c14"})
+    if source not in _PHYSICAL_SOURCES and (not features["enabled"] or source not in feature_sources):
+        raise ValueError("FY-4B parameter saliency source is invalid")
+    if not _finite_number(threshold) or not 0 <= threshold <= 1:
+        raise ValueError("FY-4B parameter saliency threshold is invalid")
+    return {"enabled": True, "source": source, "threshold": float(threshold),
+            "windowSize": _odd_window(value.get("windowSize", 3), "saliency")}
+
+
+def _odd_window(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 3 or value % 2 == 0:
+        raise ValueError(f"FY-4B parameter {name} windowSize is invalid")
+    return value
+
+
+def _finite_number(value: Any) -> bool:
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)

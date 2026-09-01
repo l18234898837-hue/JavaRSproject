@@ -20,11 +20,20 @@ public record WorkerAssetManifest(
         Objects.requireNonNull(outputPath, "outputPath");
     }
 
-    public record Input(String storageUri, String role, int ordinal, Path path, String checksum) {
+    public record Input(
+        String storageUri,
+        String role,
+        int ordinal,
+        Path path,
+        String originalFileName,
+        String checksum,
+        boolean required
+    ) {
         public Input {
             Objects.requireNonNull(storageUri, "storageUri");
             Objects.requireNonNull(role, "role");
             Objects.requireNonNull(path, "path");
+            Objects.requireNonNull(originalFileName, "originalFileName");
             Objects.requireNonNull(checksum, "checksum");
         }
     }

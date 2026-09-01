@@ -1,26 +1,51 @@
 from __future__ import annotations
 
 import json
+import re
 import tarfile
 from typing import Any
+from xml.etree import ElementTree as ET
 
 from .base import candidate, input_paths
+
+
+_PACKAGE_NAME = re.compile(r"^H2D_OPER_(?:IDR|IGDR)_2MC_.+\.tar\.gz$", re.IGNORECASE)
 
 
 def inspect_manifest(manifest):
     candidates = []
     for path in input_paths(manifest):
-        if not path.name.lower().endswith(".tar.gz"):
-            raise ValueError("HY-2D altimeter evidence requires tar.gz packages")
         try:
             with tarfile.open(path, "r:gz") as archive:
                 members = [member for member in archive.getmembers() if member.isfile()]
-                if not members:
+                nc_members = [member for member in members if member.name.lower().endswith(".nc")]
+                xml_members = [member for member in members if member.name.lower().endswith(".meta.xml")]
+                if len(nc_members) != 1 or len(xml_members) != 1:
                     raise ValueError("HY-2D altimeter evidence is incomplete")
-        except (OSError, tarfile.TarError) as error:
+                nc_stem = nc_members[0].name.rsplit("/", 1)[-1][:-3]
+                xml_stem = xml_members[0].name.rsplit("/", 1)[-1][:-9]
+                package_id = nc_stem
+                if nc_stem != xml_stem or _PACKAGE_NAME.fullmatch(package_id + ".tar.gz") is None:
+                    raise ValueError("HY-2D altimeter package members do not match")
+                xml_file = archive.extractfile(xml_members[0])
+                if xml_file is None:
+                    raise ValueError("HY-2D altimeter metadata is unreadable")
+                root = ET.fromstring(xml_file.read())
+                evidence = {
+                    "satelliteId": root.findtext("SatelliteID", "").strip(),
+                    "sensorId": root.findtext("SensorID", "").strip(),
+                    "productLevel": root.findtext(".//ProductLevel", "").strip(),
+                    "productFormat": root.findtext(".//ProductFormat", "").strip(),
+                    "orbitId": root.findtext("OrbitID", "").strip(),
+                    "orbitPass": root.findtext("OrbitPass", "").strip(),
+                }
+                if evidence["satelliteId"] != "HY2D" or evidence["sensorId"] != "ALT" \
+                        or not evidence["productLevel"].startswith("IDR") or evidence["productFormat"] != "NETCDF":
+                    raise ValueError("HY-2D altimeter evidence is incomplete")
+        except (OSError, tarfile.TarError, ET.ParseError) as error:
             raise ValueError("HY-2D altimeter evidence is unreadable") from error
-        candidates.append(candidate(path.stem, "HY-2D-ALTIMETER", "ALONG_TRACK_OBSERVATION", [path],
-                                    {"memberCount": len(members)}))
+        candidates.append(candidate(package_id, "HY-2D-ALTIMETER", "ALONG_TRACK_OBSERVATION", [path],
+                                    {"memberCount": len(members), **evidence}))
     return candidates
 
 
@@ -64,6 +89,7 @@ def build_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | Non
             _output("STANDARD_TRACK_PARQUET", "standard/track.parquet", "FINAL"),
             _output("STANDARD_TRACK_CSV", "standard/track.csv", "FINAL"),
             _output("STANDARD_TRACK_GEOJSON", "standard/track.geojson", "FINAL"),
+            _output("STANDARD_TRACK_ANOMALIES_GEOJSON", "standard/anomalies.geojson", "FINAL"),
             _output("STANDARD_TRACK_SUMMARY_JSON", "standard/summary.json", "FINAL"),
         ], snapshot),
     ]
@@ -74,6 +100,34 @@ def build_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | Non
             _output("TRACK_GRID_SUMMARY_JSON", "grid/summary.json", "FINAL"),
         ], snapshot))
     return {"version": "plan-v2", "stages": stages}
+
+
+def build_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Declare one self-contained along-track stage for the current dispatcher."""
+    source_plan = build_plan(product, parameter_snapshot)
+    parameters = json.loads(source_plan["stages"][0]["parameterSnapshot"])
+    outputs = [
+        _output("TRACK_FEATURES_JSON", "features/summary.json", "FINAL"),
+        _output("TRACK_FEATURE_WINDOWS_PARQUET", "features/windows.parquet", "FINAL"),
+        _output("TRACK_ANOMALIES_GEOJSON", "anomalies/points.geojson", "FINAL"),
+        _output("TRACK_ANOMALY_SUMMARY_JSON", "anomalies/summary.json", "FINAL"),
+        _output("STANDARD_TRACK_NETCDF", "standard/track.nc", "FINAL"),
+        _output("STANDARD_TRACK_PARQUET", "standard/track.parquet", "FINAL"),
+        _output("STANDARD_TRACK_CSV", "standard/track.csv", "FINAL"),
+        _output("STANDARD_TRACK_GEOJSON", "standard/track.geojson", "FINAL"),
+        _output("STANDARD_TRACK_ANOMALIES_GEOJSON", "standard/anomalies.geojson", "FINAL"),
+        _output("STANDARD_TRACK_SUMMARY_JSON", "standard/summary.json", "FINAL"),
+    ]
+    if parameters["grid"]["enabled"]:
+        outputs.extend([
+            _output("TRACK_GRID_NETCDF", "grid/track-grid.nc", "FINAL"),
+            _output("TRACK_GRID_COG", "grid/track-grid.tif", "FINAL"),
+            _output("TRACK_GRID_SUMMARY_JSON", "grid/summary.json", "FINAL"),
+        ])
+    snapshot = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
+    return {"version": "plan-v2", "stages": [
+        _stage("STANDARDIZE_ALTIMETER_TRACK", [], [_input("main", "RAW_INPUT", "MAIN")], outputs, snapshot)
+    ]}
 
 
 def _parameters(value: dict[str, Any]) -> dict[str, Any]:
@@ -95,7 +149,7 @@ def _parameters(value: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("invalid HY-2D grid parameters")
     enabled = grid.get("enabled", False)
     spacing = grid.get("spacingDegrees", 0.25)
-    if not isinstance(enabled, bool) or not _positive(spacing) or spacing > 5.0:
+    if not isinstance(enabled, bool) or not _positive(spacing) or spacing < 0.1 or spacing > 5.0:
         raise ValueError("HY-2D grid parameters are invalid")
     return {"qualityPolicyVersion": quality, "featureWindowSize": feature_window,
             "anomaly": {"madThreshold": float(mad), "jumpThresholdMeters": float(jump)},

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from fy3h_fixture import make_fy3h_pair
-from rs_algorithm_worker.product_adapters.fy3h_mersi import build_plan, inspect_manifest
+from rs_algorithm_worker.product_adapters.fy3h_mersi import build_integrated_plan, build_plan, inspect_manifest
 
 
 PROFILE = {"productCode": "FY-3H-MERSI", "profileVersion": "L1-1000M-GEO1K-v1"}
@@ -28,6 +28,48 @@ def test_fy3h_recognizes_one_matching_1000m_and_geo1k_pair(tmp_path):
         ("GEO1K", 0, str(geo)),
     ]
     assert build_plan(candidate)["stages"][0]["stageCode"] == "VALIDATE_FY3H_PAIR"
+
+
+def test_fy3h_recovers_original_names_from_uuid_storage_paths(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path)
+    stored_observation = observation.with_name("c916fe6d-45a9-47df-a19c-03582f83e140.HDF")
+    stored_geo = geo.with_name("75bfb183-8dc9-4b80-b5a2-508f9fb482af.HDF")
+    observation.rename(stored_observation)
+    geo.rename(stored_geo)
+    manifest = {"inputs": [
+        {"path": str(stored_observation), "role": "OBSERVATION", "ordinal": 0},
+        {"path": str(stored_geo), "role": "GEO1K", "ordinal": 0},
+    ]}
+
+    candidate = inspect_manifest(manifest)[0]
+
+    assert candidate["packageId"].endswith("_V0")
+    assert [(item["role"], item["path"]) for item in candidate["files"]] == [
+        ("OBSERVATION", str(stored_observation)),
+        ("GEO1K", str(stored_geo)),
+    ]
+
+
+def test_fy3h_rejects_manifest_roles_that_swap_the_hdf_pair(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path)
+    manifest = {"inputs": [
+        {"path": str(observation), "role": "GEO1K", "ordinal": 0},
+        {"path": str(geo), "role": "OBSERVATION", "ordinal": 0},
+    ]}
+
+    with pytest.raises(ValueError, match="manifest role"):
+        inspect_manifest(manifest)
+
+
+def test_fy3h_keeps_direct_original_filename_compatibility_without_file_name_attribute(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path)
+    for path in (observation, geo):
+        with h5py.File(path, "r+") as handle:
+            del handle.attrs["File Name"]
+
+    candidate = inspect_manifest(_manifest(observation, geo))[0]
+
+    assert candidate["packageId"].endswith("_V0")
 
 
 def test_fy3h_plan_declares_the_fixed_pair_processing_contract(tmp_path):
@@ -63,6 +105,20 @@ def test_fy3h_plan_declares_the_fixed_pair_processing_contract(tmp_path):
     snapshot = snapshots.pop()
     assert json.loads(snapshot)["bands"] == list(range(1, 26))
     assert snapshot == json.dumps(json.loads(snapshot), sort_keys=True, separators=(",", ":"))
+
+
+def test_fy3h_integrated_plan_matches_the_single_dispatch_contract(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path)
+    candidate = inspect_manifest(_manifest(observation, geo))[0]
+
+    plan = build_integrated_plan(candidate, {"bands": [1, 2, 3]})
+
+    assert [stage["stageKey"] for stage in plan["stages"]] == ["STANDARDIZE_MERSI_L1"]
+    stage = plan["stages"][0]
+    assert [item["artifactType"] for item in stage["inputs"]] == ["OBSERVATION", "GEO1K"]
+    assert {item["artifactType"] for item in stage["outputs"]} == {
+        "STANDARD_MERSI_COG", "STANDARD_MERSI_QUALITY_COG", "STANDARD_MERSI_SUMMARY_JSON",
+    }
 
 
 def test_fy3h_rejects_even_saliency_window_and_quality_override(tmp_path):
@@ -130,6 +186,8 @@ def test_fy3h_rejects_mismatched_pair_metadata_or_grid(tmp_path, mismatch, value
         renamed = geo.with_name(geo.name.replace("_V0.HDF", f"_{value}.HDF"))
         geo.rename(renamed)
         geo = renamed
+        with h5py.File(geo, "r+") as handle:
+            handle.attrs["File Name"] = geo.name
     else:
         with h5py.File(geo, "r+") as handle:
             del handle["Geolocation/Latitude"]
@@ -192,8 +250,9 @@ def test_fy3h_rejects_single_or_non_hdf_evidence(tmp_path, name):
 
 
 @pytest.mark.real_sample
-def test_fy3h_real_sample_pair_has_expected_roles_and_geolocation_shape(fy3h_mersi_manifest):
-    candidates = inspect_manifest(fy3h_mersi_manifest)
+def test_fy3h_real_sample_pair_has_expected_roles_and_geolocation_shape(fy3h_manifest):
+    inputs = fy3h_manifest["inputs"][:2]
+    candidates = inspect_manifest({"inputs": inputs})
 
     assert len(candidates) == 1
     candidate = candidates[0]

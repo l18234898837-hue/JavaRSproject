@@ -1,6 +1,7 @@
 from affine import Affine
 import numpy as np
 import pytest
+import warnings
 
 from rs_algorithm_worker.algorithms.features import FeatureParameters, extract_features
 from rs_algorithm_worker.algorithms.fusion import FusionParameters, fuse_bands
@@ -27,6 +28,21 @@ def test_fusion_baseline_stacks_explicit_bands_after_percentile_stretch():
     assert result.values.shape == (3, 2, 2)
     assert tuple(item.name for item in result.band_metadata) == ("red", "green", "blue")
     assert result.values.dtype == np.uint8
+
+
+def test_fusion_preserves_nodata_without_a_runtime_cast_warning():
+    source = _bands().raster
+    raster = RasterData(
+        values=source.values.astype(np.float32), crs=source.crs, transform=source.transform, nodata=np.nan,
+        band_metadata=source.band_metadata,
+    )
+    raster.values[:, 0, 0] = np.nan
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        result = fuse_bands(BandSet(raster), FusionParameters(red="B3", green="B2", blue="B1"))
+
+    np.testing.assert_array_equal(result.values[:, 0, 0], np.zeros(3, dtype=np.uint8))
 
 
 def test_saliency_baseline_returns_score_and_threshold_mask():

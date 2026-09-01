@@ -37,7 +37,7 @@
 		<dynamic-ds.version>3.5.2</dynamic-ds.version>
 		<alibaba-ttl.version>2.14.2</alibaba-ttl.version>
 		<powerjob.version>4.3.6</powerjob.version>
-		<lombok.version>1.18.26</lombok.version>
+		<lombok.version>1.18.46</lombok.version>
 		<bouncycastle.version>1.72</bouncycastle.version>
 		<!--国密-->
 		<sm.version>0.3.2</sm.version>

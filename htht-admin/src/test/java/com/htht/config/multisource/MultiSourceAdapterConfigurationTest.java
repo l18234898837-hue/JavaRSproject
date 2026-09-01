@@ -20,6 +20,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import java.nio.file.Path;
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -40,6 +41,10 @@ class MultiSourceAdapterConfigurationTest {
             assertThat(context).hasSingleBean(CreateProcessingBatchUseCase.class);
             assertThat(context).hasSingleBean(GetTaskDetailUseCase.class);
             assertThat(context).hasSingleBean(MultiSourceWorkerProperties.class);
+            assertThat(context).hasBean("multisourceStageExecutor");
+            MultiSourceWorkerProperties properties = context.getBean(MultiSourceWorkerProperties.class);
+            assertThat(properties.toLocalProcessProperties().timeout()).isEqualTo(Duration.ofMinutes(10));
+            assertThat(properties.toLocalProcessProperties().stageTimeout()).isEqualTo(Duration.ofHours(12));
         });
     }
 
@@ -72,6 +77,7 @@ class MultiSourceAdapterConfigurationTest {
                 "multisource.worker.work-root=" + uploadRoot.resolve("worker"),
                 "multisource.worker.artifact-root=" + uploadRoot.resolve("artifacts"),
                 "multisource.worker.timeout=10m",
+                "multisource.worker.stage-timeout=12h",
                 "multisource.worker.processor-version=worker-test-1.0.0"
             )
             .withBean(ISysFileService.class, () -> mock(ISysFileService.class))

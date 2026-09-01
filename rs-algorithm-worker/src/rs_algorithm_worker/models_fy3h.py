@@ -126,7 +126,10 @@ def read_calibrated_mersi(path: Path) -> CalibratedMersi:
 def _write(path: Path, arrays: Mapping[str, np.ndarray], model: str, metadata: Mapping[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     document = {"modelVersion": MODEL_VERSION, "model": model, "metadata": _json_value(metadata)}
-    np.savez_compressed(path, **arrays, metadata_json=np.asarray(json.dumps(document, ensure_ascii=True, sort_keys=True)))
+    # These archives only connect stages inside one local execution. Deflate
+    # dominated real 25-band runtimes and the integrated stage removes them
+    # after final artifacts are written, so compression has no storage value.
+    np.savez(path, **arrays, metadata_json=np.asarray(json.dumps(document, ensure_ascii=True, sort_keys=True)))
     path.with_suffix(".json").write_text(json.dumps(document, ensure_ascii=True, sort_keys=True, allow_nan=False), encoding="utf-8")
     return path
 

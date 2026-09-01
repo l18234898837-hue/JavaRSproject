@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.htht.common.helper.LoginHelper;
 import com.htht.common.utils.IDUtil;
 import com.htht.multisource.application.port.out.ArtifactRepository;
-import com.htht.multisource.application.port.out.TaskArtifactStore;
 import com.htht.multisource.application.port.out.ArtifactValidator;
 import com.htht.multisource.application.port.out.AssetStorage;
 import com.htht.multisource.application.port.out.ExecutionClock;
@@ -66,6 +65,7 @@ import com.htht.multisource.infrastructure.worker.WorkerResultTranslator;
 import com.htht.system.service.ISysFileService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -74,6 +74,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 @Configuration
@@ -161,22 +165,8 @@ public class MultiSourceAdapterConfiguration {
 
     @Bean
     public ArtifactRegistration multisourceArtifactRegistration(ArtifactValidator validator,
-                                                                ArtifactRepository artifactRepository,
-                                                                TaskArtifactStore artifactStore) {
-        return new ArtifactRegistrationService(validator, artifactRepository, artifactStore);
-    }
-
-    @Bean
-    public CompositeLocalWorkerAssetResolver multisourceWorkerAssetResolver(SysFileAssetStorageAdapter sysFileStorage,
-                                                                              TaskArtifactStore artifactStore,
-                                                                              MultiSourceWorkerProperties properties) {
-        return new CompositeLocalWorkerAssetResolver(sysFileStorage, properties.requireArtifactRoot());
-    }
-
-    @Bean
-    public TaskArtifactStore taskArtifactStore(MultiSourceWorkerProperties properties) {
-        return new LocalTaskArtifactStore(properties.toLocalProcessProperties().workRoot(),
-            properties.requireArtifactRoot());
+                                                                 ArtifactRepository artifactRepository) {
+        return new ArtifactRegistrationService(validator, artifactRepository);
     }
 
     @Bean
@@ -196,7 +186,7 @@ public class MultiSourceAdapterConfiguration {
 
     @Bean
     public LocalProcessWorkerGateway multisourceWorkerGateway(MultiSourceWorkerProperties properties,
-                                                               CompositeLocalWorkerAssetResolver assetStorage,
+                                                               SysFileAssetStorageAdapter assetStorage,
                                                                @Value("${file.upload-path}") String uploadPath) {
         ObjectMapper objectMapper = new ObjectMapper();
         var workerProperties = properties.toLocalProcessProperties();
@@ -215,15 +205,15 @@ public class MultiSourceAdapterConfiguration {
 
     @Bean
     public PreflightProductUseCase preflightProductUseCase(LocalProcessWorkerGateway workerGateway,
-                                                           CompositeLocalWorkerAssetResolver assetStorage) {
+                                                           SysFileAssetStorageAdapter assetStorage) {
         return new PreflightProductService((ProductInspector) workerGateway, assetStorage);
     }
 
     @Bean
     public TaskCreationCoordinator multisourceTaskCreationCoordinator(ProcessingTaskRepository taskRepository,
                                                                        TaskStageRepository stageRepository,
-                                                                     LocalProcessWorkerGateway workerGateway,
-                                                                       CompositeLocalWorkerAssetResolver assetStorage,
+                                                                       LocalProcessWorkerGateway workerGateway,
+                                                                       SysFileAssetStorageAdapter assetStorage,
                                                                        TaskIdGenerator taskIdGenerator,
                                                                        StageIdGenerator stageIdGenerator) {
         return new TaskCreationCoordinator(taskRepository, stageRepository, (ProcessingPlanner) workerGateway,
@@ -259,18 +249,29 @@ public class MultiSourceAdapterConfiguration {
         return new AcceptWorkerEventService(stageRepository, eventRepository, artifactRegistration, taskRepository);
     }
 
+    @Bean(name = "multisourceStageExecutor", destroyMethod = "shutdown")
+    public ExecutorService multisourceStageExecutor() {
+        AtomicInteger threadNumber = new AtomicInteger();
+        return Executors.newFixedThreadPool(2, command -> {
+            Thread thread = new Thread(command, "multisource-stage-" + threadNumber.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
     @Bean
     public DispatchNextStageUseCase dispatchNextStageUseCase(ProcessingTaskRepository taskRepository,
                                                              TaskStageRepository stageRepository,
                                                              LocalProcessWorkerGateway workerGateway,
-                                                             CompositeLocalWorkerAssetResolver assetStorage,
+                                                             SysFileAssetStorageAdapter assetStorage,
                                                              ExecutionIdGenerator executionIdGenerator,
                                                              ExecutionClock executionClock,
                                                              AcceptWorkerEventUseCase eventUseCase,
-                                                             ArtifactRepository artifactRepository) {
+                                                             ArtifactValidator artifactValidator,
+                                                             @Qualifier("multisourceStageExecutor") Executor dispatchExecutor) {
         return new DispatchNextStageService(taskRepository, stageRepository, workerGateway, assetStorage,
-            executionIdGenerator, executionClock, EXECUTION_LEASE_DURATION, eventUseCase, artifactRepository,
-            new com.htht.multisource.application.usecase.service.StageInputResolver());
+            executionIdGenerator, executionClock, EXECUTION_LEASE_DURATION, eventUseCase, artifactValidator,
+            dispatchExecutor);
     }
 
     @Bean

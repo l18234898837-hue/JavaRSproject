@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import rasterio
 from affine import Affine
+import rs_algorithm_worker.fy3h_mersi_pipeline as fy3h_pipeline
 
 from fy3h_fixture import COLUMNS, ROWS, make_fy3h_pair
 from rs_algorithm_worker.fy3h_mersi_pipeline import (
@@ -19,6 +20,7 @@ from rs_algorithm_worker.fy3h_mersi_pipeline import (
     calibrate_mersi,
     calibrate_reflective,
     decode_mersi_pair,
+    execute_fy3h_product,
 )
 from rs_algorithm_worker.models_fy3h import (
     CalibratedMersi,
@@ -214,6 +216,47 @@ def test_standard_mersi_cogs_have_declared_bands_and_safe_summary(tmp_path):
     with rasterio.open(result.quality_cog) as dataset:
         assert dataset.descriptions == ("quality_mask",)
     assert "C:\\" not in result.summary_path.read_text(encoding="utf-8")
+
+
+def test_integrated_fy3h_product_returns_only_selected_bands_and_prepares_one_grid(tmp_path, monkeypatch):
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    observation, geo = make_fy3h_pair(input_dir)
+    output = tmp_path / "output"
+
+    prepare_calls = 0
+    actual_prepare = fy3h_pipeline.prepare_swath_grid
+
+    def counted_prepare(*args, **kwargs):
+        nonlocal prepare_calls
+        prepare_calls += 1
+        return actual_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(fy3h_pipeline, "prepare_swath_grid", counted_prepare)
+    response = execute_fy3h_product({
+        "stageKey": "STANDARDIZE_MERSI_L1",
+        "outputUri": "rs://output/fy3h-integrated",
+        "parameterSnapshot": {"resolutionDegrees": 0.1, "bands": [1, 2, 3]},
+    }, {
+        "inputs": [
+            {"role": "OBSERVATION", "ordinal": 0, "path": str(observation)},
+            {"role": "GEO1K", "ordinal": 0, "path": str(geo)},
+        ],
+        "output": {"path": str(output)},
+    })
+
+    assert {artifact["type"] for artifact in response["artifacts"]} == {
+        "STANDARD_MERSI_COG", "STANDARD_MERSI_QUALITY_COG", "STANDARD_MERSI_SUMMARY_JSON",
+    }
+    assert (output / "standard" / "mersi.tif").is_file()
+    assert (output / "standard" / "quality.tif").is_file()
+    assert all(not (output / name).exists() for name in ("validation", "decoded", "calibrated", "quality", "grid"))
+    assert prepare_calls == 1
+    with rasterio.open(output / "standard" / "mersi.tif") as dataset:
+        assert dataset.count == 3
+        assert dataset.descriptions == ("CH01_REFLECTANCE", "CH02_REFLECTANCE", "CH03_REFLECTANCE")
+    summary = json.loads((output / "standard" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["bands"] == [1, 2, 3]
 
 
 def test_execute_feature_stage_writes_requested_feature_bands_and_statistics_to_declared_artifacts(tmp_path):

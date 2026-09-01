@@ -3,9 +3,9 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from PIL import Image
+import pytest
 
-from fy3h_fixture import make_fy3h_pair
-from fy4b_fixture import make_fy4b_package
+from rs_algorithm_worker import cli
 
 
 def test_cli_writes_response_atomically(tmp_path):
@@ -48,58 +48,138 @@ def test_cli_writes_response_atomically(tmp_path):
     assert not response_file.with_suffix(".json.tmp").exists()
 
 
-def test_cli_runs_fy3h_inspect_build_plan_and_declared_validation_stage(tmp_path):
-    observation, geo = make_fy3h_pair(tmp_path)
-    inputs = [
-        {"storageUri": "rs://input/observation", "role": "OBSERVATION", "ordinal": 0, "path": str(observation), "checksum": "sha256:observation"},
-        {"storageUri": "rs://input/geo", "role": "GEO1K", "ordinal": 1, "path": str(geo), "checksum": "sha256:geo"},
-    ]
-    inspect = _invoke_cli(tmp_path, "inspect", {"inputs": [{"storageUriSnapshot": {"value": item["storageUri"]}} for item in inputs]}, inputs)
-    candidate = inspect["payload"]["candidates"][0]
-    assert candidate["profileKey"]["productCode"] == "FY-3H-MERSI"
+def test_cli_preserves_actionable_validation_message(tmp_path, monkeypatch):
+    request_file = tmp_path / "request.json"
+    manifest_file = tmp_path / "asset-manifest.json"
+    response_file = tmp_path / "response.json"
+    request_file.write_text(json.dumps({
+        "schemaVersion": "1.0",
+        "operation": "build-plan",
+        "requestId": "req-invalid-01",
+        "payload": {},
+    }), encoding="utf-8")
+    manifest_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(cli, "validate_invocation", lambda *_args, **_kwargs: None)
 
-    plan = _invoke_cli(tmp_path, "build-plan", {"candidate": candidate, "parameterSnapshot": {"targetCrs": "EPSG:4326", "resolutionDegrees": 0.01}}, inputs)
-    assert plan["payload"]["version"] == "plan-v2"
+    def fail_with_detail(_request, _manifest):
+        raise ValueError("L2A ROI bounds are invalid")
 
-    validated = _invoke_cli(tmp_path, "execute-stage", {
-        "profileCode": "FY-3H-MERSI", "stageKey": "VALIDATE_FY3H_PAIR", "outputUri": "rs://output/fy3h-validation",
-        "parameterSnapshot": {}, "inputs": [{"storageUriSnapshot": {"value": item["storageUri"]}} for item in inputs],
-    }, inputs)
-    artifact = validated["payload"]["artifacts"][0]
-    assert artifact["type"] == "FY3H_INPUT_VALIDATION_JSON"
-    assert artifact["uri"] == "rs://output/fy3h-validation/validation/pair.json"
-    assert str(tmp_path) not in json.dumps(validated)
+    monkeypatch.setattr(cli, "dispatch", fail_with_detail)
 
+    assert cli.main([
+        "--request", str(request_file),
+        "--asset-manifest", str(manifest_file),
+        "--response", str(response_file),
+    ]) == 2
 
-def test_cli_runs_fy4b_inspect_build_plan_and_declared_validation_stage(tmp_path):
-    package = make_fy4b_package(tmp_path)
-    inputs = [
-        {"storageUri": f"rs://input/fy4b/{index}", "role": item["role"], "ordinal": item["ordinal"],
-         "path": item["path"], "checksum": f"sha256:{index}"}
-        for index, item in enumerate(package["inputs"])
-    ]
-    inspect = _invoke_cli(tmp_path, "inspect", {"inputs": [{"storageUriSnapshot": {"value": item["storageUri"]}} for item in inputs]}, inputs)
-    candidate = inspect["payload"]["candidates"][0]
-    assert candidate["profileKey"]["productCode"] == "FY-4B-AGRI"
-    plan = _invoke_cli(tmp_path, "build-plan", {"candidate": candidate, "parameterSnapshot": {"schemaVersion": "1", "targetCrs": "EPSG:4326"}}, inputs)
-    assert plan["payload"]["stages"][0]["stageKey"] == "VALIDATE_FY4B_PACKAGE"
-    response = _invoke_cli(tmp_path, "execute-stage", {
-        "profileCode": "FY-4B-AGRI", "stageKey": "VALIDATE_FY4B_PACKAGE", "outputUri": "rs://output/fy4b-validation",
-        "parameterSnapshot": {"schemaVersion": "1", "targetCrs": "EPSG:4326"},
-        "inputs": [{"storageUriSnapshot": {"value": item["storageUri"]}} for item in inputs],
-    }, inputs)
-    artifact = response["payload"]["artifacts"][0]
-    assert artifact["type"] == "FY4B_INPUT_VALIDATION_JSON"
-    assert artifact["uri"] == "rs://output/fy4b-validation/validation/package.json"
-    assert str(tmp_path) not in json.dumps(response)
+    response = json.loads(response_file.read_text(encoding="utf-8"))
+    assert response["error"]["message"] == "L2A ROI bounds are invalid"
 
 
-def _invoke_cli(tmp_path, operation, payload, inputs):
-    request_file = tmp_path / f"{operation}-request.json"
-    manifest_file = tmp_path / f"{operation}-manifest.json"
-    response_file = tmp_path / f"{operation}-response.json"
-    request_file.write_text(json.dumps({"schemaVersion": "1.0", "operation": operation, "requestId": "fy3h-request", "payload": payload}), encoding="utf-8")
-    manifest_file.write_text(json.dumps({"manifestVersion": "1.0", "requestId": "fy3h-request", "grantReference": "grant-fy3h", "expiresAt": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(), "inputs": inputs, "output": {"path": str(tmp_path / "worker-output")}}), encoding="utf-8")
-    result = subprocess.run([sys.executable, "-m", "rs_algorithm_worker.cli", "--request", str(request_file), "--asset-manifest", str(manifest_file), "--response", str(response_file)], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    return json.loads(response_file.read_text(encoding="utf-8"))
+def test_cli_preserves_the_authoritative_gf6_output_limit_error_code(tmp_path, monkeypatch):
+    request_file = tmp_path / "request.json"
+    manifest_file = tmp_path / "asset-manifest.json"
+    response_file = tmp_path / "response.json"
+    request_file.write_text(json.dumps({
+        "schemaVersion": "1.0",
+        "operation": "execute-stage",
+        "requestId": "req-gf6-limit",
+        "payload": {},
+    }), encoding="utf-8")
+    manifest_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(cli, "validate_invocation", lambda *_args, **_kwargs: None)
+
+    def fail_with_limit(_request, _manifest):
+        raise ValueError(
+            "GF6_OUTPUT_LIMIT_EXCEEDED: grid pixels 31339110702159 exceed 2000000000"
+        )
+
+    monkeypatch.setattr(cli, "dispatch", fail_with_limit)
+
+    assert cli.main([
+        "--request", str(request_file),
+        "--asset-manifest", str(manifest_file),
+        "--response", str(response_file),
+    ]) == 2
+
+    response = json.loads(response_file.read_text(encoding="utf-8"))
+    assert response["error"] == {
+        "code": "GF6_OUTPUT_LIMIT_EXCEEDED",
+        "message": "GF6_OUTPUT_LIMIT_EXCEEDED: grid pixels 31339110702159 exceed 2000000000",
+        "retryable": False,
+    }
+
+
+@pytest.mark.parametrize(("message", "actionable"), [
+    ("GF6_PARAMETER_INVALID: roi at {path}\nTraceback (most recent call last):\ninternal detail", "GF6_PARAMETER_INVALID: roi"),
+    ("GF6_PARAMETER_INVALID: roi at {path} Traceback (most recent call last): internal detail", "GF6_PARAMETER_INVALID: roi"),
+    ("FY-4B AGRI evidence requires a complete five-file package at {path}\nTraceback (most recent call last):\ninternal detail",
+     "FY-4B AGRI evidence requires a complete five-file package"),
+])
+def test_cli_sanitizes_actionable_validation_messages_without_losing_the_error_detail(tmp_path, monkeypatch, message, actionable):
+    request_file = tmp_path / "request.json"
+    manifest_file = tmp_path / "asset-manifest.json"
+    response_file = tmp_path / "response.json"
+    request_file.write_text(json.dumps({
+        "schemaVersion": "1.0",
+        "operation": "execute-stage",
+        "requestId": "req-invalid-02",
+        "payload": {},
+    }), encoding="utf-8")
+    manifest_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(cli, "validate_invocation", lambda *_args, **_kwargs: None)
+
+    def fail_with_private_detail(_request, _manifest):
+        raise ValueError(message.format(path=tmp_path / "private-input"))
+
+    monkeypatch.setattr(cli, "dispatch", fail_with_private_detail)
+
+    assert cli.main([
+        "--request", str(request_file),
+        "--asset-manifest", str(manifest_file),
+        "--response", str(response_file),
+    ]) == 2
+
+    response = json.loads(response_file.read_text(encoding="utf-8"))
+    assert response["error"]["code"] == "INVALID_REQUEST"
+    assert response["error"]["retryable"] is False
+    assert actionable in response["error"]["message"]
+    assert str(tmp_path) not in response["error"]["message"]
+    assert "Traceback" not in response["error"]["message"]
+
+
+@pytest.mark.parametrize("private_path", [
+    r"\\server\private\scene.tif",
+    r"\\?\C:\private data\scene.tif",
+    r"C:\private data\scene.tif",
+])
+def test_cli_sanitizes_unc_and_space_containing_windows_paths_without_losing_actionable_text(tmp_path, monkeypatch, private_path):
+    request_file = tmp_path / "request.json"
+    manifest_file = tmp_path / "asset-manifest.json"
+    response_file = tmp_path / "response.json"
+    request_file.write_text(json.dumps({
+        "schemaVersion": "1.0",
+        "operation": "execute-stage",
+        "requestId": "req-invalid-03",
+        "payload": {},
+    }), encoding="utf-8")
+    manifest_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(cli, "validate_invocation", lambda *_args, **_kwargs: None)
+
+    def fail_with_private_detail(_request, _manifest):
+        raise ValueError(f"GF6_PARAMETER_INVALID: roi for {private_path}")
+
+    monkeypatch.setattr(cli, "dispatch", fail_with_private_detail)
+
+    assert cli.main([
+        "--request", str(request_file),
+        "--asset-manifest", str(manifest_file),
+        "--response", str(response_file),
+    ]) == 2
+
+    response = json.loads(response_file.read_text(encoding="utf-8"))
+    assert response["error"] == {
+        "code": "INVALID_REQUEST",
+        "message": "GF6_PARAMETER_INVALID: roi for <local path>",
+        "retryable": False,
+    }

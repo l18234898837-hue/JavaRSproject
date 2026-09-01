@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 from xml.sax.saxutils import escape
 
 import numpy as np
@@ -12,216 +13,499 @@ from rasterio.enums import Resampling
 from rasterio.warp import reproject
 from rasterio.windows import Window
 
-from .gf6_processing import calibrate_gf6, detect_gf6_saliency, extract_gf6_features
+from .gf6_processing import detect_gf6_saliency, extract_gf6_features
 from .models_gf6 import Gf6ProductEvidence
-from .operators.gf6_mosaic import iter_gf6_mosaic_windows, read_gf6_window
-from .operators.gf6_rpc import as_rasterio_rpc, build_nominal_rpc_grid, crop_nominal_rpc_grid, window_transform
-from .product_adapters.gf6_wfv_l1a import inspect_paths
-
-STAGES = {"INSPECT_GF6_WFV_L1A", "MOSAIC_GF6_TILES", "CALIBRATE_GF6_WFV", "BUILD_GF6_RPC_GRID", "ALIGN_GF6_BANDS", "CROP_GF6_RASTER", "WRITE_GF6_STANDARD_COG", "EXTRACT_GF6_FEATURES", "FUSE_GF6_BANDS", "DETECT_GF6_SALIENCY"}
-_NODATA, _BLOCK = -9999.0, 256
+from .operators.gf6_rpc import as_rasterio_rpc, build_nominal_rpc_grid, crop_nominal_rpc_grid
+from .operators.windowed_cog import open_windowed_cog
+from .product_adapters.gf6_wfv_l1a import inspect_evidence, parse_parameters
 
 
-def execute_gf6_stage(stage_code: str, inputs: Sequence[Path], parameters: dict[str, Any], output_dir: Path, output_uri: str = "rs://output/gf6") -> dict[str, Any]:
-    if stage_code not in STAGES:
+_NODATA = -9999.0
+_BLOCK = 256
+_RPC_WARP_THREADS = 2
+_MAX_OUTPUT_PIXELS = 2_000_000_000
+_MAX_ESTIMATED_OUTPUT_BYTES = 224 * 1024**3
+_FUSION_SAMPLE_STEP = 16
+_MAX_FUSION_SAMPLES_PER_BAND = 8_000_000
+
+
+def execute_gf6_product(payload: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("stageKey") != "STANDARDIZE_GF6_WFV_L1A":
         raise ValueError("unsupported GF6 L1A stage")
-    evidence = inspect_paths([Path(path) for path in inputs])
-    output_dir = Path(output_dir); output_dir.mkdir(parents=True, exist_ok=True)
-    if stage_code == "INSPECT_GF6_WFV_L1A":
-        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [], "metadata": evidence.metadata_snapshot}
-    if stage_code == "BUILD_GF6_RPC_GRID":
-        grid = _grid(evidence, parameters); path = output_dir / "nominal-rpc-grid.json"
-        path.write_text(json.dumps(_grid_metadata(grid), sort_keys=True) + "\n", encoding="utf-8")
-        return _result(output_uri, [(path, "GF6_NOMINAL_RPC_GRID_JSON")])
-    if stage_code == "MOSAIC_GF6_TILES":
-        path = output_dir / "gf6-dn-mosaic.tif"; _write_source_mosaic(evidence, path)
-        return _result(output_uri, [(path, "GF6_DN_MOSAIC_TIFF")])
-    if stage_code in {"CALIBRATE_GF6_WFV", "ALIGN_GF6_BANDS", "CROP_GF6_RASTER", "WRITE_GF6_STANDARD_COG"}:
-        path = output_dir / "gf6-standard-cog.tif"; _write_standard_cog(evidence, path, parameters)
-        return _result(output_uri, [(path, "GF6_STANDARD_COG")])
-    if stage_code == "EXTRACT_GF6_FEATURES":
-        return _write_features(evidence, output_dir, parameters, output_uri)
-    if stage_code == "FUSE_GF6_BANDS":
-        return _write_fusion(evidence, output_dir, parameters, output_uri)
-    return _write_saliency(evidence, output_dir, parameters, output_uri)
-
-
-def _grid(evidence: Gf6ProductEvidence, parameters: dict[str, Any]):
-    grid = build_nominal_rpc_grid(evidence, parameters.get("targetCrs", "EPSG:4326"), float(parameters.get("resolution", 0.00015)), float(parameters.get("rpcHeight", 0.0)))
-    return crop_nominal_rpc_grid(grid, tuple(parameters["roi"])) if parameters.get("roi") else grid
-
-
-def _grid_metadata(grid: Any) -> dict[str, Any]:
-    return {"crs": grid.crs, "transform": list(grid.transform), "width": grid.width, "height": grid.height, "bounds": grid.bounds, "heightMeters": grid.height_m, "navigationStatus": grid.navigation_status, "accuracyStatus": grid.accuracy_status}
-
-
-def _write_source_mosaic(evidence: Gf6ProductEvidence, path: Path) -> None:
-    profile = {"driver": "GTiff", "width": evidence.width, "height": evidence.height, "count": 8, "dtype": "uint16", "transform": rasterio.Affine.identity(), "nodata": 0, "tiled": True, "blockxsize": _BLOCK, "blockysize": _BLOCK, "compress": "deflate", "BIGTIFF": "IF_SAFER"}
-    with rasterio.open(path, "w", **profile) as dataset:
-        dataset.update_tags(ns="RPC", **as_rasterio_rpc(evidence.rpc).to_gdal())
-        for mosaic_window in iter_gf6_mosaic_windows(evidence, (_BLOCK, _BLOCK)):
-            values = read_gf6_window(evidence, mosaic_window)
-            dataset.write(values, window=Window(mosaic_window.col_off, mosaic_window.row_off, mosaic_window.width, mosaic_window.height))
+    output_uri = payload.get("outputUri")
+    if not isinstance(output_uri, str) or not output_uri.startswith("rs://output/"):
+        raise ValueError("GF6 L1A logical output URI is required")
+    output = manifest.get("output")
+    if not isinstance(output, dict) or not isinstance(output.get("path"), str):
+        raise ValueError("GF6 L1A temporary output directory is required")
+    parameters = parse_parameters(_payload_parameters(payload))
+    evidence = inspect_evidence(manifest)
+    directory = Path(output["path"]).resolve(); directory.mkdir(parents=True, exist_ok=True)
+    standard = directory / "standard" / "gf6-standard.tif"
+    standard.parent.mkdir(parents=True, exist_ok=True)
+    _write_standard_cog(evidence, standard, parameters)
+    artifacts: list[tuple[str, Path]] = [("GF6_STANDARD_COG", standard)]
+    summary = _write_processing_summary(standard, evidence, parameters)
+    artifacts.append(("GF6_PROCESSING_SUMMARY_JSON", summary))
+    if parameters["features"]["enabled"]: artifacts.extend(_write_features(standard, directory, parameters))
+    if parameters["fusion"]["enabled"]: artifacts.extend(_write_fusion(standard, directory, parameters))
+    if parameters["saliency"]["enabled"]: artifacts.extend(_write_saliency(standard, directory, parameters))
+    return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, kind, path, directory) for kind, path in artifacts], "metadata": {"navigationStatus": "NOMINAL_RPC_NO_DEM", "accuracyStatus": "UNVALIDATED"}}
 
 
 def _write_standard_cog(evidence: Gf6ProductEvidence, path: Path, parameters: dict[str, Any]) -> None:
-    source_path = path.with_name(f".{path.stem}-source.vrt")
-    _write_mosaic_vrt(evidence, source_path)
+    grid = build_nominal_rpc_grid(evidence, parameters["targetCrs"], parameters["resolution"], 0.0)
+    if parameters["roi"]: grid = crop_nominal_rpc_grid(grid, tuple(parameters["roi"]))
+    _validate_output_budget(grid, parameters)
+    vrt = path.with_name(f".{path.stem}-source.vrt")
+    _write_mosaic_vrt(evidence, vrt)
     try:
-        _resample_source_to_grid(evidence, source_path, path, _grid(evidence, parameters))
+        _resample_vrt_to_standard(evidence, vrt, path, grid, parameters["bands"])
     finally:
-        source_path.unlink(missing_ok=True)
+        vrt.unlink(missing_ok=True)
+
+
+def _validate_output_budget(grid, parameters: dict[str, Any]) -> dict[str, int]:
+    width, height = int(grid.width), int(grid.height)
+    if width <= 0 or height <= 0:
+        raise ValueError("GF6_OUTPUT_LIMIT_EXCEEDED: grid dimensions must be positive")
+    pixels = width * height
+    if pixels > _MAX_OUTPUT_PIXELS:
+        raise ValueError(
+            f"GF6_OUTPUT_LIMIT_EXCEEDED: grid pixels {pixels} exceed {_MAX_OUTPUT_PIXELS} "
+            f"({grid.width}x{grid.height}); increase resolution or reduce ROI"
+        )
+    bytes_per_pixel = 4 * len(parameters["bands"])
+    if parameters["features"]["enabled"]:
+        raster_metric_count = sum(
+            metric != "statistics" for metric in parameters["features"]["metrics"]
+        )
+        feature_band_count = len(parameters["bands"]) * max(1, raster_metric_count)
+        bytes_per_pixel += 4 * feature_band_count
+    if parameters["fusion"]["enabled"]:
+        bytes_per_pixel += 3
+    if parameters["saliency"]["enabled"]:
+        bytes_per_pixel += 5
+    pyramid_pixels = _cog_pyramid_pixel_counts(width, height)
+    estimated_bytes = sum(pyramid_pixels) * bytes_per_pixel
+    if parameters["fusion"]["enabled"]:
+        # The RGB COG keeps valid zero-valued pixels distinguishable from
+        # NoData through an internal one-bit dataset mask at every level.
+        estimated_bytes += sum((level_pixels + 7) // 8 for level_pixels in pyramid_pixels)
+    if estimated_bytes > _MAX_ESTIMATED_OUTPUT_BYTES:
+        raise ValueError(
+            f"GF6_OUTPUT_LIMIT_EXCEEDED: estimated output bytes {estimated_bytes} exceed "
+            f"{_MAX_ESTIMATED_OUTPUT_BYTES}; reduce bands/derivatives/ROI or increase resolution"
+        )
+    return {
+        "width": int(grid.width),
+        "height": int(grid.height),
+        "pixels": pixels,
+        "estimatedBytes": estimated_bytes,
+    }
+
+
+def _cog_pyramid_pixel_counts(width: int, height: int) -> tuple[int, ...]:
+    levels: list[int] = []
+    while True:
+        levels.append(width * height)
+        if width <= _BLOCK and height <= _BLOCK:
+            return tuple(levels)
+        width = max(1, (width + 1) // 2)
+        height = max(1, (height + 1) // 2)
 
 
 def _write_mosaic_vrt(evidence: Gf6ProductEvidence, path: Path) -> None:
-    """Build a disk-light TIL mosaic whose RPC metadata drives GDAL warping."""
-    rpc_metadata = "".join(
-        f'<MDI key="{key}">{value}</MDI>' for key, value in as_rasterio_rpc(evidence.rpc).to_gdal().items()
-    )
+    rpc = "".join(f'<MDI key="{key}">{value}</MDI>' for key, value in as_rasterio_rpc(evidence.rpc).to_gdal().items())
     bands = []
-    for band_index in range(1, 9):
-        sources = []
-        for tile in evidence.tiles:
-            sources.append(
-                '<SimpleSource>'
-                f'<SourceFilename relativeToVRT="0">{escape(str(tile.path))}</SourceFilename>'
-                f'<SourceBand>{band_index}</SourceBand>'
-                f'<SrcRect xOff="0" yOff="0" xSize="{tile.width}" ySize="{tile.height}"/>'
-                f'<DstRect xOff="{tile.column_offset}" yOff="{tile.row_offset}" xSize="{tile.width}" ySize="{tile.height}"/>'
-                '</SimpleSource>'
+    for index in range(1, 9):
+        sources = "".join(
+            '<SimpleSource>'
+            f'<SourceFilename relativeToVRT="0">{escape(str(tile.path))}</SourceFilename>'
+            f'<SourceBand>{index}</SourceBand><SrcRect xOff="0" yOff="0" xSize="{tile.width}" ySize="{tile.height}"/>'
+            f'<DstRect xOff="{tile.column_offset}" yOff="{tile.row_offset}" xSize="{tile.width}" ySize="{tile.height}"/>'
+            '</SimpleSource>' for tile in evidence.tiles
+        )
+        bands.append(f'<VRTRasterBand dataType="UInt16" band="{index}"><NoDataValue>0</NoDataValue>{sources}</VRTRasterBand>')
+    path.write_text(f'<VRTDataset rasterXSize="{evidence.width}" rasterYSize="{evidence.height}"><Metadata domain="RPC">{rpc}</Metadata>{"".join(bands)}</VRTDataset>', encoding="utf-8")
+
+
+def _resample_vrt_to_standard(evidence: Gf6ProductEvidence, vrt: Path, path: Path, grid, selected_bands: list[int]) -> None:
+    profile = {"driver": "GTiff", "width": grid.width, "height": grid.height, "count": len(selected_bands), "dtype": "float32", "crs": grid.crs, "transform": grid.transform, "nodata": _NODATA, "interleave": "band", "BLOCKSIZE": _BLOCK, "COMPRESS": "DEFLATE", "BIGTIFF": "IF_SAFER"}
+    with rasterio.open(vrt) as source, open_windowed_cog(
+        path,
+        profile,
+        block_size=_BLOCK,
+        overview_resampling="AVERAGE",
+    ) as destination:
+        if source.rpcs is None:
+            raise ValueError("GF6_EVIDENCE_INVALID: VRT RPC metadata is unavailable")
+        for output_index, band in enumerate(selected_bands, 1):
+            reproject(
+                rasterio.band(source, band),
+                rasterio.band(destination, output_index),
+                rpcs=source.rpcs,
+                src_nodata=0,
+                dst_transform=grid.transform,
+                dst_crs=grid.crs,
+                dst_nodata=_NODATA,
+                resampling=Resampling.bilinear,
+                init_dest_nodata=True,
+                warp_mem_limit=256,
+                num_threads=_RPC_WARP_THREADS,
+                RPC_HEIGHT=0.0,
             )
-        bands.append(f'<VRTRasterBand dataType="UInt16" band="{band_index}"><NoDataValue>0</NoDataValue>{"".join(sources)}</VRTRasterBand>')
-    path.write_text(
-        f'<VRTDataset rasterXSize="{evidence.width}" rasterYSize="{evidence.height}">'
-        f'<Metadata domain="RPC">{rpc_metadata}</Metadata>{"".join(bands)}</VRTDataset>',
+            spec = evidence.bands[band - 1]
+            for target_window in _windows(grid.width, grid.height):
+                destination_values = destination.read(output_index, window=target_window)
+                valid = destination_values != _NODATA
+                destination_values[valid] = spec.gain * destination_values[valid] + spec.offset
+                destination.write(destination_values, output_index, window=target_window)
+            destination.set_band_description(output_index, f"B{spec.number}_{spec.wavelength}")
+        destination.update_tags(calibrationFormula="AGain*DN+AOffset", calibrationUnit="W.m-2.sr-1.um-1", navigationStatus="NOMINAL_RPC_NO_DEM", accuracyStatus="UNVALIDATED", heightMode="CONSTANT", heightMeters="0", rpcResampling="bilinear")
+
+
+def _write_processing_summary(standard: Path, evidence: Gf6ProductEvidence, parameters: dict[str, Any]) -> Path:
+    path = standard.with_name("summary.json")
+    path.write_text(json.dumps({"profileKey": {"productCode": "GF-6-WFV-L1A", "profileVersion": "v1"}, "declaredDimensions": evidence.metadata_snapshot["declaredDimensions"], "tileCoverageDimensions": evidence.metadata_snapshot["tileCoverageDimensions"], "tileCoverageDelta": evidence.metadata_snapshot["tileCoverageDelta"], "navigationStatus": "NOMINAL_RPC_NO_DEM", "accuracyStatus": "UNVALIDATED", "rpcHeightMode": "CONSTANT", "rpcHeight": 0.0, "bands": parameters["bands"]}, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def _write_features(standard: Path, directory: Path, parameters: dict[str, Any]) -> list[tuple[str, Path]]:
+    path, summary = directory / "features" / "gf6-features.tif", directory / "features" / "summary.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with rasterio.open(standard) as source:
+        metrics = parameters["features"]["metrics"]
+        raster_metrics = [metric for metric in metrics if metric != "statistics"]
+        statistics_only = not raster_metrics
+        output_count = source.count if statistics_only else len(raster_metrics) * source.count
+        descriptions = tuple(description or f"B{band}" for description, band in zip(source.descriptions, parameters["bands"]))
+        statistics = [_empty_statistics() for _ in range(source.count)]
+        profile = source.profile.copy(); profile.update(driver="GTiff", count=output_count, dtype="float32", nodata=_NODATA, interleave="band", BLOCKSIZE=_BLOCK, COMPRESS="DEFLATE", BIGTIFF="IF_SAFER")
+        with open_windowed_cog(
+            path,
+            profile,
+            block_size=_BLOCK,
+            overview_resampling="AVERAGE",
+        ) as dest:
+            if statistics_only:
+                for index, description in enumerate(descriptions, 1):
+                    dest.set_band_description(index, f"statistics:value:{description}")
+                dest.update_tags(statisticsRasterSemantics="VALID_STANDARDIZED_VALUE_CARRIER")
+            else:
+                index = 1
+                for metric in raster_metrics:
+                    for description in descriptions:
+                        dest.set_band_description(index, f"{metric}:{description}")
+                        index += 1
+            halo = _feature_halo(metrics, parameters["features"].get("windowSize", 3))
+            for window in _windows(source.width, source.height):
+                read_window, centre_rows, centre_columns = _window_with_halo(
+                    window, source.width, source.height, halo
+                )
+                values = source.read(window=read_window)
+                valid = np.isfinite(values)
+                if source.nodata is not None and np.isfinite(source.nodata):
+                    valid &= values != source.nodata
+                centre_values = values[:, centre_rows, centre_columns]
+                centre_valid = valid[:, centre_rows, centre_columns]
+                if "statistics" in metrics:
+                    for band_index in range(source.count):
+                        _update_statistics(
+                            statistics[band_index],
+                            centre_values[band_index][centre_valid[band_index]],
+                        )
+                values = np.where(valid, values, np.nan)
+                features = extract_gf6_features(values, metrics=raster_metrics or ["statistics"], window_size=parameters["features"].get("windowSize", 3))
+                index = 1
+                for metric in raster_metrics:
+                    for band_index, band in enumerate(features[metric]):
+                        centre_band = band[centre_rows, centre_columns]
+                        output = np.where(
+                            centre_valid[band_index] & np.isfinite(centre_band),
+                            centre_band,
+                            _NODATA,
+                        ).astype(np.float32)
+                        dest.write(output, index, window=window)
+                        index += 1
+                if statistics_only:
+                    dest.write(
+                        np.where(centre_valid, centre_values, _NODATA).astype(np.float32),
+                        window=window,
+                    )
+    payload: dict[str, Any] = {"metrics": parameters["features"]["metrics"]}
+    if "statistics" in parameters["features"]["metrics"]:
+        payload.update({
+            "statisticsMethod": "windowed-chan-population-v1",
+            "nodataPolicy": "IGNORE_NODATA_AND_NAN",
+            "bandStatistics": [
+                _finish_statistics(item, output_index, band, description)
+                for output_index, (item, band, description) in enumerate(
+                    zip(statistics, parameters["bands"], descriptions), 1
+                )
+            ],
+        })
+    summary.write_text(json.dumps(payload, allow_nan=False, sort_keys=True) + "\n", encoding="utf-8")
+    return [("GF6_FEATURES_COG", path), ("GF6_FEATURES_SUMMARY_JSON", summary)]
+
+
+def _empty_statistics() -> dict[str, float | int | None]:
+    return {"count": 0, "min": None, "max": None, "mean": 0.0, "m2": 0.0}
+
+
+def _update_statistics(statistics: dict[str, float | int | None], pixels: np.ndarray) -> None:
+    if pixels.size == 0:
+        return
+    values = pixels.astype(np.float64, copy=False)
+    chunk_count = int(values.size)
+    chunk_mean = float(values.mean(dtype=np.float64))
+    centered = values - chunk_mean
+    chunk_m2 = float(np.sum(centered * centered, dtype=np.float64))
+    count = int(statistics["count"])
+    if count == 0:
+        statistics.update({
+            "count": chunk_count,
+            "min": float(values.min()),
+            "max": float(values.max()),
+            "mean": chunk_mean,
+            "m2": chunk_m2,
+        })
+        return
+    total = count + chunk_count
+    mean = float(statistics["mean"])
+    delta = chunk_mean - mean
+    statistics["count"] = total
+    statistics["min"] = min(float(statistics["min"]), float(values.min()))
+    statistics["max"] = max(float(statistics["max"]), float(values.max()))
+    statistics["mean"] = mean + delta * chunk_count / total
+    statistics["m2"] = float(statistics["m2"]) + chunk_m2 + delta * delta * count * chunk_count / total
+
+
+def _finish_statistics(
+    statistics: dict[str, float | int | None],
+    source_band_index: int,
+    source_band: int,
+    description: str,
+) -> dict[str, Any]:
+    count = int(statistics["count"])
+    return {
+        "sourceBandIndex": source_band_index,
+        "sourceBand": f"B{source_band}",
+        "description": description,
+        "count": count,
+        "min": statistics["min"],
+        "max": statistics["max"],
+        "mean": float(statistics["mean"]) if count else None,
+        "std": math.sqrt(max(0.0, float(statistics["m2"]) / count)) if count else None,
+    }
+
+
+def _write_fusion(standard: Path, directory: Path, parameters: dict[str, Any]) -> list[tuple[str, Path]]:
+    path, summary = directory / "fusion" / "gf6-rgb.tif", directory / "fusion" / "summary.json"; path.parent.mkdir(parents=True, exist_ok=True); config = parameters["fusion"]
+    with rasterio.open(standard) as source:
+        selected = tuple(parameters["bands"].index(config[name]) + 1 for name in ("red", "green", "blue"))
+        stretches, valid_sample_counts, sampling = _global_fusion_stretches(
+            source, selected, tuple(config["percentiles"])
+        )
+        profile = source.profile.copy(); profile.update(driver="GTiff", count=3, dtype="uint8", BLOCKSIZE=_BLOCK, COMPRESS="DEFLATE", BIGTIFF="IF_SAFER", photometric="RGB")
+        profile.pop("nodata", None)
+        with open_windowed_cog(
+            path,
+            profile,
+            block_size=_BLOCK,
+            overview_resampling="AVERAGE",
+            internal_mask=True,
+        ) as dest:
+            for window in _windows(source.width, source.height):
+                values = source.read(selected, window=window).astype(np.float32)
+                valid_channels = np.isfinite(values) & (values != _NODATA)
+                output = np.zeros(values.shape, dtype=np.uint8)
+                for index, (lower, upper) in enumerate(stretches):
+                    valid = valid_channels[index]
+                    output[index, valid] = np.clip(
+                        (values[index, valid] - lower)
+                        * 255.0
+                        / max(upper - lower, 1e-6),
+                        0,
+                        255,
+                    ).astype(np.uint8)
+                dest.write(output, window=window)
+                dest.write_mask(
+                    np.where(valid_channels.all(axis=0), 255, 0).astype(np.uint8),
+                    window=window,
+                )
+            for index, name in enumerate(("red", "green", "blue"), 1):
+                dest.set_band_description(index, f"{name}_B{config[name]}")
+    names = ("red", "green", "blue")
+    summary.write_text(
+        json.dumps(
+            {
+                "version": "percentile-rgb-v1",
+                "bands": {name: config[name] for name in names},
+                "percentiles": config["percentiles"],
+                "stretches": stretches,
+                "outputNodata": None,
+                "validityPolicy": "INTERNAL_DATASET_MASK_ALL_RGB_SOURCE_BANDS_VALID",
+                "datasetMaskValues": {"invalid": 0, "valid": 255},
+                "sampling": {
+                    **sampling,
+                    "validSamplesPerBand": dict(zip(names, valid_sample_counts)),
+                },
+            },
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
+    return [("GF6_RGB_FUSION_COG", path), ("GF6_FUSION_SUMMARY_JSON", summary)]
 
 
-def _resample_source_to_grid(evidence: Gf6ProductEvidence, source_path: Path, path: Path, grid: Any) -> None:
-    profile = {"driver": "COG", "width": grid.width, "height": grid.height, "count": 8, "dtype": "float32", "crs": grid.crs, "transform": grid.transform, "nodata": _NODATA, "BLOCKSIZE": _BLOCK, "COMPRESS": "DEFLATE", "BIGTIFF": "IF_SAFER"}
-    with rasterio.open(source_path) as source, rasterio.open(path, "w", **profile) as destination:
-        if source.rpcs is None:
-            raise ValueError("GF6 RPC source metadata is unavailable")
-        for output_window in _windows(grid.width, grid.height):
-            transform = window_transform(grid.transform, output_window)
-            for band_index in range(1, 9):
-                output = np.full((int(output_window.height), int(output_window.width)), _NODATA, dtype=np.float32)
-                reproject(source=rasterio.band(source, band_index), destination=output, rpcs=source.rpcs, src_nodata=0, dst_transform=transform, dst_crs=grid.crs, dst_nodata=_NODATA, resampling=Resampling.bilinear, RPC_HEIGHT=grid.height_m)
-                calibrated = calibrate_gf6(output[np.newaxis, ...], gains=[evidence.bands[band_index - 1].gain], offsets=[evidence.bands[band_index - 1].offset], fill_value=int(_NODATA))[0]
-                calibrated[output == _NODATA] = _NODATA
-                destination.write(calibrated, band_index, window=output_window)
-        destination.update_tags(calibrationFormula=evidence.calibration.formula, calibrationUnit=evidence.calibration.unit, navigationStatus="NOMINAL_RPC_NO_DEM", accuracyStatus="UNVALIDATED", heightMode="CONSTANT", heightMeters=str(grid.height_m), rpcResampling="bilinear")
-        for index, band in enumerate(evidence.bands, start=1):
-            destination.set_band_description(index, f"B{band.number}_{band.wavelength}")
-            destination.update_tags(index, unit=evidence.calibration.unit, gain=str(band.gain), offset=str(band.offset))
+def _fusion_sampling_plan(width: int, height: int) -> dict[str, int]:
+    if width <= 0 or height <= 0:
+        raise ValueError("GF6 fusion source dimensions are invalid")
+    sample_columns = (int(width) + _FUSION_SAMPLE_STEP - 1) // _FUSION_SAMPLE_STEP
+    sample_rows = (int(height) + _FUSION_SAMPLE_STEP - 1) // _FUSION_SAMPLE_STEP
+    base_sample_count = sample_columns * sample_rows
+    thinning_stride = max(
+        1,
+        (base_sample_count + _MAX_FUSION_SAMPLES_PER_BAND - 1)
+        // _MAX_FUSION_SAMPLES_PER_BAND,
+    )
+    retained_upper_bound = (
+        base_sample_count + thinning_stride - 1
+    ) // thinning_stride
+    return {
+        "step": _FUSION_SAMPLE_STEP,
+        "baseSampleCountPerBand": base_sample_count,
+        "thinningStride": thinning_stride,
+        "maximumSamplesPerBand": _MAX_FUSION_SAMPLES_PER_BAND,
+        "retainedSampleUpperBoundPerBand": retained_upper_bound,
+    }
 
 
-def _windows(width: int, height: int) -> Iterable[Window]:
-    for row in range(0, height, _BLOCK):
-        for col in range(0, width, _BLOCK):
-            yield Window(col, row, min(_BLOCK, width - col), min(_BLOCK, height - row))
-
-
-def calculate_global_stretches(chunks: Iterable[Sequence[Sequence[float] | np.ndarray]], *, percentiles: tuple[float, float] = (2.0, 98.0)) -> tuple[tuple[float, float], ...]:
+def _global_fusion_stretches(source, selected: tuple[int, int, int], percentiles: tuple[float, float]):
     low, high = percentiles
     if not 0 <= low < high <= 100:
         raise ValueError("GF6 fusion percentiles are invalid")
-    values: list[list[np.ndarray]] = [[], [], []]
-    for chunk in chunks:
-        if len(chunk) != 3:
-            raise ValueError("GF6 fusion requires three bands")
-        for index, band in enumerate(chunk):
-            array = np.asarray(band, dtype=np.float32).reshape(-1)
-            array = array[np.isfinite(array) & (array != _NODATA)]
-            if array.size:
-                values[index].append(array)
-    result = []
-    for bands in values:
-        result.append((0.0, 1.0) if not bands else tuple(float(value) for value in np.percentile(np.concatenate(bands), [low, high])))
-    return tuple(result)
+    sampling = _fusion_sampling_plan(source.width, source.height)
+    stretches: list[tuple[float, float]] = []
+    valid_sample_counts: list[int] = []
+    for band_index in selected:
+        samples = np.empty(
+            sampling["retainedSampleUpperBoundPerBand"], dtype=np.float32
+        )
+        retained_count = 0
+        visited_count = 0
+        for window in _windows(source.width, source.height):
+            sampled = source.read(band_index, window=window)[
+                ::_FUSION_SAMPLE_STEP, ::_FUSION_SAMPLE_STEP
+            ].reshape(-1)
+            start = (-visited_count) % sampling["thinningStride"]
+            retained = sampled[start::sampling["thinningStride"]]
+            visited_count += int(sampled.size)
+            valid = np.isfinite(retained) & (retained != _NODATA)
+            retained = retained[valid]
+            next_count = retained_count + int(retained.size)
+            if next_count > samples.size:
+                raise ValueError("GF6 fusion sampling exceeded its memory bound")
+            samples[retained_count:next_count] = retained
+            retained_count = next_count
+        if retained_count:
+            lower, upper = np.percentile(samples[:retained_count], (low, high))
+            stretches.append((float(lower), float(upper)))
+        else:
+            stretches.append((0.0, 1.0))
+        valid_sample_counts.append(retained_count)
+    return tuple(stretches), tuple(valid_sample_counts), sampling
 
 
-def _standard_source(evidence: Gf6ProductEvidence, output_dir: Path, parameters: dict[str, Any]) -> Path:
-    path = output_dir / ".gf6-standard-source.tif"; _write_standard_cog(evidence, path, parameters); return path
+def _write_saliency(standard: Path, directory: Path, parameters: dict[str, Any]) -> list[tuple[str, Path]]:
+    score_path, mask_path, summary = directory / "saliency" / "score.tif", directory / "saliency" / "mask.tif", directory / "saliency" / "summary.json"; score_path.parent.mkdir(parents=True, exist_ok=True); config = parameters["saliency"]
+    with rasterio.open(standard) as source:
+        profile = source.profile.copy(); profile.update(driver="GTiff", count=1, dtype="float32", nodata=_NODATA, BLOCKSIZE=_BLOCK, COMPRESS="DEFLATE", BIGTIFF="IF_SAFER"); mask_profile = profile.copy(); mask_profile.update(dtype="uint8", nodata=255)
+        source_index = parameters["bands"].index(int(config["source"][1:])) + 1
+        with open_windowed_cog(
+            score_path,
+            profile,
+            block_size=_BLOCK,
+            overview_resampling="AVERAGE",
+        ) as score, open_windowed_cog(
+            mask_path,
+            mask_profile,
+            block_size=_BLOCK,
+            overview_resampling="NEAREST",
+        ) as mask:
+            for window in _windows(source.width, source.height):
+                read_window, centre_rows, centre_columns = _window_with_halo(
+                    window,
+                    source.width,
+                    source.height,
+                    config["windowSize"] // 2,
+                )
+                values = source.read(source_index, window=read_window)
+                valid = np.isfinite(values) & (values != _NODATA)
+                centre_valid = valid[centre_rows, centre_columns]
+                values = np.where(valid, values, np.nan)
+                scores, masks = detect_gf6_saliency(
+                    values,
+                    window_size=config["windowSize"],
+                    threshold=config["threshold"],
+                )
+                centre_scores = scores[centre_rows, centre_columns]
+                centre_masks = masks[centre_rows, centre_columns]
+                score.write(
+                    np.where(
+                        centre_valid & np.isfinite(centre_scores),
+                        centre_scores,
+                        _NODATA,
+                    ).astype(np.float32),
+                    1,
+                    window=window,
+                )
+                mask.write(
+                    np.where(centre_valid, centre_masks.astype(np.uint8), 255).astype(np.uint8),
+                    1,
+                    window=window,
+                )
+            score.set_band_description(1, f"saliency_score:{config['source']}")
+            mask.set_band_description(1, f"saliency_mask:{config['source']}")
+    summary.write_text(json.dumps({"interpretation": "CANDIDATE_ONLY", **config, "scoreNodata": _NODATA, "maskNodata": 255, "maskValues": {"notSalient": 0, "salient": 1, "invalid": 255}, "validityPolicy": "SOURCE_PIXEL_MUST_BE_VALID"}, sort_keys=True) + "\n", encoding="utf-8")
+    return [("GF6_SALIENCY_SCORE_COG", score_path), ("GF6_SALIENCY_MASK_COG", mask_path), ("GF6_SALIENCY_SUMMARY_JSON", summary)]
 
 
-def _write_fusion(evidence: Gf6ProductEvidence, output_dir: Path, parameters: dict[str, Any], output_uri: str) -> dict[str, Any]:
-    config = parameters.get("fusion", {}); selected = tuple(int(config.get(key, fallback)) for key, fallback in (("red", 3), ("green", 2), ("blue", 1)))
-    source_path = _standard_source(evidence, output_dir, parameters); path = output_dir / "gf6-rgb-fusion.tif"; summary = output_dir / "gf6-fusion-summary.json"
-    try:
-        with rasterio.open(source_path) as source:
-            chunks = (tuple(source.read(index, window=window)[::16, ::16] for index in selected) for window in _windows(source.width, source.height))
-            stretches = calculate_global_stretches(chunks, percentiles=tuple(config.get("percentiles", (2.0, 98.0))))
-            profile = source.profile.copy(); profile.update(driver="COG", count=3, dtype="uint8", nodata=0, photometric="RGB", BLOCKSIZE=_BLOCK, COMPRESS="DEFLATE")
-            with rasterio.open(path, "w", **profile) as destination:
-                for window in _windows(source.width, source.height):
-                    values = source.read(selected, window=window).astype(np.float32); output = np.zeros(values.shape, dtype=np.uint8)
-                    for index, (lower, upper) in enumerate(stretches):
-                        valid = np.isfinite(values[index]) & (values[index] != _NODATA)
-                        output[index, valid] = np.clip((values[index, valid] - lower) * 255.0 / max(upper - lower, 1e-6), 0, 255).astype(np.uint8)
-                    destination.write(output, window=window)
-                for index, name in enumerate(("red", "green", "blue"), start=1): destination.set_band_description(index, f"{name}_B{selected[index - 1]}")
-        summary.write_text(json.dumps({"version": "percentile-rgb-v1", "bands": dict(zip(("red", "green", "blue"), selected)), "stretches": stretches}, sort_keys=True) + "\n", encoding="utf-8")
-    finally:
-        source_path.unlink(missing_ok=True)
-    return _result(output_uri, [(path, "GF6_RGB_FUSION_COG"), (summary, "GF6_FUSION_SUMMARY_JSON")])
-
-
-def _write_features(evidence: Gf6ProductEvidence, output_dir: Path, parameters: dict[str, Any], output_uri: str) -> dict[str, Any]:
-    config = parameters.get("features", {}); metrics = tuple(metric for metric in config.get("metrics", ("gradient", "local_variance")) if metric in {"gradient", "local_variance", "statistics"})
-    if not metrics: raise ValueError("GF6 feature metrics are empty")
-    selected = tuple(int(value) for value in parameters.get("bands", list(range(1, 9)))); raster_metrics = tuple(metric for metric in metrics if metric != "statistics")
-    source_path = _standard_source(evidence, output_dir, parameters); path = output_dir / "gf6-features.tif"; summary = output_dir / "gf6-features-summary.json"
-    try:
-        with rasterio.open(source_path) as source:
-            profile = source.profile.copy(); profile.update(driver="COG", count=max(1, len(selected) * len(raster_metrics)), dtype="float32", nodata=_NODATA, BLOCKSIZE=_BLOCK, COMPRESS="DEFLATE"); statistics: dict[str, Any] = {}
-            with rasterio.open(path, "w", **profile) as destination:
-                for window in _windows(source.width, source.height):
-                    values = source.read(selected, window=window).astype(np.float32); values[values == _NODATA] = np.nan
-                    if raster_metrics:
-                        features = extract_gf6_features(values, metrics=raster_metrics); destination_index = 1
-                        for metric in raster_metrics:
-                            for band_offset, _ in enumerate(selected):
-                                destination.write(np.nan_to_num(features[metric][band_offset], nan=_NODATA), destination_index, window=window); destination_index += 1
-                if not raster_metrics:
-                    for window in _windows(source.width, source.height):
-                        destination.write(np.full((int(window.height), int(window.width)), _NODATA, dtype=np.float32), 1, window=window)
-                for metric_offset, metric in enumerate(raster_metrics):
-                    for band_offset, band in enumerate(selected): destination.set_band_description(metric_offset * len(selected) + band_offset + 1, f"{metric}:B{band}")
-            if "statistics" in metrics:
-                for index in selected:
-                    arrays = [array for window in _windows(source.width, source.height) if (array := source.read(index, window=window)) is not None]
-                    joined = np.concatenate([array[(array != _NODATA) & np.isfinite(array)] for array in arrays]); statistics[f"B{index}"] = None if not joined.size else {"min": float(joined.min()), "max": float(joined.max()), "mean": float(joined.mean()), "std": float(joined.std())}
-        summary.write_text(json.dumps({"version": "features-v1", "metrics": metrics, "statistics": statistics}, sort_keys=True) + "\n", encoding="utf-8")
-    finally:
-        source_path.unlink(missing_ok=True)
-    return _result(output_uri, [(path, "GF6_FEATURES_COG"), (summary, "GF6_FEATURES_SUMMARY_JSON")])
-
-
-def _write_saliency(evidence: Gf6ProductEvidence, output_dir: Path, parameters: dict[str, Any], output_uri: str) -> dict[str, Any]:
-    config = parameters.get("saliency", {}); band = int(str(config.get("source", "B3")).removeprefix("B")); window_size = int(config.get("windowSize", 9)); threshold = float(config.get("threshold", 0.95))
-    source_path = _standard_source(evidence, output_dir, parameters); score_path = output_dir / "gf6-saliency-score.tif"; mask_path = output_dir / "gf6-saliency-mask.tif"; summary = output_dir / "gf6-saliency-summary.json"
-    try:
-        with rasterio.open(source_path) as source:
-            profile = source.profile.copy(); profile.update(driver="COG", count=1, dtype="float32", nodata=_NODATA, BLOCKSIZE=_BLOCK, COMPRESS="DEFLATE"); mask_profile = profile.copy(); mask_profile.update(dtype="uint8", nodata=0)
-            with rasterio.open(score_path, "w", **profile) as score, rasterio.open(mask_path, "w", **mask_profile) as mask:
-                for window in _windows(source.width, source.height):
-                    values = source.read(band, window=window).astype(np.float32); valid = values != _NODATA; values[~valid] = np.nan; scores, masks = detect_gf6_saliency(values, window_size=window_size, threshold=threshold)
-                    score.write(np.where(valid, scores, _NODATA), 1, window=window); mask.write(np.where(valid, masks, 0).astype(np.uint8), 1, window=window)
-                score.set_band_description(1, f"saliency_score:B{band}"); mask.set_band_description(1, f"saliency_mask:B{band}")
-        summary.write_text(json.dumps({"version": "contrast-v1", "source": f"B{band}", "windowSize": window_size, "threshold": threshold, "interpretation": "CANDIDATE_ONLY"}, sort_keys=True) + "\n", encoding="utf-8")
-    finally:
-        source_path.unlink(missing_ok=True)
-    return _result(output_uri, [(score_path, "GF6_SALIENCY_SCORE_COG"), (mask_path, "GF6_SALIENCY_MASK_COG"), (summary, "GF6_SALIENCY_SUMMARY_JSON")])
-
-
-def _result(output_uri: str, artifacts: Sequence[tuple[Path, str]]) -> dict[str, Any]:
-    return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [{"uri": output_uri.rstrip("/") + "/" + path.name, "type": artifact_type, "sizeBytes": path.stat().st_size, "checksum": "sha256:" + _sha256(path)} for path, artifact_type in artifacts]}
-
-
+def _windows(width: int, height: int):
+    for row in range(0, height, _BLOCK):
+        for col in range(0, width, _BLOCK): yield Window(col, row, min(_BLOCK, width-col), min(_BLOCK, height-row))
+def _feature_halo(metrics: list[str], window_size: int) -> int:
+    radius = 1 if "gradient" in metrics else 0
+    if "local_variance" in metrics:
+        radius = max(radius, window_size // 2)
+    return radius
+def _window_with_halo(window: Window, width: int, height: int, radius: int):
+    left = max(0, int(window.col_off) - radius)
+    top = max(0, int(window.row_off) - radius)
+    right = min(width, int(window.col_off + window.width) + radius)
+    bottom = min(height, int(window.row_off + window.height) + radius)
+    expanded = Window(left, top, right - left, bottom - top)
+    row_offset = int(window.row_off) - top
+    column_offset = int(window.col_off) - left
+    return (
+        expanded,
+        slice(row_offset, row_offset + int(window.height)),
+        slice(column_offset, column_offset + int(window.width)),
+    )
+def _payload_parameters(payload: dict[str, Any]) -> dict[str, Any]:
+    snapshot = payload.get("parameterSnapshot", payload.get("parameters", {}))
+    if isinstance(snapshot, str):
+        try: snapshot = json.loads(snapshot)
+        except json.JSONDecodeError as error: raise ValueError("GF6_PARAMETER_INVALID: parameterSnapshot") from error
+    if not isinstance(snapshot, dict): raise ValueError("GF6_PARAMETER_INVALID: parameterSnapshot")
+    return snapshot
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""): digest.update(chunk)
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""): digest.update(chunk)
     return digest.hexdigest()
+def _artifact(uri: str, kind: str, path: Path, output_root: Path) -> dict[str, Any]:
+    relative = path.relative_to(output_root).as_posix()
+    return {"uri": uri.rstrip("/") + "/" + relative, "type": kind, "sizeBytes": path.stat().st_size, "checksum": "sha256:" + _sha256(path)}

@@ -8,6 +8,7 @@ import com.htht.multisource.domain.model.StorageUri;
 import com.htht.multisource.domain.model.TaskId;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -54,7 +55,7 @@ public final class LocalWorkerArtifactValidator implements ArtifactValidator {
             if (!candidate.checksum().matches("sha256:[0-9a-fA-F]{64}")) {
                 throw new IllegalArgumentException("Artifact checksum must be sha256:<64 hex characters>.");
             }
-            String actual = "sha256:" + hex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(artifactPath)));
+            String actual = "sha256:" + checksum(artifactPath);
             if (!actual.equalsIgnoreCase(candidate.checksum())) {
                 throw new IllegalArgumentException("Artifact checksum does not match candidate metadata.");
             }
@@ -63,6 +64,19 @@ public final class LocalWorkerArtifactValidator implements ArtifactValidator {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is unavailable.", e);
         }
+    }
+
+    private static String checksum(Path path) throws IOException, NoSuchAlgorithmException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream source = Files.newInputStream(path)) {
+            byte[] buffer = new byte[1024 * 1024];
+            for (int count; (count = source.read(buffer)) >= 0;) {
+                if (count > 0) {
+                    digest.update(buffer, 0, count);
+                }
+            }
+        }
+        return hex(digest.digest());
     }
 
     private static String hex(byte[] bytes) {

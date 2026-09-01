@@ -177,6 +177,36 @@ def build_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any] | N
     return {"version": "plan-v2", "stages": stages}
 
 
+def build_integrated_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Declare the self-contained stage supported by the current Java dispatcher."""
+    source_plan = build_plan(candidate, parameter_snapshot)
+    parameters = json.loads(source_plan["stages"][0]["parameterSnapshot"])
+    outputs = [
+        _output("STANDARD_MERSI_COG", "standard/mersi.tif", "FINAL"),
+        _output("STANDARD_MERSI_QUALITY_COG", "standard/quality.tif", "FINAL"),
+        _output("STANDARD_MERSI_SUMMARY_JSON", "standard/summary.json", "FINAL"),
+    ]
+    if parameters["features"]["enabled"]:
+        if any(metric in {"gradient", "local_variance"} for metric in parameters["features"]["metrics"]):
+            outputs.append(_output("MERSI_FEATURE_COG", "features/mersi.tif", "FINAL"))
+        outputs.append(_output("MERSI_FEATURE_SUMMARY_JSON", "features/summary.json", "FINAL"))
+    if parameters["fusion"]["enabled"]:
+        outputs.append(_output("MERSI_FUSION_COG", "fusion/mersi-rgb.tif", "FINAL"))
+    if parameters["saliency"]["enabled"]:
+        outputs.extend([
+            _output("MERSI_SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"),
+            _output("MERSI_SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"),
+        ])
+    inputs = [
+        _input("observation", "RAW_INPUT", "OBSERVATION"),
+        _input("geo", "RAW_INPUT", "GEO1K"),
+    ]
+    snapshot = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
+    return {"version": "plan-v2", "stages": [
+        _stage("STANDARDIZE_MERSI_L1", [], inputs, outputs, snapshot)
+    ]}
+
+
 def _feature_source_names(parameters: dict[str, Any]) -> set[str]:
     variables = {
         f"CH{band:02d}_{'REFLECTANCE' if band <= 19 else 'BRIGHTNESS_TEMPERATURE'}"
@@ -200,13 +230,32 @@ def _output(artifact_type: str, relative_path: str, retention: str) -> dict[str,
 
 
 def _classify(path: Path, entry: dict[str, Any]) -> dict[str, Any]:
-    match = FILENAME.fullmatch(path.name)
+    match = FILENAME.fullmatch(_original_filename(path))
     if match is None:
         raise ValueError("FY-3H MERSI evidence requires matching 1000M and GEO1K filenames")
     ordinal = entry.get("ordinal")
     if not isinstance(ordinal, int):
         raise ValueError("FY-3H MERSI evidence requires manifest ordinals")
-    return {"path": path, "ordinal": ordinal, **match.groupdict()}
+    classified = {"path": path, "ordinal": ordinal, **match.groupdict()}
+    declared_role = entry.get("role")
+    expected_kind = {"OBSERVATION": "1000M", "GEO1K": "GEO1K"}.get(declared_role)
+    if expected_kind is not None and classified["kind"].upper() != expected_kind:
+        raise ValueError("FY-3H MERSI manifest role does not match the HDF product type")
+    return classified
+
+
+def _original_filename(path: Path) -> str:
+    try:
+        with h5py.File(path, "r") as handle:
+            value = handle.attrs.get("File Name")
+    except OSError:
+        return path.name
+    if value is None:
+        return path.name
+    name = _text(value).strip().strip("\x00")
+    if not name or Path(name.replace("\\", "/")).name != name:
+        raise ValueError("FY-3H MERSI File Name attribute is invalid")
+    return name
 
 
 def _read_observation(path: Path) -> tuple[dict[str, Any], tuple[int, int]]:

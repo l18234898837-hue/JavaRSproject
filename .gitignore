@@ -47,6 +47,15 @@ nbdist/
 /.vscode/settings.json
 .worktrees/
 
+######################################################################
+# Local runtime data and generated artifacts
+
+.run/
+.superpowers/
+*.class
+rs-algorithm-worker/src/rs_algorithm_worker/input/
+rs-algorithm-worker/src/rs_algorithm_worker/output/
+
 
 htht-modules/htht-business/src/test/
 htht-modules/htht-algorithm/src/test/

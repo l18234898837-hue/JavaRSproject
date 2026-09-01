@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
-import pyarrow as pa
-import pyarrow.parquet as pq
 from netCDF4 import Dataset
 
 from rs_algorithm_worker.algorithms.track_anomaly import TrackAnomalyResult
@@ -98,6 +96,11 @@ def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
 
 
 def _write_parquet(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ModuleNotFoundError as error:
+        raise RuntimeError("HY-2D processing requires the pyarrow package") from error
     columns = {name: [row[name] for row in rows] for name in _COLUMN_NAMES}
     pq.write_table(pa.table(columns), path)
 
@@ -154,6 +157,7 @@ def _summary(
         "processingVersion": processing_version,
         "qualityPolicyVersion": quality.policy.version,
         "sshFormulaVersion": ssh.summary["sshFormulaVersion"],
+        "sshSummary": dict(ssh.summary),
         "observationCount": int(track.time.size),
         "passRate": float(valid_ssh.mean()) if track.time.size else 0.0,
         "anomalyCount": int(anomalies.summary["anomalyCount"]),

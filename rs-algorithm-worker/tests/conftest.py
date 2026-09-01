@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+import rs_algorithm_worker  # Configure Rasterio before test modules import it.
+
 
 # Rasterio must use the compatible PROJ database bundled with this test venv.
 _PROJ_DATA = Path(__file__).parents[1] / ".venv" / "Lib" / "site-packages" / "rasterio" / "proj_data"

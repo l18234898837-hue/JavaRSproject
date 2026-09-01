@@ -31,9 +31,11 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Tag("dev")
 class LocalProcessWorkerGatewayTest {
@@ -80,6 +82,26 @@ class LocalProcessWorkerGatewayTest {
         assertThat(receipt.workerId()).isEqualTo("worker-local-01");
         assertThat(receipt.succeeded()).isTrue();
         assertThat(receipt.artifacts()).isEmpty();
+    }
+
+    @Test
+    void canceledReservationNeverLaunchesAQueuedWorker() {
+        CancellableRecordingLauncher launcher = new CancellableRecordingLauncher();
+        LocalProcessWorkerGateway gateway = new LocalProcessWorkerGateway(
+            new WorkerContractCodec(new ObjectMapper()), new WorkerResultTranslator(new ObjectMapper()),
+            launcher, () -> "req-reserved"
+        );
+        ExecutionId executionId = new ExecutionId("exec-01");
+
+        gateway.reserve(executionId);
+        gateway.cancel(executionId);
+
+        assertThatThrownBy(() -> gateway.dispatch(stageRequest()))
+            .isInstanceOf(CancellationException.class);
+        assertThat(launcher.launchCalls).isZero();
+        assertThat(launcher.reservedRequestId).isEqualTo("req-reserved");
+        assertThat(launcher.canceledRequestId).isEqualTo("req-reserved");
+        assertThat(launcher.releasedRequestId).isEqualTo("req-reserved");
     }
 
     @Test
@@ -206,6 +228,34 @@ class LocalProcessWorkerGatewayTest {
 
         private List<WorkerInvocation> invocations() {
             return invocations;
+        }
+    }
+
+    private static final class CancellableRecordingLauncher implements WorkerProcessLauncher {
+        private int launchCalls;
+        private String reservedRequestId;
+        private String canceledRequestId;
+        private String releasedRequestId;
+
+        @Override
+        public void reserve(String requestId) {
+            reservedRequestId = requestId;
+        }
+
+        @Override
+        public WorkerInvocationResult launch(WorkerInvocation invocation) {
+            launchCalls++;
+            throw new AssertionError("Canceled worker must not be launched.");
+        }
+
+        @Override
+        public void cancel(String requestId) {
+            canceledRequestId = requestId;
+        }
+
+        @Override
+        public void release(String requestId) {
+            releasedRequestId = requestId;
         }
     }
 }

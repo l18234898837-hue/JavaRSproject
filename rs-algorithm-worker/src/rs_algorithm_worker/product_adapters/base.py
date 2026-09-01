@@ -20,6 +20,27 @@ def input_paths(manifest: dict[str, Any]) -> list[Path]:
     return paths
 
 
+def input_path_names(manifest: dict[str, Any]) -> list[tuple[Path, str]]:
+    inputs = manifest.get("inputs")
+    paths = input_paths(manifest)
+    return [(path, logical_file_name(path, item)) for path, item in zip(paths, inputs)]
+
+
+def logical_file_name(path: Path, item: dict[str, Any] | None = None) -> str:
+    name = item.get("originalFileName") if isinstance(item, dict) and "originalFileName" in item else path.name
+    if (
+        not isinstance(name, str)
+        or not name.strip()
+        or len(name) > 255
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in name)
+    ):
+        raise ValueError("manifest originalFileName is invalid")
+    return name
+
+
 def candidate(package_id: str, product_code: str, shape: str, files: list[Path], metadata: dict[str, Any]) -> dict[str, Any]:
     return {
         "packageId": package_id,

@@ -71,4 +71,24 @@ class MigrationScriptTest {
         );
         assertThat(sql).doesNotContain("st_island_info", "sd_observe_data");
     }
+
+    @Test
+    void fy3hMigrationPublishesTheConcretePairedInputProfile() throws IOException {
+        String sql = Files.readString(MIGRATIONS.resolve("V20260827_02__seed_fy3h_mersi_l1_profile.sql"));
+
+        assertThat(sql).contains(
+            "FY-3H-MERSI", "L1-1000M-GEO1K-v1", "SWATH_RASTER", "SUPPORTED",
+            "ON CONFLICT (product_code, profile_version) DO UPDATE"
+        );
+    }
+
+    @Test
+    void gf6L1aMigrationPublishesAnIdempotentRasterGridProfile() throws IOException {
+        String sql = Files.readString(MIGRATIONS.resolve("V20260828_01__seed_gf6_wfv_l1a_profile.sql"));
+
+        assertThat(sql).contains(
+            "GF-6-WFV-L1A", "GF-6 WFV L1A", "RASTER_GRID", "SUPPORTED",
+            "ON CONFLICT (product_code, profile_version) DO UPDATE"
+        );
+    }
 }

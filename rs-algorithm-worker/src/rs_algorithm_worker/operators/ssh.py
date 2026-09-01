@@ -8,7 +8,8 @@ import numpy as np
 from rs_algorithm_worker.models_track import TrackData
 
 
-SSH_FORMULA_VERSION = "hy2d-idr-2mc-baseline-v1"
+SSH_FORMULA_VERSION = "hy2d-idr-2mc-baseline-v2"
+ALL_MISSING_ZERO_FALLBACKS = ("hf_fluctuations_corr",)
 SSH_VARIABLES = (
     "alt",
     "range_ku",
@@ -39,8 +40,17 @@ def _formula_values(track: TrackData, name: str) -> np.ndarray:
 
 
 def calculate_baseline_ssh(track: TrackData) -> SshResult:
-    """Calculate the declared HY-2D baseline SSH, preserving missing terms as NaN."""
+    """Calculate the engineering baseline and audit all-missing optional terms."""
     terms = {name: _formula_values(track, name) for name in SSH_VARIABLES}
+    missing_rates = {
+        name: float((~np.isfinite(terms[name])).mean()) if terms[name].size else 0.0
+        for name in SSH_VARIABLES
+    }
+    fallbacks: dict[str, str] = {}
+    for name in ALL_MISSING_ZERO_FALLBACKS:
+        if terms[name].size and not np.isfinite(terms[name]).any():
+            terms[name] = np.zeros(track.latitude.size, dtype=np.float64)
+            fallbacks[name] = "ZERO_WHEN_ALL_VALUES_ARE_MISSING"
     range_corrections = sum(
         (terms[name] for name in SSH_VARIABLES[2:8]), np.zeros(track.latitude.size, dtype=np.float64)
     )
@@ -55,10 +65,9 @@ def calculate_baseline_ssh(track: TrackData) -> SshResult:
     summary: dict[str, Any] = {
         "sshFormulaVersion": SSH_FORMULA_VERSION,
         "variables": list(SSH_VARIABLES),
-        "missingRates": {
-            name: float((~np.isfinite(terms[name])).mean()) if terms[name].size else 0.0
-            for name in SSH_VARIABLES
-        },
+        "missingRates": missing_rates,
+        "allMissingTermFallbacks": fallbacks,
+        "scientificStatus": "ENGINEERING_BASELINE_REQUIRES_OFFICIAL_REVIEW",
         "validCount": int(valid.sum()),
         "invalidCount": int((~valid).sum()),
     }

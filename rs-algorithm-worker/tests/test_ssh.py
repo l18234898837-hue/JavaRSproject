@@ -3,40 +3,38 @@ from __future__ import annotations
 import numpy as np
 
 from rs_algorithm_worker.models_track import TrackData
-from rs_algorithm_worker.operators.ssh import calculate_baseline_ssh
+from rs_algorithm_worker.operators.ssh import SSH_VARIABLES, calculate_baseline_ssh
 
 
-def _track(**overrides: np.ndarray) -> TrackData:
-    fields = {
-        "alt": np.array([100.0, 100.0]), "range_ku": np.array([10.0, 10.0]),
-        "model_dry_tropo_corr": np.array([1.0, 1.0]), "rad_wet_tropo_corr": np.array([2.0, 2.0]),
-        "iono_corr_alt_ku": np.array([3.0, 3.0]), "sea_state_bias_ku": np.array([4.0, 4.0]),
-        "inv_bar_corr": np.array([5.0, 5.0]), "hf_fluctuations_corr": np.array([6.0, 6.0]),
-        "ocean_tide_sol1": np.array([7.0, 7.0]), "solid_earth_tide": np.array([8.0, 8.0]),
-        "pole_tide": np.array([9.0, 9.0]), "load_tide_sol1": np.array([10.0, 10.0]),
-    }
-    fields.update(overrides)
+def _track(hf_correction: np.ndarray) -> TrackData:
+    size = hf_correction.size
+    fields = {name: np.ones(size, dtype=np.float64) for name in SSH_VARIABLES}
+    fields["alt"] = np.full(size, 20.0)
+    fields["range_ku"] = np.full(size, 10.0)
+    fields["hf_fluctuations_corr"] = hf_correction
     return TrackData(
-        time=np.arange(2, dtype=float), longitude=np.array([120.0, 121.0]),
-        latitude=np.array([20.0, 21.0]), fields=fields, quality=np.array([True, True]),
+        time=np.arange(size, dtype=np.float64),
+        longitude=np.linspace(120.0, 121.0, size),
+        latitude=np.linspace(20.0, 21.0, size),
+        fields=fields,
+        quality=np.ones(size, dtype=bool),
     )
 
 
-def test_calculate_baseline_ssh_uses_all_documented_terms() -> None:
-    result = calculate_baseline_ssh(_track())
+def test_all_missing_hf_correction_uses_audited_zero_fallback() -> None:
+    result = calculate_baseline_ssh(_track(np.full(3, np.nan)))
 
-    assert result.values.tolist() == [35.0, 35.0]
-    assert result.summary["sshFormulaVersion"] == "hy2d-idr-2mc-baseline-v1"
-    assert result.summary["variables"] == [
-        "alt", "range_ku", "model_dry_tropo_corr", "rad_wet_tropo_corr", "iono_corr_alt_ku",
-        "sea_state_bias_ku", "inv_bar_corr", "hf_fluctuations_corr", "ocean_tide_sol1",
-        "solid_earth_tide", "pole_tide", "load_tide_sol1",
-    ]
+    assert np.isfinite(result.values).all()
+    assert result.summary["validCount"] == 3
+    assert result.summary["missingRates"]["hf_fluctuations_corr"] == 1.0
+    assert result.summary["allMissingTermFallbacks"] == {
+        "hf_fluctuations_corr": "ZERO_WHEN_ALL_VALUES_ARE_MISSING"
+    }
 
 
-def test_missing_or_nonfinite_formula_term_produces_nan_and_summary_rate() -> None:
-    result = calculate_baseline_ssh(_track(rad_wet_tropo_corr=np.array([np.nan, 2.0])))
+def test_partly_missing_hf_correction_is_not_silently_filled() -> None:
+    result = calculate_baseline_ssh(_track(np.array([0.0, np.nan, 0.0])))
 
-    assert np.isnan(result.values[0])
-    assert result.values[1] == 35.0
-    assert result.summary["missingRates"]["rad_wet_tropo_corr"] == 0.5
+    assert np.isfinite(result.values[[0, 2]]).all()
+    assert np.isnan(result.values[1])
+    assert result.summary["allMissingTermFallbacks"] == {}

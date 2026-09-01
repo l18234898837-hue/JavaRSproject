@@ -29,6 +29,7 @@ def make_fy3h_pair(root: Path, *, time: str = "2335", orbit: int = 3948,
     }
     with h5py.File(observation, "w") as handle:
         _write_root_attributes(handle, attributes)
+        handle.attrs["File Name"] = observation.name
         handle.attrs["EarthSun Distance Ratio"] = np.array([1.01659817], dtype=np.float64)
         handle.attrs["Solar_Irradiance"] = np.ones(19, dtype=np.float32)
         handle.attrs["Effect_Center_WaveLength"] = np.ones(25, dtype=np.float32)
@@ -49,6 +50,7 @@ def make_fy3h_pair(root: Path, *, time: str = "2335", orbit: int = 3948,
         handle.create_group("QA").create_dataset("QA_Frame_Flag", data=np.zeros(FRAMES, dtype=np.uint16))
     with h5py.File(geo, "w") as handle:
         _write_root_attributes(handle, attributes)
+        handle.attrs["File Name"] = geo.name
         geolocation = handle.create_group("Geolocation")
         for name in ("Latitude", "Longitude", "SolarZenith", "SolarAzimuth", "SensorZenith", "SensorAzimuth",
                      "Altitude", "LandSeaMask", "LandCover"):

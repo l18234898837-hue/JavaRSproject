@@ -4,7 +4,7 @@
 
 迁移文件一旦进入任意环境的 `flyway_schema_history`，禁止修改文件内容或文件名；修正必须新增更高版本的迁移。`README.md` 和 baseline 模板不会被复制到运行时迁移目录。
 
-当前仓库最新迁移版本为 `20260825.01`（`V20260825_01__add_artifact_storage_key.sql`）。
+当前仓库最新迁移版本为 `20260827.02`（`V20260827_02__seed_fy3h_mersi_l1_profile.sql`）。
 
 ## 新数据库
 

@@ -8,7 +8,9 @@ import pytest
 from netCDF4 import Dataset
 
 from rs_algorithm_worker.models_track import TrackData
-from rs_algorithm_worker.hy2d_pipeline import execute_hy2d_stage
+from rs_algorithm_worker.hy2d_pipeline import (
+    _continuous_grid_longitude, _grid_spec, execute_hy2d_stage,
+)
 from rs_algorithm_worker.registry import dispatch
 from rs_algorithm_worker.operators.netcdf_track import decode_values, decode_tar_gz
 from rs_algorithm_worker.operators.ssh import SshResult
@@ -44,8 +46,8 @@ def _write_nc(path: Path, *, format="NETCDF3_CLASSIC", length=3):
         scaled[:] = np.array([100, -32768, 200], dtype=np.int16)
 
 
-def _archive(tmp_path, members):
-    package = tmp_path / "sample.tar.gz"
+def _archive(tmp_path, members, package_name="sample.tar.gz"):
+    package = tmp_path / package_name
     with tarfile.open(package, "w:gz") as archive:
         for name, content in members:
             info = tarfile.TarInfo(name)
@@ -71,6 +73,23 @@ def test_decode_tar_gz_reads_track_data_and_metadata(tmp_path):
     assert "alt" in result.fields
     assert np.isnan(result.fields["scaled"][1])
     assert result.metadata["netcdf_format"] == "NETCDF3_CLASSIC"
+
+
+def test_decode_tar_gz_accepts_a_regular_archive_directory_entry(tmp_path):
+    nc = tmp_path / "sample.nc"
+    _write_nc(nc)
+    package = tmp_path / "stored.gz"
+    with tarfile.open(package, "w:gz") as archive:
+        directory = tarfile.TarInfo("payload/")
+        directory.type = tarfile.DIRTYPE
+        archive.addfile(directory)
+        for name, content in (("payload/sample.nc", nc.read_bytes()),
+                              ("payload/sample.meta.xml", b"<meta />")):
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+
+    assert decode_tar_gz(package).latitude.shape == (3,)
 
 
 def test_decode_tar_gz_rejects_unsafe_member(tmp_path):
@@ -137,7 +156,13 @@ def test_execute_hy2d_quality_stage_uses_only_declared_upstream_track(tmp_path):
 def test_registry_builds_hy2d_plan_v2_for_recognized_package(tmp_path):
     nc = tmp_path / "sample.nc"
     _write_nc(nc)
-    package = _archive(tmp_path, [("sample.nc", nc.read_bytes()), ("sample.meta.xml", b"<meta />")])
+    package_id = "H2D_OPER_IDR_2MC_0188_0236_20260701T145956_20260701T155159"
+    metadata = b"""<ProductMeta><SatelliteID>HY2D</SatelliteID><SensorID>ALT</SensorID>
+        <OrbitID>188</OrbitID><OrbitPass>0236</OrbitPass><ProductInfo>
+        <ProductLevel>IDR_2M</ProductLevel><ProductFormat>NETCDF</ProductFormat>
+        </ProductInfo></ProductMeta>"""
+    package = _archive(tmp_path, [(f"{package_id}.nc", nc.read_bytes()),
+                                  (f"{package_id}.meta.xml", metadata)], "0123456789abcdef.gz")
     manifest = {"inputs": [{"role": "MAIN", "path": str(package), "storageUri": "rs://input/sample"}]}
     inspected = dispatch({"operation": "inspect"}, manifest)
     candidate = inspected["candidates"][0]
@@ -146,7 +171,40 @@ def test_registry_builds_hy2d_plan_v2_for_recognized_package(tmp_path):
     plan = dispatch(request, manifest)
 
     assert plan["version"] == "plan-v2"
-    assert "WRITE_STANDARD_TRACK_OUTPUT" in {stage["stageKey"] for stage in plan["stages"]}
+    assert [stage["stageKey"] for stage in plan["stages"]] == ["STANDARDIZE_ALTIMETER_TRACK"]
+    assert candidate["packageId"] == package_id
+
+
+def test_registry_executes_integrated_hy2d_product(tmp_path):
+    nc = tmp_path / "sample.nc"
+    _write_nc(nc)
+    package_id = "H2D_OPER_IDR_2MC_0188_0236_20260701T145956_20260701T155159"
+    metadata = b"""<ProductMeta><SatelliteID>HY2D</SatelliteID><SensorID>ALT</SensorID>
+        <OrbitID>188</OrbitID><OrbitPass>0236</OrbitPass><ProductInfo>
+        <ProductLevel>IDR_2M</ProductLevel><ProductFormat>NETCDF</ProductFormat>
+        </ProductInfo></ProductMeta>"""
+    package = _archive(tmp_path, [(f"{package_id}.nc", nc.read_bytes()),
+                                  (f"{package_id}.meta.xml", metadata)], f"{package_id}.tar.gz")
+    output = tmp_path / "output"
+
+    response = dispatch({"operation": "execute-stage", "payload": {
+        "profileCode": "HY-2D-ALTIMETER",
+        "stageKey": "STANDARDIZE_ALTIMETER_TRACK",
+        "outputUri": "rs://output/hy2d-integrated",
+        "parameterSnapshot": {},
+    }}, {
+        "inputs": [{"role": "MAIN", "path": str(package)}],
+        "output": {"path": str(output)},
+    })
+
+    assert {item["type"] for item in response["artifacts"]} == {
+        "TRACK_FEATURES_JSON", "TRACK_FEATURE_WINDOWS_PARQUET",
+        "TRACK_ANOMALIES_GEOJSON", "TRACK_ANOMALY_SUMMARY_JSON",
+        "STANDARD_TRACK_NETCDF", "STANDARD_TRACK_PARQUET", "STANDARD_TRACK_CSV",
+        "STANDARD_TRACK_GEOJSON", "STANDARD_TRACK_ANOMALIES_GEOJSON",
+        "STANDARD_TRACK_SUMMARY_JSON",
+    }
+    assert (output / "standard" / "track.nc").is_file()
 
 
 def test_execute_hy2d_ssh_stage_uses_only_quality_track(tmp_path):
@@ -170,7 +228,7 @@ def test_execute_hy2d_ssh_stage_uses_only_quality_track(tmp_path):
     assert (ssh_output / "ssh" / "track.npz").is_file()
 
 
-def test_registry_routes_hy2d_downstream_stage_by_profile_code(tmp_path):
+def test_registry_rejects_obsolete_hy2d_multistage_execution(tmp_path):
     nc = tmp_path / "sample.nc"
     _write_nc(nc)
     package = _archive(tmp_path, [("sample.nc", nc.read_bytes()), ("sample.meta.xml", b"<meta />")])
@@ -178,12 +236,25 @@ def test_registry_routes_hy2d_downstream_stage_by_profile_code(tmp_path):
     execute_hy2d_stage({"stageKey": "DECODE_ALTIMETER_TRACK", "outputUri": "rs://output/task-1", "parameterSnapshot": {}}, {
         "inputs": [{"role": "MAIN", "path": str(package)}], "output": {"path": str(decoded)},
     })
-    result = dispatch({"operation": "execute-stage", "payload": {
-        "profileCode": "HY-2D-ALTIMETER", "stageKey": "APPLY_TRACK_QUALITY", "outputUri": "rs://output/task-1", "parameterSnapshot": {},
-    }}, {"inputs": [{"role": "decoded", "path": str(decoded / "decoded" / "track.npz")}],
-        "output": {"path": str(tmp_path / "quality")}})
+    with pytest.raises(ValueError, match="unsupported HY-2D stage"):
+        dispatch({"operation": "execute-stage", "payload": {
+            "profileCode": "HY-2D-ALTIMETER", "stageKey": "APPLY_TRACK_QUALITY",
+            "outputUri": "rs://output/task-1", "parameterSnapshot": {},
+        }}, {"inputs": [{"role": "decoded", "path": str(decoded / "decoded" / "track.npz")}],
+            "output": {"path": str(tmp_path / "quality")}})
 
-    assert result["artifacts"][0]["type"] == "QUALITY_FILTERED_ALTIMETER_TRACK"
+
+def test_hy2d_grid_uses_a_compact_continuous_domain_across_the_date_line():
+    longitude = _continuous_grid_longitude(np.array([179.9, -179.9, -179.8]))
+    grid = _grid_spec(longitude, np.array([10.0, 10.1, 10.2]), 0.1)
+
+    assert np.ptp(longitude) == pytest.approx(0.3)
+    assert grid.max_lon - grid.min_lon < 1.0
+
+
+def test_hy2d_grid_rejects_unsafe_allocations_before_building_arrays():
+    with pytest.raises(ValueError, match="too large"):
+        _grid_spec(np.array([-100.0, 100.0]), np.array([-80.0, 80.0]), 0.01)
 
 
 def test_write_standard_track_output_writes_interoperable_track_artifacts(tmp_path):

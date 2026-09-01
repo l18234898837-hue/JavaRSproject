@@ -15,6 +15,7 @@ multisource:
     work-root: ${MULTISOURCE_WORK_ROOT}
     artifact-root: ${MULTISOURCE_ARTIFACT_ROOT}
     timeout: ${MULTISOURCE_WORKER_TIMEOUT}
+    stage-timeout: ${MULTISOURCE_WORKER_STAGE_TIMEOUT:24h}
     processor-version: ${MULTISOURCE_WORKER_PROCESSOR_VERSION}
 
 captcha:
@@ -90,7 +91,7 @@ spring:
   servlet:
     multipart:
       # 单个文件大小
-      max-file-size: 5000MB
+      max-file-size: 10000MB
       # 设置总上传的文件大小
       max-request-size: 10000MB
   # 服务模块

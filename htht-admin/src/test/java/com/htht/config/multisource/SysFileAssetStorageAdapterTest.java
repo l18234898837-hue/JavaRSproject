@@ -31,9 +31,11 @@ public class SysFileAssetStorageAdapterTest {
     @Test
     void mapsOnlyServerManagedFilesToStableInputSnapshots() throws Exception {
         Path directory = Files.createDirectories(uploadRoot.resolve("hdf"));
-        Path file = Files.writeString(directory.resolve("product.hdf"), "ocean-data");
+        Path file = Files.writeString(directory.resolve("8b083cd7-5181-4af2-94d2-91357d6d8938.hdf"), "ocean-data");
         ISysFileService files = mock(ISysFileService.class);
-        when(files.getById(42L)).thenReturn(sysFile(42L, file));
+        when(files.getById(42L)).thenReturn(sysFile(42L, file,
+            "FY4B-_AGRI--_N_DISK_1050E_L1-_GEO-_MULT_NOM_20260701000000_20260701001459_4000M_V0001",
+            "HDF"));
         SysFileAssetStorageAdapter adapter = new SysFileAssetStorageAdapter(files, uploadRoot);
 
         var asset = adapter.toInputAsset("MAIN", 0, new AssetReference("SYS_FILE", "42"), true);
@@ -42,6 +44,8 @@ public class SysFileAssetStorageAdapterTest {
         assertThat(asset.storageUriSnapshot().value()).isEqualTo("rs://sys-file/42");
         assertThat(asset.checksum()).isEqualTo("sha256:a16a137dd0219234e90ff5848180727180554414f2d8dbdcd213cb69f951d570");
         assertThat(adapter.resolve(grant.grantReference(), new StorageUri("rs://sys-file/42"))).isEqualTo(file.toRealPath());
+        assertThat(adapter.originalFileName(grant.grantReference(), new StorageUri("rs://sys-file/42"), file.toRealPath()))
+            .isEqualTo("FY4B-_AGRI--_N_DISK_1050E_L1-_GEO-_MULT_NOM_20260701000000_20260701001459_4000M_V0001.HDF");
     }
 
     @Test
@@ -97,8 +101,17 @@ public class SysFileAssetStorageAdapterTest {
     }
 
     private SysFile sysFile(long id, Path path) {
+        String name = path.getFileName().toString();
+        int separator = name.lastIndexOf('.');
+        return sysFile(id, path, separator > 0 ? name.substring(0, separator) : name,
+            separator > 0 ? name.substring(separator + 1) : null);
+    }
+
+    private SysFile sysFile(long id, Path path, String fileName, String extension) {
         SysFile file = new SysFile();
         file.setId(id);
+        file.setFileName(fileName);
+        file.setExtension(extension);
         file.setFilePath(path.toString());
         return file;
     }

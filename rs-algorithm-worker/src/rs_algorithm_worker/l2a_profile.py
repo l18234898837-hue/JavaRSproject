@@ -109,17 +109,67 @@ def _algorithms(value: Any, bands: tuple[str, ...]) -> dict[str, dict[str, Any]]
     normalized: dict[str, dict[str, Any]] = {}
     for name, configuration in algorithms.items():
         configuration = _mapping(configuration, f"{name} algorithm")
-        enabled = configuration.get("enabled", False)
+        enabled = configuration.get("enabled")
         if not isinstance(enabled, bool):
             raise ValueError(f"L2A {name} enabled must be boolean")
-        if name == "fusion" and enabled:
-            selected = (configuration.get("red"), configuration.get("green"), configuration.get("blue"))
-            if any(item not in bands for item in selected):
-                raise ValueError("L2A fusion bands must be selected")
-        if name == "saliency" and enabled and configuration.get("source") not in bands:
-            raise ValueError("L2A saliency source must be selected")
+        if name == "features":
+            _validate_feature_configuration(configuration)
+        elif name == "fusion":
+            _validate_fusion_configuration(configuration, bands, enabled)
+        else:
+            _validate_saliency_configuration(configuration, bands, enabled)
         normalized[name] = dict(configuration)
     return normalized
+
+
+def _validate_feature_configuration(configuration: dict[str, Any]) -> None:
+    if set(configuration) != {"enabled", "metrics", "windowSize"}:
+        raise ValueError("L2A feature configuration fields are invalid")
+    metrics = configuration["metrics"]
+    if (not isinstance(metrics, list) or not metrics or any(not isinstance(item, str) for item in metrics)
+            or len(set(metrics)) != len(metrics)
+            or not set(metrics).issubset({"statistics", "gradient", "local_variance"})):
+        raise ValueError("L2A feature metrics are invalid")
+    _odd_window_size(configuration["windowSize"], "feature")
+
+
+def _validate_fusion_configuration(configuration: dict[str, Any], bands: tuple[str, ...], enabled: bool) -> None:
+    if set(configuration) != {"enabled", "red", "green", "blue", "lowPercentile", "highPercentile"}:
+        raise ValueError("L2A fusion configuration fields are invalid")
+    selected = (configuration["red"], configuration["green"], configuration["blue"])
+    if any(not isinstance(item, str) for item in selected):
+        raise ValueError("L2A fusion bands are invalid")
+    if enabled and any(item not in bands for item in selected):
+        raise ValueError("L2A fusion bands must be selected")
+    low = _number(configuration["lowPercentile"], "fusion percentile")
+    high = _number(configuration["highPercentile"], "fusion percentile")
+    if not 0 <= low < high <= 100:
+        raise ValueError("L2A fusion percentiles are invalid")
+
+
+def _validate_saliency_configuration(configuration: dict[str, Any], bands: tuple[str, ...], enabled: bool) -> None:
+    if set(configuration) != {"enabled", "source", "threshold", "windowSize"}:
+        raise ValueError("L2A saliency configuration fields are invalid")
+    source = configuration["source"]
+    if not isinstance(source, str):
+        raise ValueError("L2A saliency source is invalid")
+    if enabled and source not in bands:
+        raise ValueError("L2A saliency source must be selected")
+    threshold = _number(configuration["threshold"], "saliency threshold")
+    if not 0 <= threshold <= 1:
+        raise ValueError("L2A saliency threshold is invalid")
+    _odd_window_size(configuration["windowSize"], "saliency")
+
+
+def _odd_window_size(value: Any, name: str) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 3 or value % 2 == 0:
+        raise ValueError(f"L2A {name} windowSize must be an odd integer of at least three")
+
+
+def _number(value: Any, name: str) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValueError(f"L2A {name} must be numeric")
+    return float(value)
 
 
 def _mapping(value: Any, name: str) -> dict[str, Any]:

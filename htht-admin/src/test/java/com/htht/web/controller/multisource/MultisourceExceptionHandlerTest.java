@@ -41,4 +41,48 @@ class MultisourceExceptionHandlerTest {
         assertThat(response.getMsg()).isEqualTo("Worker 执行失败，请稍后重试");
         assertThat(response.getMsg()).doesNotContain("C:\\secret");
     }
+
+    @Test
+    void exposesGf6OutputLimitCodeWithSafeMessageWithoutWorkerDetails() {
+        MultisourceExceptionHandler handler = new MultisourceExceptionHandler();
+
+        R<Void> response = handler.handleWorkerProtocolException(
+            new WorkerProtocolException("req-03", WorkerOperation.EXECUTE_STAGE,
+                "GF6_OUTPUT_LIMIT_EXCEEDED", "output grid C:\\secret\\work\\grid.tif is too large", false),
+            new MockHttpServletRequest("POST", "/api/multisource/processing-tasks/1/dispatch")
+        );
+
+        assertThat(response.getMsg()).isEqualTo(
+            "GF6_OUTPUT_LIMIT_EXCEEDED: 输出网格超过服务端安全上限，请增大输出分辨率、缩小 ROI、减少波段或关闭部分衍生产物"
+        );
+        assertThat(response.getMsg()).doesNotContain("C:\\secret");
+    }
+
+    @Test
+    void returnsActionableMessageForInvalidWorkerParameters() {
+        MultisourceExceptionHandler handler = new MultisourceExceptionHandler();
+
+        R<Void> response = handler.handleWorkerProtocolException(
+            new WorkerProtocolException("req-03", WorkerOperation.BUILD_PLAN,
+                "INVALID_REQUEST", "L2A ROI bounds are invalid", false),
+            new MockHttpServletRequest("POST", "/api/multisource/processing-tasks")
+        );
+
+        assertThat(response.getMsg()).isEqualTo("输入参数错误：L2A ROI bounds are invalid");
+    }
+
+    @Test
+    void doesNotExposeUnsafeInvalidRequestDetails() {
+        MultisourceExceptionHandler handler = new MultisourceExceptionHandler();
+
+        R<Void> response = handler.handleWorkerProtocolException(
+            new WorkerProtocolException("req-04", WorkerOperation.BUILD_PLAN,
+                "INVALID_REQUEST", "invalid ROI at C:\\secret\\work\\input.tif\nstack detail", false),
+            new MockHttpServletRequest("POST", "/api/multisource/processing-tasks")
+        );
+
+        assertThat(response.getMsg()).isEqualTo("Worker 执行失败，请稍后重试");
+        assertThat(response.getMsg()).doesNotContain("C:\\secret");
+        assertThat(response.getMsg()).doesNotContain("stack detail");
+    }
 }

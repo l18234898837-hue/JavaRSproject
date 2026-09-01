@@ -28,14 +28,14 @@ powerjob:
 spring:
   flyway:
     url: jdbc:postgresql://127.0.0.1:5432/htht_rs_dev
-    user: htht_rs_dev
-    password: 845420
+    user: postgres
+    password: 123456
   datasource:
     type: com.zaxxer.hikari.HikariDataSource
     # 动态数据源文档 https://www.kancloud.cn/tracy5546/dynamic-datasource/content
     dynamic:
       # 性能分析插件(有性能损耗 不建议生产环境使用)
-      p6spy: true
+      p6spy: false
       # 设置默认的数据源或者数据源组,默认值即为 master
       primary: postgres
       # 严格模式 匹配不到数据源则报错
@@ -77,8 +77,8 @@ spring:
           driverClassName: org.postgresql.Driver
           # 本机 PostgreSQL 17 实例使用默认端口 5432。
           url: jdbc:postgresql://127.0.0.1:5432/htht_rs_dev
-          username: htht_rs_dev
-          password: 845420
+          username: postgres
+          password: 123456
 #        sqlserver:
 #          type: ${spring.datasource.type}
 #          driverClassName: com.microsoft.sqlserver.jdbc.SQLServerDriver
@@ -193,7 +193,7 @@ sms:
 --- #文件上传路径
 file:
   # Windows 本地开发使用绝对路径，统一使用正斜杠，避免被解析为 Undertow 临时目录下的相对路径
-  upload-path: "D:/Lwy_project_space/RSImageProcess/otherfile/filestorage"
+  upload-path: "${FILE_UPLOAD_PATH}"
 
 
 --- # 实时切片配置
