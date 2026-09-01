@@ -174,7 +174,8 @@ mybatis-plus:
   # 例如 com.**.**.mapper
   mapperPackage: com.htht.**.mapper
   # 对应的 XML 文件位置
-  mapperLocations: classpath:mapper/**/*Mapper.xml
+  # Mapper XMLs live in dependency modules; classpath* scans every module/jar.
+  mapperLocations: classpath*:/mapper/**/*Mapper.xml
   # 实体扫描，多个package用逗号或者分号分隔
   typeAliasesPackage: com.htht.**.domain
   # 启动时是否检查 MyBatis XML 文件的存在，默认不检查

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,7 @@ class ReviewedL2AMapping:
 
 
 def load_reviewed_mapping() -> ReviewedL2AMapping:
-    fixture = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "hy1c_czi_l2a_v1.json"
+    fixture = resources.files("rs_algorithm_worker").joinpath("resources", "hy1c_czi_l2a_v1.json")
     try:
         payload = json.loads(fixture.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:

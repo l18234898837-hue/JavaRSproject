@@ -1,4 +1,8 @@
 import json
+import subprocess
+import sys
+import zipfile
+from pathlib import Path
 
 import pytest
 import h5py
@@ -14,6 +18,23 @@ from rs_algorithm_worker.product_adapters.hy1c_czi_l2a import (
 )
 from rs_algorithm_worker.registry import dispatch
 from rs_algorithm_worker.l2a_pipeline import _validate_output_grid, execute_l2a_stage
+
+
+def test_built_worker_wheel_contains_the_reviewed_l2a_mapping(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    wheel_dir = tmp_path / "wheel"
+    subprocess.run(
+        [sys.executable, "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(wheel_dir), str(project_root)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    wheel = next(wheel_dir.glob("rs_algorithm_worker-*.whl"))
+    with zipfile.ZipFile(wheel) as archive:
+        payload = json.loads(archive.read("rs_algorithm_worker/resources/hy1c_czi_l2a_v1.json"))
+
+    assert payload["mappingVersion"] == "HY-1C-CZI-L2A-v1"
 
 
 def test_reviewed_l2a_mapping_declares_bands_navigation_and_quality():

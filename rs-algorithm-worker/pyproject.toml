@@ -23,6 +23,9 @@ test = ["pytest>=8,<9"]
 [project.scripts]
 rs-worker = "rs_algorithm_worker.cli:main"
 
+[tool.setuptools.package-data]
+rs_algorithm_worker = ["resources/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

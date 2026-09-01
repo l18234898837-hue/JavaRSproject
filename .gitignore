@@ -56,6 +56,15 @@ nbdist/
 rs-algorithm-worker/src/rs_algorithm_worker/input/
 rs-algorithm-worker/src/rs_algorithm_worker/output/
 
+# Python local environments, caches, and generated worker artifacts
+**/.venv/
+**/.venv-*/
+**/venv/
+**/__pycache__/
+**/.pytest_cache/
+rs-algorithm-worker/build/
+tmp/
+
 
 htht-modules/htht-business/src/test/
 htht-modules/htht-algorithm/src/test/
