@@ -1,0 +1,5 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Wed Sep 02 12:17:03 HKT 2026
+@default-central-https\://repo.maven.apache.org/maven2/.lastUpdated=1788322546849
+https\://mirrors.huaweicloud.com/repository/maven/.lastUpdated=1788322623413
+https\://repo.maven.apache.org/maven2/.error=Could not transfer artifact org.apache.maven.plugins\:maven-resources-plugin\:pom\:3.4.0 from/to central (https\://repo.maven.apache.org/maven2)\: Permission denied\: getsockopt

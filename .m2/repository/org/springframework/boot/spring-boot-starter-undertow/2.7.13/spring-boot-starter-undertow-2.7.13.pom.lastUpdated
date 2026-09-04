@@ -1,0 +1,5 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Thu Aug 20 22:05:36 HKT 2026
+@default-central-https\://repo.maven.apache.org/maven2/.lastUpdated=1787234695223
+https\://mirrors.huaweicloud.com/repository/maven/.lastUpdated=1787234736038
+https\://repo.maven.apache.org/maven2/.error=Could not transfer artifact org.springframework.boot\:spring-boot-starter-undertow\:pom\:2.7.13 from/to central (https\://repo.maven.apache.org/maven2)\: Permission denied\: getsockopt

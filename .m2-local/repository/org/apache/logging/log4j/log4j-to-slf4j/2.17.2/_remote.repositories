@@ -1,0 +1,4 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Fri Aug 21 11:32:19 HKT 2026
+log4j-to-slf4j-2.17.2.jar>public=
+log4j-to-slf4j-2.17.2.pom>public=

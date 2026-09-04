@@ -1,0 +1,5 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Thu Aug 20 22:05:37 HKT 2026
+@default-central-https\://repo.maven.apache.org/maven2/.lastUpdated=1787234695236
+https\://mirrors.huaweicloud.com/repository/maven/.lastUpdated=1787234737503
+https\://repo.maven.apache.org/maven2/.error=Could not transfer artifact p6spy\:p6spy\:pom\:3.9.1 from/to central (https\://repo.maven.apache.org/maven2)\: Permission denied\: getsockopt

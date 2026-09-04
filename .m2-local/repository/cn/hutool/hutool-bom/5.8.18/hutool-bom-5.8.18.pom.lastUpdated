@@ -1,0 +1,5 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Fri Aug 21 11:31:38 HKT 2026
+@default-central-https\://repo.maven.apache.org/maven2/.lastUpdated=1787283021508
+https\://mirrors.huaweicloud.com/repository/maven/.lastUpdated=1787283098816
+https\://repo.maven.apache.org/maven2/.error=Could not transfer artifact cn.hutool\:hutool-bom\:pom\:5.8.18 from/to central (https\://repo.maven.apache.org/maven2)\: Permission denied\: getsockopt

@@ -1,0 +1,4 @@
+#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
+#Tue Aug 18 15:24:19 HKT 2026
+surefire-api-2.22.2.jar>public=
+surefire-api-2.22.2.pom>public=

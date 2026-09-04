@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>cn.dev33</groupId>
+    <artifactId>sa-token-parent</artifactId>
+    <version>1.38.0</version>
+  </parent>
+  <groupId>cn.dev33</groupId>
+  <artifactId>sa-token-plugin</artifactId>
+  <version>1.38.0</version>
+  <packaging>pom</packaging>
+  <name>sa-token-plugin</name>
+  <description>sa-token plugins</description>
+  <licenses>
+    <license>
+      <name>Apache 2</name>
+      <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+      <comments>A business-friendly OSS license</comments>
+    </license>
+  </licenses>
+  <modules>
+    <module>sa-token-redis</module>
+    <module>sa-token-redis-jackson</module>
+    <module>sa-token-redis-fastjson</module>
+    <module>sa-token-redis-fastjson2</module>
+    <module>sa-token-redisson-jackson</module>
+    <module>sa-token-redisson-jackson2</module>
+    <module>sa-token-redisx</module>
+    <module>sa-token-alone-redis</module>
+    <module>sa-token-hutool-timed-cache</module>
+    <module>sa-token-dialect-thymeleaf</module>
+    <module>sa-token-sso</module>
+    <module>sa-token-oauth2</module>
+    <module>sa-token-quick-login</module>
+    <module>sa-token-spring-aop</module>
+    <module>sa-token-temp-jwt</module>
+    <module>sa-token-jwt</module>
+    <module>sa-token-dubbo</module>
+    <module>sa-token-dubbo3</module>
+    <module>sa-token-grpc</module>
+  </modules>
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-configuration-processor</artifactId>
+      <optional>true</optional>
+    </dependency>
+  </dependencies>
+</project>
