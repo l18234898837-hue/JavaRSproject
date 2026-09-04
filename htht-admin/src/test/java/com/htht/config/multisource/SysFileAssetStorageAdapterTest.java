@@ -1,5 +1,6 @@
 package com.htht.config.multisource;
 
+import com.htht.multisource.application.port.out.AssetStorage;
 import com.htht.multisource.domain.model.AssetReference;
 import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.domain.model.InputAsset;
@@ -27,6 +28,11 @@ public class SysFileAssetStorageAdapterTest {
 
     @TempDir
     Path uploadRoot;
+
+    @Test
+    void implementsAssetStorageContract() {
+        assertThat(AssetStorage.class.isAssignableFrom(SysFileAssetStorageAdapter.class)).isTrue();
+    }
 
     @Test
     void mapsOnlyServerManagedFilesToStableInputSnapshots() throws Exception {

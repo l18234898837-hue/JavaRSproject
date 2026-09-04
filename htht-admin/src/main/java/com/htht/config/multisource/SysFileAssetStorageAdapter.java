@@ -33,7 +33,7 @@ import java.util.UUID;
  * Bridges sys_file records to controlled Worker assets. sys_file has no owner field, so this adapter
  * can validate existence and path safety but cannot establish per-file ownership.
  */
-public final class SysFileAssetStorageAdapter implements LocalWorkerAssetResolver {
+public final class SysFileAssetStorageAdapter implements AssetStorage, LocalWorkerAssetResolver {
     private final ISysFileService sysFileService;
     private final Path uploadRoot;
     private final Map<String, GrantScope> grants = new ConcurrentHashMap<>();
