@@ -10,6 +10,15 @@ htht:
   cacheLazy: false
 
 multisource:
+  archive-upload:
+    max-size-bytes: 21474836480
+    max-entry-count: 100000
+    max-expanded-size-bytes: 42949672960
+    worker-threads: 2
+    max-concurrent-parses: 1
+    safety-reserve-bytes: 21474836480
+    stale-session-hours: 24
+    cleanup-interval-ms: 3600000
   worker:
     command: ${MULTISOURCE_WORKER_COMMAND}
     work-root: ${MULTISOURCE_WORK_ROOT}

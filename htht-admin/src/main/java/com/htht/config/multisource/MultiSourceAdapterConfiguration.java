@@ -81,7 +81,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 @Configuration
-@EnableConfigurationProperties(MultiSourceWorkerProperties.class)
+@EnableConfigurationProperties({MultiSourceWorkerProperties.class, com.htht.config.multisource.archive.ArchiveUploadProperties.class})
 public class MultiSourceAdapterConfiguration {
     private static final Duration EXECUTION_LEASE_DURATION = Duration.ofMinutes(5);
     private static final int MAX_STAGE_ATTEMPTS = 3;

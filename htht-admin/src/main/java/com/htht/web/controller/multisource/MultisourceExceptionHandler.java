@@ -43,7 +43,20 @@ public final class MultisourceExceptionHandler {
             log.warn("请求地址'{}' 的预检会话已失效，请重新预检", request.getRequestURI());
             return R.fail("预检会话已失效，请重新点击预检或开始处理");
         }
+        String message = error.getMessage();
+        if (message != null && (message.contains("临时空间不足") || message.contains("解析任务繁忙")
+            || message.contains("解析服务正在停止"))) {
+            log.warn("请求地址'{}' 多源归档资源受限: {}", request.getRequestURI(), message);
+            return R.fail(message);
+        }
         log.error("请求地址'{}' 多源处理状态异常: {}", request.getRequestURI(), error.getMessage(), error);
         return R.fail("多源处理状态不可用，请重试");
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public R<Void> handleIllegalArgument(IllegalArgumentException error, HttpServletRequest request) {
+        log.warn("请求地址'{}' 多源归档请求参数无效: {}", request.getRequestURI(), error.getMessage());
+        return R.fail(error.getMessage() == null ? "请求参数无效" : error.getMessage());
     }
 }
