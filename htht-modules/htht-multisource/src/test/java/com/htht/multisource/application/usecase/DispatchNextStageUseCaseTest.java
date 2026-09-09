@@ -47,6 +47,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -190,6 +191,42 @@ class DispatchNextStageUseCaseTest {
         assertThat(events.artifacts).singleElement().satisfies(artifact ->
             assertThat(artifact.uri().value()).isEqualTo("rs://output/7/task-01/result.tif")
         );
+    }
+
+    @Test
+    void dispatchesNextRunnableStageAfterSuccessfulCompletion() {
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "READ"), pending(202L, "WRITE")),
+            Map.of("READ", List.of(), "WRITE", List.of("READ"))
+        );
+        List<String> dispatchedStages = new java.util.ArrayList<>();
+        TaskDispatcher dispatcher = new TaskDispatcher() {
+            @Override
+            public DispatchReceipt dispatch(StageExecutionRequest request) {
+                dispatchedStages.add(request.stageKey());
+                return new DispatchReceipt("worker-local", true, List.of());
+            }
+
+            @Override
+            public void cancel(ExecutionId executionId) {
+                throw new UnsupportedOperationException();
+            }
+        };
+        AtomicInteger executionSequence = new AtomicInteger();
+        SingleTaskRepository tasks = new SingleTaskRepository(twoStageTask());
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            tasks, stages, dispatcher, new RecordingAssetStorage(),
+            () -> new ExecutionId("exec-" + executionSequence.incrementAndGet()), () -> NOW,
+            java.time.Duration.ofMinutes(5),
+            new AcceptWorkerEventService(stages, new InMemoryExecutionEventRepository(),
+                (taskId, stageId, outputUri, executionId, artifacts) -> { }, tasks)
+        );
+
+        assertThat(useCase.dispatch(TASK_ID)).isPresent();
+
+        assertThat(dispatchedStages).containsExactly("READ", "WRITE");
+        assertThat(stages.findByTaskId(TASK_ID)).extracting(TaskStage::status)
+            .containsExactly(StageExecutionStatus.SUCCEEDED, StageExecutionStatus.SUCCEEDED);
     }
 
     @Test
@@ -417,6 +454,19 @@ class DispatchNextStageUseCaseTest {
         return new ProcessingTask(TASK_ID, "task-01", new AccessSubject(7L), TaskLifecycleStatus.CREATED,
             QualityStatus.NOT_CHECKED, "{\"mode\":\"standard\"}", new StorageUri("rs://output/7/task-01"),
             new ProcessingPlan("plan-v2", "worker-1.2.3", List.of(stage)),
+            new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate)), List.of(candidate));
+    }
+
+    private static ProcessingTask twoStageTask() {
+        InputAsset input = new InputAsset("MAIN", 0, new AssetReference("SYS_FILE", "42"),
+            new StorageUri("rs://sys-file/42"), "sha256:input", true);
+        ProductCandidate candidate = new ProductCandidate("package-01", new ProductProfileKey("GENERIC", "v1"),
+            ProductDataShape.RASTER_GRID, ProductSupportStatus.SUPPORTED, List.of(input), "{}", 0.91);
+        ProcessingStage read = new ProcessingStage("READ", "READ", List.of(), List.of(), List.of(), "{}");
+        ProcessingStage write = new ProcessingStage("WRITE", "WRITE", List.of("READ"), List.of(), List.of(), "{}");
+        return new ProcessingTask(TASK_ID, "task-01", new AccessSubject(7L), TaskLifecycleStatus.CREATED,
+            QualityStatus.NOT_CHECKED, "{}", new StorageUri("rs://output/7/task-01"),
+            new ProcessingPlan("plan-v3", "worker-1.2.3", List.of(read, write)),
             new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate)), List.of(candidate));
     }
 

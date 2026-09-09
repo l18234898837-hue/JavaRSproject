@@ -176,6 +176,10 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
                 ExecutionEvent.Type.SUCCEEDED, "{\"workerId\":\"" + escapeJson(receipt.workerId()) + "\"}",
                 clock.now(), ExecutionEvent.Acceptance.APPLIED
             ), receipt.artifacts());
+            // A successful stage unlocks its dependants. Continue dispatching from
+            // the persisted plan until no runnable stage remains; the repository
+            // claim is idempotent, so concurrent completion events are safe.
+            dispatch(task.id());
         } catch (CancellationException canceled) {
             LOG.info(
                 "Multisource stage execution was canceled before completion: "
