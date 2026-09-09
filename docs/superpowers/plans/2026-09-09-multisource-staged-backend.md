@@ -70,13 +70,17 @@
 - [ ] `resolveInputs` 按 role/ordinal 和依赖阶段 artifact 精确匹配；request 携带本阶段 outputs 和 execution grant。
 - [ ] 运行 Maven 重点测试并提交：`feat: authorize and promote artifacts for staged execution`。
 
-### Task 5: 状态传播、重试取消和 API 兼容
+### Task 5: 状态传播、前端阶段映射、重试取消和 API 兼容
 
-**Files:** `DispatchNextStageService.java`、`MyBatisTaskStageRepository.java`、`TaskCreationCoordinator.java`、`ProcessingExecutionController.java`、`ExecutionProgressResponse.java`、前端新增标签映射及生命周期测试。
+**Files:** `DispatchNextStageService.java`、`MyBatisTaskStageRepository.java`、`TaskCreationCoordinator.java`、`ProcessingExecutionController.java`、`ExecutionProgressResponse.java`、`rsimageprocess-view/src/features/multisource/pipelineDefinitions.ts`、`processingRunState.ts`、`MultiSourceSatelliteProcess.vue` 及对应测试。
 
 - [ ] 测试仅 claim 依赖已成功且 artifact 齐全的 ready 阶段；失败时下游保持等待/跳过。
 - [ ] 重试递增 attempt 并使用独立目录；取消停止新派发；旧 plan-v1/v2 仍走旧 executor。
 - [ ] 保持进度 JSON 结构不变，返回所有真实阶段、时间戳、错误和 artifact stage 归属；禁止前端伪造阶段。
+- [ ] 在 `pipelineDefinitions.ts` 增加后端 stageKey 到 UI `StepDefinition` 的显式映射，覆盖所有产品的校验、解码、定标、质量、定位/网格、标准化、特征、融合、显著性和轨迹分析阶段。
+- [ ] 在 `processingRunState.ts` 按远端 `stageId` 去重并稳定排序：已知阶段显示在对应 UI 步骤，未知阶段显示为 `remoteOnly`；旧单阶段任务仍只显示一个远端阶段，不补出虚假阶段。
+- [ ] 在 `MultiSourceSatelliteProcess.vue` 统一阶段标题、描述、失败/重试入口和 artifact 展示；标签映射只改变文案，不改变后端状态和进度百分比来源。
+- [ ] 前端测试覆盖全产品 stageKey 映射、远端排序、未知阶段、旧 plan-v2 单阶段、失败下游状态和 artifact 按 stageId 归属。
 - [ ] 运行 Java 和前端回归并提交：`feat: preserve multisource staged lifecycle compatibility`。
 
 ### Task 6: 全产品端到端验收与灰度
