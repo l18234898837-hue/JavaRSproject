@@ -130,6 +130,12 @@ def build_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str,
     ]}
 
 
+def build_staged_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return the existing validated along-track DAG as plan-v3."""
+    plan = build_plan(product, parameter_snapshot)
+    return {**plan, "version": "plan-v3"}
+
+
 def _parameters(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value).difference({"qualityPolicyVersion", "featureWindowSize", "anomaly", "grid"}):
         raise ValueError("unsupported HY-2D parameter")

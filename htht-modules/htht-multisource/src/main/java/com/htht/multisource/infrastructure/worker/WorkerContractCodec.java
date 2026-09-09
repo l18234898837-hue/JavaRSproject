@@ -57,6 +57,8 @@ public final class WorkerContractCodec {
         payload.put("taskId", request.taskId().value());
         payload.set("candidate", objectMapper.valueToTree(request.candidate()));
         payload.put("parameterSnapshot", request.parameterSnapshot());
+        payload.put("planVersion", request.planVersion());
+        payload.put("requestedPlanVersion", request.requestedPlanVersion());
         payload.set("readGrant", encodeGrant(request.readGrant().grantReference(), request.readGrant().expiresAt().toString()));
         return encodeEnvelope(requestId, WorkerOperation.BUILD_PLAN, payload);
     }

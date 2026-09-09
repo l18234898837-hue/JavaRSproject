@@ -194,6 +194,70 @@ def build_l2a_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any]
     ]}
 
 
+def build_l2a_staged_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Build the real HY-1C stage DAG while retaining the legacy builder above."""
+    if candidate.get("profileKey") != {"productCode": "HY-1C-CZI", "profileVersion": "L2A-v1"}:
+        raise ValueError("HY-1C CZI L2A candidate is required")
+    from ..l2a_profile import parse_l2a_parameters
+
+    centre = candidate.get("metadataSnapshot", {}).get("sceneCentre", {})
+    parameters = parse_l2a_parameters(parameter_snapshot,
+                                       centre_longitude=centre.get("longitude"), centre_latitude=centre.get("latitude"))
+    snapshot = json.dumps({"mappingVersion": load_reviewed_mapping().mapping_version,
+                           "parameters": parameter_snapshot}, sort_keys=True, separators=(",", ":"))
+    main = _input("main", "RAW_INPUT", "MAIN")
+    metadata = _input("metadata", "RAW_INPUT", "METADATA")
+    browse = _input("browse", "RAW_INPUT", "BROWSE")
+    stages = [
+        _stage("VALIDATE_SOURCE", [], [main, metadata, browse],
+               [_output("HY1C_INPUT_VALIDATION_JSON", "validation/source.json", "INTERMEDIATE")], snapshot),
+        _stage("DECODE_SCALE_AND_NODATA", ["VALIDATE_SOURCE"], [main],
+               [_output("DECODED_CZI_RASTER", "decoded/czi.npz", "INTERMEDIATE")], snapshot),
+        _stage("APPLY_L2_FLAGS", ["DECODE_SCALE_AND_NODATA"], [
+            _input("decoded", "UPSTREAM_ARTIFACT", "DECODED_CZI_RASTER"), main,
+        ], [
+            _output("QUALITY_MASKED_CZI_RASTER", "quality/czi.npz", "INTERMEDIATE"),
+            _output("VALID_MASK", "quality/valid-mask.npz", "INTERMEDIATE"),
+        ], snapshot),
+        _stage("GEOLOCATE_AND_GRID", ["APPLY_L2_FLAGS"], [
+            _input("quality", "UPSTREAM_ARTIFACT", "QUALITY_MASKED_CZI_RASTER"), main,
+        ], [_output("GEOLOCATED_CZI_RASTER", "grid/czi.npz", "INTERMEDIATE")], snapshot),
+        _stage("CROP_CZI", ["GEOLOCATE_AND_GRID"], [
+            _input("grid", "UPSTREAM_ARTIFACT", "GEOLOCATED_CZI_RASTER"),
+        ], [_output("CROPPED_CZI", "crop/czi.npz", "INTERMEDIATE")], snapshot),
+        _stage("WRITE_STANDARD_COG", ["CROP_CZI"], [
+            _input("cropped", "UPSTREAM_ARTIFACT", "CROPPED_CZI"),
+        ], [
+            _output("STANDARD_COG", "standard/czi-l2a.tif", "FINAL"),
+            _output("STANDARD_METADATA_JSON", "standard/czi-l2a.json", "FINAL"),
+        ], snapshot),
+    ]
+    features = parameters.algorithms.get("features", {})
+    if features.get("enabled"):
+        outputs = [_output("FEATURE_METADATA_JSON", "features/czi-features.json", "FINAL")]
+        if any(metric in {"gradient", "local_variance"} for metric in features.get("metrics", [])):
+            outputs.insert(0, _output("FEATURE_COG", "features/czi-features.tif", "FINAL"))
+        stages.append(_stage("EXTRACT_CZI_FEATURES", ["CROP_CZI"],
+                             [_input("cropped", "UPSTREAM_ARTIFACT", "CROPPED_CZI")], outputs, snapshot))
+    if parameters.algorithms.get("fusion", {}).get("enabled"):
+        stages.append(_stage("FUSE_CZI_BANDS", ["CROP_CZI"],
+                             [_input("cropped", "UPSTREAM_ARTIFACT", "CROPPED_CZI")], [
+                                 _output("FUSION_COG", "fusion/czi-rgb.tif", "FINAL"),
+                                 _output("FUSION_PREVIEW_PNG", "fusion/czi-rgb.png", "FINAL"),
+                             ], snapshot))
+    if parameters.algorithms.get("saliency", {}).get("enabled"):
+        source = parameters.algorithms["saliency"].get("source")
+        dependency = "EXTRACT_CZI_FEATURES" if isinstance(source, str) and ":" in source and features.get("enabled") else "CROP_CZI"
+        artifact = "FEATURE_COG" if dependency == "EXTRACT_CZI_FEATURES" else "CROPPED_CZI"
+        stages.append(_stage("DETECT_CZI_SALIENCY", [dependency],
+                             [_input("source", "UPSTREAM_ARTIFACT", artifact)], [
+                                 _output("SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"),
+                                 _output("SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"),
+                                 _output("SALIENCY_PREVIEW_PNG", "saliency/preview.png", "FINAL"),
+                             ], snapshot))
+    return {"version": "plan-v3", "stages": stages}
+
+
 def _stage(key: str, dependencies: list[str], inputs: list[dict[str, Any]], outputs: list[dict[str, Any]], snapshot: str) -> dict[str, Any]:
     return {"stageKey": key, "stageCode": key, "dependsOnStageKeys": dependencies,
             "inputs": inputs, "outputs": outputs, "parameterSnapshot": snapshot}

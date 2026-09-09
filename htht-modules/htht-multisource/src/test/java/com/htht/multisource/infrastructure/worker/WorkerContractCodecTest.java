@@ -81,6 +81,8 @@ class WorkerContractCodecTest {
         assertThat(root.path("payload").path("taskId").asLong()).isEqualTo(101L);
         assertThat(root.path("payload").path("candidate").path("packageId").asText())
             .isEqualTo("package-01");
+        assertThat(root.path("payload").path("requestedPlanVersion").asText())
+            .isEqualTo("plan-v3");
     }
 
     @Test
@@ -195,6 +197,7 @@ class WorkerContractCodecTest {
     private static PlanRequest planRequest() {
         return new PlanRequest(
             TaskId.of(101L), candidate(), "{\"mode\":\"standard\"}",
+            "plan-v3",
             new AssetAccessGrant("read-01", Instant.parse("2026-08-20T00:00:00Z"))
         );
     }

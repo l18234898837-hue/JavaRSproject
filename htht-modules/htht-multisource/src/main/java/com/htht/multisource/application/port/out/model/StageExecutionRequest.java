@@ -22,18 +22,29 @@ public record StageExecutionRequest(
     String parameterSnapshot,
     List<InputAsset> inputs,
     StorageUri outputUri,
-    ExecutionGrant executionGrant
+    ExecutionGrant executionGrant,
+    String planVersion
 ) {
+    public StageExecutionRequest(
+        TaskId taskId, StageId stageId, String stageKey, int attempt, ExecutionId executionId,
+        String schemaVersion, String profileCode, String profileVersion, String processorVersion,
+        String parameterSnapshot, List<InputAsset> inputs, StorageUri outputUri, ExecutionGrant executionGrant
+    ) {
+        this(taskId, stageId, stageKey, attempt, executionId, schemaVersion, profileCode, profileVersion,
+            processorVersion, parameterSnapshot, inputs, outputUri, executionGrant, "plan-v2");
+    }
+
     public StageExecutionRequest {
         Objects.requireNonNull(inputs, "inputs");
         Objects.requireNonNull(outputUri, "outputUri");
         Objects.requireNonNull(executionGrant, "executionGrant");
+        Objects.requireNonNull(planVersion, "planVersion");
         inputs = List.copyOf(inputs);
         if (attempt < 1 || stageKey == null || stageKey.isBlank()
             || schemaVersion == null || schemaVersion.isBlank()
             || profileCode == null || profileCode.isBlank()
             || profileVersion == null || profileVersion.isBlank()
-            || processorVersion == null || processorVersion.isBlank()) {
+            || processorVersion == null || processorVersion.isBlank() || planVersion.isBlank()) {
             throw new IllegalArgumentException("Stage execution request is incomplete.");
         }
         if (inputs.isEmpty()) {

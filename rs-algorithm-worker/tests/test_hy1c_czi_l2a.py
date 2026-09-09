@@ -222,6 +222,19 @@ def test_l2a_plan_has_one_executable_standardization_stage(synthetic_l2a_manifes
     }
 
 
+def test_l2a_staged_plan_declares_real_dag(synthetic_l2a_manifest):
+    from rs_algorithm_worker.product_adapters.hy1c_czi_l2a import build_l2a_staged_plan
+
+    candidate = inspect_l2a_manifest(synthetic_l2a_manifest)
+    plan = build_l2a_staged_plan(candidate, _standard_l2a_snapshot())
+
+    assert plan["version"] == "plan-v3"
+    assert [stage["stageKey"] for stage in plan["stages"]][:6] == [
+        "VALIDATE_SOURCE", "DECODE_SCALE_AND_NODATA", "APPLY_L2_FLAGS",
+        "GEOLOCATE_AND_GRID", "CROP_CZI", "WRITE_STANDARD_COG",
+    ]
+
+
 def test_registry_standardizes_l2a_into_archiveable_output_artifacts(synthetic_l2a_manifest, tmp_path):
     snapshot = _standard_l2a_snapshot()
     snapshot["roiWgs84"] = {"minLon": 119.999, "minLat": 29.999, "maxLon": 120.011, "maxLat": 30.011}

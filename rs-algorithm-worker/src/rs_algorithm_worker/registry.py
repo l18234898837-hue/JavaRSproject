@@ -8,11 +8,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .fy3h_mersi_pipeline import execute_fy3h_product
+from .fy3h_mersi_pipeline import execute_fy3h_product, execute_fy3h_stage
 from .fy4b_agri_pipeline import execute_fy4b_product
 from .gf6_wfv_pipeline import execute_gf6_product
-from .hy2d_pipeline import execute_hy2d_product
-from .l2a_pipeline import execute_l2a_product
+from .hy2d_pipeline import execute_hy2d_product, execute_hy2d_stage
+from .l2a_pipeline import execute_l2a_product, execute_l2a_staged_stage
 from .product_adapters import fy3h_mersi, fy4b_agri, gf6_wfv_browse, gf6_wfv_l1a, hy1c_czi, hy1c_czi_l2a, hy2d_altimeter
 from .product_adapters.base import logical_file_name
 
@@ -30,27 +30,35 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
     if operation == "build-plan":
         payload = _payload(request)
         selected = payload.get("candidate")
+        requested_version = payload.get("requestedPlanVersion")
         if _is_l2a_candidate(selected):
             candidate = hy1c_czi_l2a.inspect_l2a_manifest(manifest)
             if candidate["packageId"] != selected.get("packageId"):
                 raise ValueError("recognized HY-1C CZI L2A packageId is required")
+            if requested_version == "plan-v3":
+                return hy1c_czi_l2a.build_l2a_staged_plan(candidate, _parameter_snapshot(payload))
             return hy1c_czi_l2a.build_l2a_plan(candidate, _parameter_snapshot(payload))
         adapter = _adapter_for_manifest(manifest)
         if adapter is fy3h_mersi:
             candidate = _recognized_fy3h_candidate(manifest, payload.get("candidate", {}).get("packageId"))
-            return fy3h_mersi.build_integrated_plan(candidate, _parameter_snapshot(payload))
+            builder = fy3h_mersi.build_staged_plan if requested_version == "plan-v3" else fy3h_mersi.build_integrated_plan
+            return _with_requested_plan_version(builder(candidate, _parameter_snapshot(payload)), requested_version)
         if adapter is hy2d_altimeter:
             candidate = _recognized_hy2d_candidate(manifest, payload.get("candidate", {}).get("packageId"))
-            return hy2d_altimeter.build_integrated_plan(candidate, _parameter_snapshot(payload))
+            builder = hy2d_altimeter.build_staged_plan if requested_version == "plan-v3" else hy2d_altimeter.build_integrated_plan
+            return _with_requested_plan_version(builder(candidate, _parameter_snapshot(payload)), requested_version)
         if adapter is fy4b_agri:
             candidate = _recognized_fy4b_candidate(manifest, payload.get("candidate", {}).get("packageId"))
-            return fy4b_agri.build_integrated_plan(candidate, _parameter_snapshot(payload))
+            builder = fy4b_agri.build_plan if requested_version == "plan-v3" else fy4b_agri.build_integrated_plan
+            return _with_requested_plan_version(builder(candidate, _parameter_snapshot(payload)), requested_version)
         if adapter is gf6_wfv_l1a:
             candidate = _recognized_gf6_l1a_candidate(manifest, payload.get("candidate", {}).get("packageId"))
+            if requested_version == "plan-v3":
+                raise ValueError("GF-6 WFV L1A plan-v3 is not implemented")
             return gf6_wfv_l1a.build_integrated_plan(candidate, _parameter_snapshot(payload))
         if adapter is gf6_wfv_browse:
             candidate = _recognized_gf_candidate(manifest, payload.get("candidate", {}).get("packageId"))
-            return adapter.build_plan(candidate, _parameter_snapshot(payload))
+            return _with_requested_plan_version(adapter.build_plan(candidate, _parameter_snapshot(payload)), requested_version)
         return {"version": "plan-v1", "stages": [{
             "stageKey": "VALIDATE_SOURCE",
             "stageCode": "VALIDATE_SOURCE",
@@ -58,6 +66,8 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
         }]}
     if operation == "execute-stage":
         payload = _payload(request)
+        if payload.get("profileCode") == "HY-1C-CZI" and payload.get("planVersion") == "plan-v3":
+            return execute_l2a_staged_stage(payload, manifest)
         if _is_l2a_execution(payload):
             return {
                 "workerId": "worker-local",
@@ -73,22 +83,38 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
                 raise ValueError("unsupported GF6 L1A stage")
             return execute_gf6_product(payload, manifest)
         if payload.get("profileCode") == "FY-3H-MERSI":
-            if payload.get("stageKey") != "STANDARDIZE_MERSI_L1":
+            if payload.get("stageKey") == "STANDARDIZE_MERSI_L1":
+                return execute_fy3h_product(payload, manifest)
+            if payload.get("planVersion") != "plan-v3":
                 raise ValueError("unsupported FY-3H MERSI stage")
-            return execute_fy3h_product(payload, manifest)
+            return execute_fy3h_stage(payload, manifest)
         if payload.get("profileCode") == "HY-2D-ALTIMETER":
-            if payload.get("stageKey") != "STANDARDIZE_ALTIMETER_TRACK":
+            if payload.get("stageKey") == "STANDARDIZE_ALTIMETER_TRACK":
+                return execute_hy2d_product(payload, manifest)
+            if payload.get("planVersion") != "plan-v3":
                 raise ValueError("unsupported HY-2D stage")
-            return execute_hy2d_product(payload, manifest)
+            return execute_hy2d_stage(payload, manifest)
         adapter = _adapter_for_manifest(manifest)
         if adapter is hy2d_altimeter:
-            if payload.get("stageKey") != "STANDARDIZE_ALTIMETER_TRACK":
+            if payload.get("stageKey") == "STANDARDIZE_ALTIMETER_TRACK":
+                return execute_hy2d_product(payload, manifest)
+            if payload.get("planVersion") != "plan-v3":
                 raise ValueError("unsupported HY-2D stage")
-            return execute_hy2d_product(payload, manifest)
+            return execute_hy2d_stage(payload, manifest)
         if adapter is gf6_wfv_browse:
             return _execute_gf_browse_stage(payload, manifest)
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": []}
     raise ValueError(f"unsupported operation: {operation}")
+
+
+def _with_requested_plan_version(plan: dict[str, Any], requested_version: Any) -> dict[str, Any]:
+    if requested_version is None:
+        return plan
+    if requested_version == "plan-v2":
+        return plan
+    if requested_version != "plan-v3":
+        raise ValueError("unsupported requested plan version")
+    return {**plan, "version": "plan-v3"}
 
 
 def _adapter_for_manifest(manifest):

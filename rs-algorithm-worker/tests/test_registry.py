@@ -35,6 +35,21 @@ def test_registry_builds_fy3h_plan_v2_for_recognized_pair(tmp_path):
     assert response["stages"][0]["stageKey"] == "VALIDATE_FY3H_PAIR"
 
 
+def test_registry_builds_requested_plan_v3_for_fy3h_pair(tmp_path):
+    observation, geo = make_fy3h_pair(tmp_path)
+    manifest = _fy3h_manifest(observation, geo)
+    candidate = dispatch({"operation": "inspect"}, manifest)["candidates"][0]
+
+    response = dispatch({"operation": "build-plan", "payload": {
+        "candidate": candidate,
+        "requestedPlanVersion": "plan-v3",
+        "parameterSnapshot": {"targetCrs": "EPSG:4326", "resolutionDegrees": 0.01},
+    }}, manifest)
+
+    assert response["version"] == "plan-v3"
+    assert response["stages"][0]["stageKey"] == "VALIDATE_FY3H_PAIR"
+
+
 def test_registry_routes_only_recognized_fy4b_package_and_returns_logical_artifact(tmp_path):
     manifest = make_fy4b_package(tmp_path)
     manifest["output"] = {"path": str(tmp_path / "output")}

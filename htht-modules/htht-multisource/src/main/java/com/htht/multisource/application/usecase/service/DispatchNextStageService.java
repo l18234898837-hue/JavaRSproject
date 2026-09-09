@@ -162,7 +162,8 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
                 return new StageExecutionRequest(
                     task.id(), stage.id(), planStage.stageKey(), stage.attempt(), executionId,
                     "1.0", candidate.profileKey().productCode(), candidate.profileKey().profileVersion(),
-                    task.plan().processorVersion(), task.parameterSnapshot(), candidate.files(), task.outputUri(), grant
+                    task.plan().processorVersion(), task.parameterSnapshot(), candidate.files(), task.outputUri(), grant,
+                    task.plan().version()
                 );
             });
             outputContractValidator.validate(planStage, task.outputUri(), receipt.artifacts());

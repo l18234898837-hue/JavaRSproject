@@ -147,6 +147,136 @@ def execute_l2a_product(
     return artifacts
 
 
+def execute_l2a_staged_stage(
+    payload: dict[str, Any], manifest: dict[str, Any]
+) -> dict[str, Any]:
+    """Execute one HY-1C plan-v3 stage using manifest-authorized local paths."""
+    stage_key = payload.get("stageKey")
+    output = manifest.get("output")
+    if not isinstance(stage_key, str) or not isinstance(output, dict) or not isinstance(output.get("path"), str):
+        raise ValueError("HY-1C staged execution requires stageKey and output directory")
+    output_dir = Path(output["path"]).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    parameters = _parameters_from_payload(payload, manifest)
+    inputs = _manifest_inputs(manifest)
+    output_uri = _logical_output_uri(payload.get("outputUri"))
+
+    if stage_key == "VALIDATE_SOURCE":
+        candidate = inspect_l2a_manifest(manifest)
+        path = output_dir / "validation" / "source.json"
+        _write_json(path, {"packageId": candidate["packageId"], "metadata": candidate["metadataSnapshot"]})
+        return {"workerId": "worker-local", "status": "SUCCEEDED",
+                "artifacts": [_file_artifact(output_uri, output_dir, "HY1C_INPUT_VALIDATION_JSON", path)]}
+    if stage_key == "DECODE_SCALE_AND_NODATA":
+        raster = _decode(_h5_input(list(inputs.values())), load_reviewed_mapping())
+        path = output_dir / "decoded" / "czi.npz"
+        _write_raster_intermediate(path, raster, None, stage_key)
+        return {"workerId": "worker-local", "status": "SUCCEEDED",
+                "artifacts": [_file_artifact(output_uri, output_dir, "DECODED_CZI_RASTER", path)]}
+    if stage_key == "APPLY_L2_FLAGS":
+        decoded = _read_raster_intermediate(_required_input(inputs, "decoded"), "DECODED_CZI_RASTER")
+        result = _apply_flags(decoded[0], _h5_input([_required_input(inputs, "main")]), load_reviewed_mapping())
+        quality_path = output_dir / "quality" / "czi.npz"
+        mask_path = output_dir / "quality" / "valid-mask.npz"
+        _write_raster_intermediate(quality_path, result.raster, result.valid_mask, stage_key)
+        mask_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(mask_path, values=np.asarray(result.valid_mask, dtype=np.uint8), producerStage=stage_key)
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [
+            _file_artifact(output_uri, output_dir, "QUALITY_MASKED_CZI_RASTER", quality_path),
+            _file_artifact(output_uri, output_dir, "VALID_MASK", mask_path),
+        ]}
+    if stage_key == "GEOLOCATE_AND_GRID":
+        main = _required_input(inputs, "main")
+        raster = _grid_l2a_source(main, load_reviewed_mapping(), parameters, output_dir)
+        path = output_dir / "grid" / "czi.npz"
+        _write_raster_intermediate(path, raster, None, stage_key)
+        return {"workerId": "worker-local", "status": "SUCCEEDED",
+                "artifacts": [_file_artifact(output_uri, output_dir, "GEOLOCATED_CZI_RASTER", path)]}
+    if stage_key == "CROP_CZI":
+        source = _read_raster_intermediate(_required_input(inputs, "grid"), "GEOLOCATED_CZI_RASTER")
+        path = output_dir / "crop" / "czi.npz"
+        _write_raster_intermediate(path, source[0], source[1], stage_key)
+        return {"workerId": "worker-local", "status": "SUCCEEDED",
+                "artifacts": [_file_artifact(output_uri, output_dir, "CROPPED_CZI", path)]}
+    if stage_key == "WRITE_STANDARD_COG":
+        raster = _read_raster_intermediate(_required_input(inputs, "cropped"), "CROPPED_CZI")[0]
+        standard_path = output_dir / "standard" / "czi-l2a.tif"
+        standard_path.parent.mkdir(parents=True, exist_ok=True)
+        result = write_cog(raster, standard_path)
+        metadata_path = output_dir / "standard" / "czi-l2a.json"
+        _write_json(metadata_path, {"productCode": "HY-1C-CZI", "profileVersion": "L2A-v1",
+                                    "bands": [item.name for item in raster.band_metadata],
+                                    "grid": {"crs": raster.crs, "transform": list(tuple(raster.transform)[:6])}})
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [
+            _cog_artifact(output_uri, output_dir, "STANDARD_COG", result),
+            _file_artifact(output_uri, output_dir, "STANDARD_METADATA_JSON", metadata_path),
+        ]}
+    raise ValueError(f"unsupported HY-1C CZI L2A staged stage: {stage_key}")
+
+
+def _manifest_inputs(manifest: dict[str, Any]) -> dict[str, Path]:
+    result: dict[str, Path] = {}
+    for item in manifest.get("inputs", []):
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            continue
+        key = str(item.get("key") or item.get("role") or "").lower()
+        if key:
+            result[key] = Path(item["path"])
+    return result
+
+
+def _required_input(inputs: dict[str, Path], key: str) -> Path:
+    value = inputs.get(key.lower())
+    if value is None or not value.is_file():
+        raise ValueError(f"HY-1C staged input is missing: {key}")
+    return value
+
+
+def _parameters_from_payload(payload: dict[str, Any], manifest: dict[str, Any]) -> Any:
+    from .l2a_profile import parse_l2a_parameters
+    candidate = inspect_l2a_manifest(manifest)
+    centre = candidate["metadataSnapshot"]["sceneCentre"]
+    return parse_l2a_parameters(_parameter_snapshot_value(payload),
+                                centre_longitude=centre["longitude"], centre_latitude=centre["latitude"])
+
+
+def _parameter_snapshot_value(payload: dict[str, Any]) -> dict[str, Any]:
+    value = payload.get("parameterSnapshot", {})
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        return json.loads(value)
+    raise ValueError("HY-1C parameter snapshot is invalid")
+
+
+def _write_raster_intermediate(path: Path, raster: RasterData, valid_mask: np.ndarray | None, producer_stage: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, values=np.asarray(raster.values), validMask=np.asarray(valid_mask) if valid_mask is not None else np.array([], dtype=np.uint8),
+                        crs=np.asarray(raster.crs or ""), transform=np.asarray(tuple(raster.transform)[:6] if raster.transform else [], dtype=np.float64),
+                        nodata=np.asarray(raster.nodata if raster.nodata is not None else np.nan),
+                        bandNames=np.asarray([item.name for item in raster.band_metadata]),
+                        bandWavelengths=np.asarray([item.wavelength_nm if item.wavelength_nm is not None else -1 for item in raster.band_metadata]),
+                        producerStage=np.asarray(producer_stage))
+
+
+def _read_raster_intermediate(path: Path, expected_type: str) -> tuple[RasterData, np.ndarray | None]:
+    with np.load(path, allow_pickle=False) as data:
+        producer = str(np.asarray(data["producerStage"]).item())
+        if producer not in {"DECODE_SCALE_AND_NODATA", "APPLY_L2_FLAGS", "GEOLOCATE_AND_GRID", "CROP_CZI"}:
+            raise ValueError(f"invalid intermediate producer for {expected_type}")
+        values = np.asarray(data["values"])
+        names = [str(item) for item in np.asarray(data["bandNames"]).reshape(-1)]
+        wavelengths = [int(item) for item in np.asarray(data["bandWavelengths"]).reshape(-1)]
+        transform_values = np.asarray(data["transform"]).reshape(-1)
+        transform = Affine(*[float(item) for item in transform_values]) if transform_values.size == 6 else None
+        crs = str(np.asarray(data["crs"]).item()) or None
+        nodata = float(np.asarray(data["nodata"]).item())
+        metadata = tuple(BandMetadata(name, None if wavelength < 0 else wavelength, "1/sr") for name, wavelength in zip(names, wavelengths))
+        raster = RasterData(values, crs, transform, nodata, metadata)
+        mask = np.asarray(data["validMask"])
+        return raster, (mask.astype(bool) if mask.size else None)
+
+
 def _grid_l2a_source(h5_path: Path, mapping: ReviewedL2AMapping, parameters, output_dir: Path) -> RasterData:
     source_window, source_bounds = _source_window(h5_path, mapping, parameters.roi_wgs84)
     transformer = Transformer.from_crs("EPSG:4326", parameters.resolved_crs, always_xy=True)

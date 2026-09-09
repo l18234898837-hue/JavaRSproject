@@ -207,6 +207,12 @@ def build_integrated_plan(candidate: dict[str, Any], parameter_snapshot: dict[st
     ]}
 
 
+def build_staged_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return the reviewed multi-stage DAG for new plan-v3 tasks."""
+    plan = build_plan(candidate, parameter_snapshot)
+    return {**plan, "version": "plan-v3"}
+
+
 def _feature_source_names(parameters: dict[str, Any]) -> set[str]:
     variables = {
         f"CH{band:02d}_{'REFLECTANCE' if band <= 19 else 'BRIGHTNESS_TEMPERATURE'}"
