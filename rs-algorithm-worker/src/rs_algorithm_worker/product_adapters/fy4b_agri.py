@@ -124,6 +124,74 @@ def build_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str,
     }]}
 
 
+def build_staged_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Build the FY-4B AGRI plan-v3 DAG while retaining the legacy integrated plan."""
+    _require_candidate(product)
+    parameters = parse_fy4b_parameters(parameter_snapshot)
+    parameter_snapshot_json = snapshot(parameters)
+    raw_inputs = [_raw_input(role.lower(), role) for role in ROLE_ORDER]
+    stages: list[dict[str, Any]] = [
+        {"stageKey": "VALIDATE_FY4B_PACKAGE", "stageCode": "VALIDATE_FY4B_PACKAGE",
+         "dependsOnStageKeys": [], "inputs": raw_inputs,
+         "outputs": [_output("FY4B_INPUT_VALIDATION_JSON", "validation/package.json", "INTERMEDIATE")],
+         "parameterSnapshot": parameter_snapshot_json},
+        {"stageKey": "BUILD_FY4B_NOMINAL_GRID", "stageCode": "BUILD_FY4B_NOMINAL_GRID",
+         "dependsOnStageKeys": ["VALIDATE_FY4B_PACKAGE"],
+         "inputs": [_raw_input("geo_4000m", "GEO_4000M"), _upstream("validation", "FY4B_INPUT_VALIDATION_JSON")],
+         "outputs": [_output("FY4B_NOMINAL_GRID_JSON", "navigation/nominal-grid.json", "INTERMEDIATE")],
+         "parameterSnapshot": parameter_snapshot_json},
+        {"stageKey": "CALIBRATE_AND_GEOREFERENCE_FY4B", "stageCode": "CALIBRATE_AND_GEOREFERENCE_FY4B",
+         "dependsOnStageKeys": ["BUILD_FY4B_NOMINAL_GRID"], "inputs": raw_inputs + [_upstream("grid", "FY4B_NOMINAL_GRID_JSON")],
+         "outputs": [_output(f"FY4B_NATIVE_{resolution}_RASTER", f"native/{resolution.lower()}.tif", "INTERMEDIATE")
+                     for resolution in ("0500M", "1000M", "2000M", "4000M")] +
+                    [_output(f"FY4B_NATIVE_{resolution}_QUALITY", f"native/quality-{resolution.lower()}.tif", "INTERMEDIATE")
+                     for resolution in ("0500M", "1000M", "2000M", "4000M")] +
+                    [_output("FY4B_CALIBRATION_SUMMARY_JSON", "calibration/summary.json", "INTERMEDIATE")],
+         "parameterSnapshot": parameter_snapshot_json},
+        {"stageKey": "REPROJECT_AND_CROP_FY4B", "stageCode": "REPROJECT_AND_CROP_FY4B",
+         "dependsOnStageKeys": ["CALIBRATE_AND_GEOREFERENCE_FY4B"],
+         "inputs": [_upstream(f"native{resolution}", f"FY4B_NATIVE_{resolution}_RASTER") for resolution in ("0500M", "1000M", "2000M", "4000M")] +
+                   [_upstream(f"nativeQuality{resolution}", f"FY4B_NATIVE_{resolution}_QUALITY") for resolution in ("0500M", "1000M", "2000M", "4000M")],
+         "outputs": [_output(f"FY4B_GRIDDED_{resolution}_RASTER", f"grid/{resolution.lower()}.tif", "INTERMEDIATE")
+                     for resolution in ("0500M", "1000M", "2000M", "4000M")] +
+                    [_output(f"FY4B_GRIDDED_{resolution}_QUALITY", f"grid/quality-{resolution.lower()}.tif", "INTERMEDIATE")
+                     for resolution in ("0500M", "1000M", "2000M", "4000M")],
+         "parameterSnapshot": parameter_snapshot_json},
+    ]
+    standard_outputs = [_output(kind, path, "FINAL") for kind, path in (
+        ("FY4B_RED_500M_COG", "standard/0500m.tif"), ("FY4B_RED_500M_QUALITY_COG", "standard/quality-0500m.tif"),
+        ("FY4B_VIS_NIR_1000M_COG", "standard/1000m.tif"), ("FY4B_VIS_NIR_1000M_QUALITY_COG", "standard/quality-1000m.tif"),
+        ("FY4B_SPECTRAL_2000M_COG", "standard/2000m.tif"), ("FY4B_SPECTRAL_2000M_QUALITY_COG", "standard/quality-2000m.tif"),
+        ("FY4B_MULTISPECTRAL_4000M_COG", "standard/4000m.tif"), ("FY4B_MULTISPECTRAL_4000M_QUALITY_COG", "standard/quality-4000m.tif"),
+        ("FY4B_STANDARD_SUMMARY_JSON", "standard/summary.json"),)]
+    stages.append({"stageKey": "WRITE_FY4B_STANDARD_COG", "stageCode": "WRITE_FY4B_STANDARD_COG",
+                   "dependsOnStageKeys": ["REPROJECT_AND_CROP_FY4B"],
+                   "inputs": [_upstream(f"grid{resolution}", f"FY4B_GRIDDED_{resolution}_RASTER") for resolution in ("0500M", "1000M", "2000M", "4000M")] +
+                             [_upstream(f"gridQuality{resolution}", f"FY4B_GRIDDED_{resolution}_QUALITY") for resolution in ("0500M", "1000M", "2000M", "4000M")],
+                   "outputs": standard_outputs, "parameterSnapshot": parameter_snapshot_json})
+    if parameters["features"]["enabled"]:
+        stages.append({"stageKey": "EXTRACT_FY4B_FEATURES", "stageCode": "EXTRACT_FY4B_FEATURES",
+                       "dependsOnStageKeys": ["WRITE_FY4B_STANDARD_COG"],
+                       "inputs": [_upstream("standard", "FY4B_VIS_NIR_1000M_COG")],
+                       "outputs": [_output("FY4B_FEATURE_COG", "features/fy4b-features.tif", "FINAL"), _output("FY4B_FEATURE_SUMMARY_JSON", "features/summary.json", "FINAL")],
+                       "parameterSnapshot": parameter_snapshot_json})
+    if parameters["fusion"]["enabled"]:
+        stages.append({"stageKey": "FUSE_FY4B_BANDS", "stageCode": "FUSE_FY4B_BANDS", "dependsOnStageKeys": ["WRITE_FY4B_STANDARD_COG"],
+                       "inputs": [_upstream("standard", "FY4B_VIS_NIR_1000M_COG"), _upstream("red", "FY4B_RED_500M_COG")],
+                       "outputs": [_output("FY4B_FALSE_COLOR_COG", "fusion/false-color.tif", "FINAL")], "parameterSnapshot": parameter_snapshot_json})
+    if parameters["saliency"]["enabled"]:
+        dependencies = ["WRITE_FY4B_STANDARD_COG"]
+        source = parameters["saliency"]["source"]
+        saliency_input = "FY4B_VIS_NIR_1000M_COG"
+        if source.startswith(("gradient:", "local_variance:")) and parameters["features"]["enabled"]:
+            dependencies.append("EXTRACT_FY4B_FEATURES"); saliency_input = "FY4B_FEATURE_COG"
+        stages.append({"stageKey": "DETECT_FY4B_SALIENCY", "stageCode": "DETECT_FY4B_SALIENCY", "dependsOnStageKeys": dependencies,
+                       "inputs": [_upstream("source", saliency_input)],
+                       "outputs": [_output("FY4B_SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"), _output("FY4B_SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"), _output("FY4B_SALIENCY_SUMMARY_JSON", "saliency/summary.json", "FINAL")],
+                       "parameterSnapshot": parameter_snapshot_json})
+    return {"version": "plan-v3", "stages": stages}
+
+
 def _classify_file(path: Path, original_file_name: str, entry: Any) -> dict[str, Any]:
     if Path(original_file_name).suffix.upper() != ".HDF":
         raise ValueError("FY-4B AGRI evidence requires HDF files")
@@ -224,8 +292,12 @@ def _raw_input(key: str, artifact_type: str) -> dict[str, Any]:
     return {"key": key, "source": "RAW_INPUT", "artifactType": artifact_type, "required": True}
 
 
-def _output(artifact_type: str, relative_path: str) -> dict[str, Any]:
-    return {"artifactType": artifact_type, "relativePath": relative_path, "retention": "FINAL"}
+def _upstream(key: str, artifact_type: str) -> dict[str, Any]:
+    return {"key": key, "source": "UPSTREAM_ARTIFACT", "artifactType": artifact_type, "required": True}
+
+
+def _output(artifact_type: str, relative_path: str, retention: str = "FINAL") -> dict[str, Any]:
+    return {"artifactType": artifact_type, "relativePath": relative_path, "retention": retention}
 
 
 def _scalar(value: Any) -> Any:

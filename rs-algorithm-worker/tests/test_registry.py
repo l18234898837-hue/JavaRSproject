@@ -180,6 +180,20 @@ def test_registry_executes_only_the_fy4b_integrated_stage(tmp_path, monkeypatch)
     assert response == expected
 
 
+def test_registry_routes_fy4b_plan_v3_stage_to_staged_executor(tmp_path, monkeypatch):
+    root = tmp_path / "fy4b-stage"; root.mkdir()
+    manifest = _manifest_with_storage_uris(make_fy4b_package(root))
+    expected = {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": []}
+    monkeypatch.setattr(registry, "execute_fy4b_stage", lambda _payload, _manifest: expected)
+
+    response = dispatch({"operation": "execute-stage", "payload": {
+        "profileCode": "FY-4B-AGRI", "planVersion": "plan-v3", "stageKey": "VALIDATE_FY4B_PACKAGE",
+        "outputUri": "rs://output/fy4b-validation", "parameterSnapshot": "{}",
+    }}, manifest)
+
+    assert response == expected
+
+
 def test_registry_inspects_and_builds_the_gf6_l1a_integrated_plan(tmp_path):
     manifest = _manifest_with_storage_uris(make_gf6_package(tmp_path / "gf6"))
 

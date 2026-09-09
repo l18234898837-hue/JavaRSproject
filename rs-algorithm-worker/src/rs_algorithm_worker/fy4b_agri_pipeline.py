@@ -304,6 +304,71 @@ def execute_fy4b_product(payload: dict[str, Any], manifest: dict[str, Any]) -> d
         _remove_intermediates(directory)
 
 
+def execute_fy4b_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    """Execute one FY-4B AGRI plan-v3 stage, preserving intermediate artifacts."""
+    stage = payload.get("stageKey")
+    output_uri = payload.get("outputUri")
+    output = manifest.get("output")
+    if not isinstance(stage, str) or not isinstance(output_uri, str) or not output_uri.startswith("rs://output/"):
+        raise ValueError("FY-4B AGRI stage and logical output URI are required")
+    if not isinstance(output, dict) or not isinstance(output.get("path"), str):
+        raise ValueError("FY-4B temporary output directory is required")
+    directory = Path(output["path"]).resolve(); directory.mkdir(parents=True, exist_ok=True)
+    parameters = _parameters(payload)
+    raw_paths = _raw_paths(manifest)
+    if stage == "VALIDATE_FY4B_PACKAGE":
+        _require_paths(raw_paths, ROLE_ORDER, "FY-4B execution requires all raw roles")
+        return _stage_response(output_uri, directory, _validate_fy4b_package(manifest, directory))
+    if stage == "BUILD_FY4B_NOMINAL_GRID":
+        geo = raw_paths.get("GEO_4000M")
+        if geo is None:
+            raise ValueError("FY-4B nominal grid requires GEO_4000M input")
+        return _stage_response(output_uri, directory, _build_fy4b_nominal_grid(geo, directory))
+    if stage == "CALIBRATE_AND_GEOREFERENCE_FY4B":
+        _require_paths(raw_paths, ROLE_ORDER, "FY-4B calibration requires all raw roles")
+        grid_path = raw_paths.get("FY4B_NOMINAL_GRID_JSON") or directory / "navigation" / "nominal-grid.json"
+        if not Path(grid_path).is_file():
+            raise ValueError("FY-4B calibration requires nominal grid")
+        return _stage_response(output_uri, directory, _calibrate_and_georeference_fy4b(raw_paths, [("FY4B_NOMINAL_GRID_JSON", Path(grid_path))], parameters, directory))
+    if stage == "REPROJECT_AND_CROP_FY4B":
+        native = []
+        for resolution in ("0500M", "1000M", "2000M", "4000M"):
+            for suffix in ("RASTER", "QUALITY"):
+                key = f"FY4B_NATIVE_{resolution}_{suffix}"
+                path = raw_paths.get(key) or directory / "native" / (f"{resolution.lower()}.tif" if suffix == "RASTER" else f"quality-{resolution.lower()}.tif")
+                if not Path(path).is_file():
+                    raise ValueError(f"FY-4B reprojection requires {key}")
+                native.append((key, Path(path)))
+        return _stage_response(output_uri, directory, _reproject_and_crop_fy4b(native, parameters, directory))
+    if stage == "WRITE_FY4B_STANDARD_COG":
+        gridded = []
+        for resolution in ("0500M", "1000M", "2000M", "4000M"):
+            for suffix in ("RASTER", "QUALITY"):
+                key = f"FY4B_GRIDDED_{resolution}_{suffix}"
+                path = raw_paths.get(key) or directory / "grid" / (f"{resolution.lower()}.tif" if suffix == "RASTER" else f"quality-{resolution.lower()}.tif")
+                if not Path(path).is_file():
+                    raise ValueError(f"FY-4B standard COG requires {key}")
+                gridded.append((key, Path(path)))
+        return _stage_response(output_uri, directory, _write_fy4b_standard_cog(gridded, directory))
+    if stage == "EXTRACT_FY4B_FEATURES":
+        standard = {"FY4B_VIS_NIR_1000M_COG": raw_paths.get("FY4B_VIS_NIR_1000M_COG") or directory / "standard" / "1000m.tif",
+                    "FY4B_RED_500M_COG": raw_paths.get("FY4B_RED_500M_COG") or directory / "standard" / "0500m.tif"}
+        return _stage_response(output_uri, directory, _write_fy4b_features({k: Path(v) for k, v in standard.items()}, directory, parameters))
+    if stage == "FUSE_FY4B_BANDS":
+        standard = {k: Path(raw_paths.get(k) or directory / "standard" / name) for k, name in (("FY4B_VIS_NIR_1000M_COG", "1000m.tif"), ("FY4B_RED_500M_COG", "0500m.tif"), ("FY4B_MULTISPECTRAL_4000M_COG", "4000m.tif"))}
+        return _stage_response(output_uri, directory, _write_fy4b_fusion(standard, directory, parameters))
+    if stage == "DETECT_FY4B_SALIENCY":
+        source = raw_paths.get("FY4B_FEATURE_COG") if parameters["saliency"]["source"].startswith(("gradient:", "local_variance:")) else raw_paths.get("FY4B_VIS_NIR_1000M_COG")
+        source = Path(source or directory / ("features/fy4b-features.tif" if parameters["saliency"]["source"].startswith(("gradient:", "local_variance:")) else "standard/1000m.tif"))
+        return _stage_response(output_uri, directory, _write_fy4b_saliency({"FY4B_FEATURE_COG": source, "FY4B_VIS_NIR_1000M_COG": source}, directory, parameters))
+    raise ValueError("unsupported FY-4B AGRI stage")
+
+
+def _stage_response(output_uri: str, directory: Path, artifacts: list[tuple[str, Path]]) -> dict[str, Any]:
+    return {"workerId": "worker-local", "status": "SUCCEEDED",
+            "artifacts": [_artifact(output_uri, directory, artifact_type, path) for artifact_type, path in artifacts]}
+
+
 def _validate_fy4b_package(manifest: dict[str, Any], directory: Path) -> list[tuple[str, Path]]:
     from .product_adapters.fy4b_agri import inspect_manifest
 

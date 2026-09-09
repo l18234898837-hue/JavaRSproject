@@ -7,7 +7,9 @@ import pytest
 
 from fy4b_fixture import make_fy4b_package
 from rs_algorithm_worker.fy4b_agri_profile import parse_fy4b_parameters
-from rs_algorithm_worker.product_adapters.fy4b_agri import build_integrated_plan, build_plan, inspect_manifest
+from rs_algorithm_worker.product_adapters.fy4b_agri import (
+    build_integrated_plan, build_plan, build_staged_plan, inspect_manifest,
+)
 
 
 @pytest.mark.real_sample
@@ -178,6 +180,22 @@ def test_integrated_plan_declares_one_stage_nine_mandatory_outputs_and_enabled_o
         "FY4B_FEATURE_COG", "FY4B_FEATURE_SUMMARY_JSON", "FY4B_FALSE_COLOR_COG",
         "FY4B_SALIENCY_SCORE_COG", "FY4B_SALIENCY_MASK_COG", "FY4B_SALIENCY_SUMMARY_JSON",
     }
+
+
+def test_staged_plan_v3_splits_fy4b_pipeline_into_real_dag(tmp_path):
+    candidate = inspect_manifest(make_fy4b_package(tmp_path))[0]
+    plan = build_staged_plan(candidate, {"schemaVersion": "1"})
+
+    assert plan["version"] == "plan-v3"
+    assert [stage["stageKey"] for stage in plan["stages"]] == [
+        "VALIDATE_FY4B_PACKAGE", "BUILD_FY4B_NOMINAL_GRID",
+        "CALIBRATE_AND_GEOREFERENCE_FY4B", "REPROJECT_AND_CROP_FY4B",
+        "WRITE_FY4B_STANDARD_COG",
+    ]
+    assert plan["stages"][0]["outputs"][0]["artifactType"] == "FY4B_INPUT_VALIDATION_JSON"
+    assert plan["stages"][1]["dependsOnStageKeys"] == ["VALIDATE_FY4B_PACKAGE"]
+    assert plan["stages"][2]["dependsOnStageKeys"] == ["BUILD_FY4B_NOMINAL_GRID"]
+    assert plan["stages"][4]["outputs"][0]["retention"] == "FINAL"
 
 
 def test_integrated_plan_rejects_candidate_with_invalid_file_contract(tmp_path):
