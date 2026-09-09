@@ -13,7 +13,7 @@ from .fy4b_agri_pipeline import execute_fy4b_product, execute_fy4b_stage
 from .gf6_wfv_pipeline import execute_gf6_product, execute_gf6_stage
 from .hy2d_pipeline import execute_hy2d_product, execute_hy2d_stage
 from .l2a_pipeline import execute_l2a_product, execute_l2a_staged_stage
-from .product_adapters import fy3h_mersi, fy4b_agri, gf6_wfv_browse, gf6_wfv_l1a, hy1c_czi, hy1c_czi_l2a, hy2d_altimeter
+from .product_adapters import base, fy3h_mersi, fy4b_agri, gf6_wfv_browse, gf6_wfv_l1a, hy1c_czi, hy1c_czi_l2a, hy2d_altimeter
 from .product_adapters.base import logical_file_name
 
 
@@ -60,10 +60,16 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
             candidate = _recognized_gf_candidate(manifest, payload.get("candidate", {}).get("packageId"))
             builder = adapter.build_staged_plan if requested_version == "plan-v3" else adapter.build_plan
             return _with_requested_plan_version(builder(candidate, _parameter_snapshot(payload)), requested_version)
-        return {"version": "plan-v1", "stages": [{
+        if adapter is base:
+            candidate = base.candidate("GENERIC", "RASTER_GRID", "GENERIC", [Path(item["path"]) for item in manifest.get("inputs", [])], {})
+            return _with_requested_plan_version(base.build_plan(candidate), requested_version)
+        version = "plan-v3" if requested_version == "plan-v3" else "plan-v1"
+        return {"version": version, "stages": [{
             "stageKey": "VALIDATE_SOURCE",
             "stageCode": "VALIDATE_SOURCE",
             "dependsOnStageKeys": [],
+            "inputs": [{"key": "main", "source": "RAW_INPUT", "artifactType": "MAIN", "required": True}],
+            "outputs": [{"artifactType": "VALIDATION_METADATA_JSON", "relativePath": "validation/source.json", "retention": "INTERMEDIATE"}] if version == "plan-v3" else [],
         }]}
     if operation == "execute-stage":
         payload = _payload(request)
@@ -147,7 +153,7 @@ def _adapter_for_manifest(manifest):
         return hy1c_czi
     if _has_fy4b_agri_evidence(manifest, roles):
         return fy4b_agri
-    return fy3h_mersi
+    return base
 
 
 def _has_gf6_l1a_evidence(manifest: dict[str, Any], roles: set[Any]) -> bool:

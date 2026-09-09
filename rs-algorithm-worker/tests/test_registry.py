@@ -35,6 +35,18 @@ def test_registry_builds_fy3h_plan_v2_for_recognized_pair(tmp_path):
     assert response["stages"][0]["stageKey"] == "VALIDATE_FY3H_PAIR"
 
 
+def test_registry_builds_plan_v3_for_generic_supported_manifest(tmp_path):
+    source = tmp_path / "generic.bin"
+    source.write_bytes(b"generic")
+    manifest = {"inputs": [{"path": str(source), "role": "MAIN", "ordinal": 0}]}
+    candidate = {"packageId": "generic", "profileKey": {"productCode": "GENERIC", "profileVersion": "v1"}, "dataShape": "RASTER_GRID", "supportStatus": "SUPPORTED", "files": [{"role": "MAIN", "ordinal": 0, "path": str(source)}]}
+    response = dispatch({"operation": "build-plan", "payload": {
+        "candidate": candidate, "requestedPlanVersion": "plan-v3", "parameterSnapshot": {}
+    }}, manifest)
+    assert response["version"] == "plan-v3"
+    assert response["stages"][0]["stageKey"] == "VALIDATE_SOURCE"
+
+
 def test_registry_builds_requested_plan_v3_for_fy3h_pair(tmp_path):
     observation, geo = make_fy3h_pair(tmp_path)
     manifest = _fy3h_manifest(observation, geo)
