@@ -4,6 +4,7 @@ import json
 import math
 import os
 import tempfile
+import hashlib
 from pathlib import Path
 
 from PIL import Image, ImageStat
@@ -102,6 +103,74 @@ def build_plan(product: dict, parameters: dict | None = None) -> dict:
         {"stageKey": "EXTRACT_VISUAL_FEATURES", "stageCode": "EXTRACT_VISUAL_FEATURES", "dependsOnStageKeys": ["GEOREFERENCE_BROWSE"]},
         {"stageKey": "WRITE_BROWSE_REPORT", "stageCode": "WRITE_BROWSE_REPORT", "dependsOnStageKeys": ["EXTRACT_VISUAL_FEATURES"]},
     ]}
+
+
+def build_staged_plan(product: dict, parameters: dict | None = None) -> dict:
+    """Declare the browse workflow as a plan-v3 artifact DAG."""
+    if parameters != PUBLIC_PARAMETERS:
+        operation = parameters.get("operation") if isinstance(parameters, dict) else None
+        raise ValueError(f"UNSUPPORTED_BROWSE_OPERATION: {operation or 'invalid parameter snapshot'}")
+    if product.get("profileKey") != {"productCode": "GF-6-WFV-BROWSE", "profileVersion": "v1"}:
+        raise ValueError("GF-6 browse profile is required")
+    return {"version": "plan-v3", "stages": [
+        {"stageKey": "VALIDATE_BROWSE", "stageCode": "VALIDATE_BROWSE", "dependsOnStageKeys": [],
+         "inputs": [{"key": "browse_image", "source": "RAW_INPUT", "artifactType": "BROWSE_IMAGE", "required": True}],
+         "outputs": [{"artifactType": "BROWSE_VALIDATION_JSON", "relativePath": "intermediate/validation.json", "retention": "INTERMEDIATE"}]},
+        {"stageKey": "GEOREFERENCE_BROWSE", "stageCode": "GEOREFERENCE_BROWSE", "dependsOnStageKeys": ["VALIDATE_BROWSE"],
+         "inputs": [{"key": "validation", "source": "UPSTREAM_ARTIFACT", "artifactType": "BROWSE_VALIDATION_JSON", "required": True}],
+         "outputs": [{"artifactType": "BROWSE_GEOREFERENCE_JSON", "relativePath": "intermediate/georeference.json", "retention": "INTERMEDIATE"}]},
+        {"stageKey": "EXTRACT_VISUAL_FEATURES", "stageCode": "EXTRACT_VISUAL_FEATURES", "dependsOnStageKeys": ["GEOREFERENCE_BROWSE"],
+         "inputs": [{"key": "georeference", "source": "UPSTREAM_ARTIFACT", "artifactType": "BROWSE_GEOREFERENCE_JSON", "required": True}],
+         "outputs": [{"artifactType": "BROWSE_FEATURES_JSON", "relativePath": "intermediate/features.json", "retention": "INTERMEDIATE"}]},
+        {"stageKey": "WRITE_BROWSE_REPORT", "stageCode": "WRITE_BROWSE_REPORT", "dependsOnStageKeys": ["EXTRACT_VISUAL_FEATURES"],
+         "inputs": [{"key": "features", "source": "UPSTREAM_ARTIFACT", "artifactType": "BROWSE_FEATURES_JSON", "required": True}],
+         "outputs": [{"artifactType": "BROWSE_REPORT_JSON", "relativePath": "browse-report.json", "retention": "FINAL"}]},
+    ]}
+
+
+def execute_visual_stage(stage_key: str, product: dict, manifest: dict, output_dir: str | os.PathLike[str], output_uri: str | None = None) -> dict:
+    """Execute one browse stage and return declared artifact metadata."""
+    output = Path(output_dir).resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    image_path = next((Path(item["path"]) for item in product.get("files", []) if item.get("role") == "BROWSE_IMAGE"), None)
+    if image_path is None:
+        for item in manifest.get("inputs", []):
+            if item.get("role") == "BROWSE_IMAGE":
+                image_path = Path(item["path"])
+                break
+    if image_path is None:
+        raise ValueError("GF-6 browse image is required")
+    with Image.open(image_path) as image:
+        if image.mode != "RGB" or image.width <= 0 or image.height <= 0:
+            raise ValueError("GF-6 browse image must be a positive RGB JPEG")
+        dimensions = [image.width, image.height]
+        stats = _rgb_stats(image)
+    if stage_key == "VALIDATE_BROWSE":
+        relative, artifact_type, value = "intermediate/validation.json", "BROWSE_VALIDATION_JSON", {"valid": True, "dimensions": dimensions}
+    elif stage_key == "GEOREFERENCE_BROWSE":
+        relative, artifact_type, value = "intermediate/georeference.json", "BROWSE_GEOREFERENCE_JSON", {"method": "AFFINE_WORLD_FILE_APPROXIMATE", "dimensions": dimensions}
+    elif stage_key == "EXTRACT_VISUAL_FEATURES":
+        relative, artifact_type, value = "intermediate/features.json", "BROWSE_FEATURES_JSON", {"dimensions": dimensions, "rgbStats": stats}
+    elif stage_key == "WRITE_BROWSE_REPORT":
+        report = execute_visual_plan(product, output)
+        relative, artifact_type = "browse-report.json", "BROWSE_REPORT_JSON"
+        content = report.read_bytes()
+        return _stage_response(manifest, artifact_type, relative, report, content, output_uri)
+    else:
+        raise ValueError("unsupported GF-6 browse stage")
+    path = output / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+    return _stage_response(manifest, artifact_type, relative, path, path.read_bytes(), output_uri)
+
+
+def _stage_response(manifest, artifact_type, relative, path, content, output_uri=None):
+    output = manifest.get("output") or {}
+    uri = output_uri or output.get("uri") or "rs://output/local"
+    return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [{
+        "uri": uri.rstrip("/") + "/" + relative, "type": artifact_type,
+        "sizeBytes": len(content), "checksum": "sha256:" + hashlib.sha256(content).hexdigest(),
+    }]}
 
 
 def execute_visual_plan(product: dict, output_dir: str | os.PathLike[str]) -> Path:

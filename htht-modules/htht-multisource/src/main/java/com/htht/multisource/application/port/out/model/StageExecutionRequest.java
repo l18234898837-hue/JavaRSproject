@@ -23,7 +23,8 @@ public record StageExecutionRequest(
     List<InputAsset> inputs,
     StorageUri outputUri,
     ExecutionGrant executionGrant,
-    String planVersion
+    String planVersion,
+    List<StageOutput> outputs
 ) {
     public StageExecutionRequest(
         TaskId taskId, StageId stageId, String stageKey, int attempt, ExecutionId executionId,
@@ -31,7 +32,7 @@ public record StageExecutionRequest(
         String parameterSnapshot, List<InputAsset> inputs, StorageUri outputUri, ExecutionGrant executionGrant
     ) {
         this(taskId, stageId, stageKey, attempt, executionId, schemaVersion, profileCode, profileVersion,
-            processorVersion, parameterSnapshot, inputs, outputUri, executionGrant, "plan-v2");
+            processorVersion, parameterSnapshot, inputs, outputUri, executionGrant, "plan-v2", List.of());
     }
 
     public StageExecutionRequest {
@@ -39,7 +40,9 @@ public record StageExecutionRequest(
         Objects.requireNonNull(outputUri, "outputUri");
         Objects.requireNonNull(executionGrant, "executionGrant");
         Objects.requireNonNull(planVersion, "planVersion");
+        Objects.requireNonNull(outputs, "outputs");
         inputs = List.copyOf(inputs);
+        outputs = List.copyOf(outputs);
         if (attempt < 1 || stageKey == null || stageKey.isBlank()
             || schemaVersion == null || schemaVersion.isBlank()
             || profileCode == null || profileCode.isBlank()

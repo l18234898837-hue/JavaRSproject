@@ -3,7 +3,7 @@ import json
 import pytest
 from PIL import Image
 
-from rs_algorithm_worker.product_adapters.gf6_wfv_browse import build_plan, execute_visual_plan, inspect_manifest
+from rs_algorithm_worker.product_adapters.gf6_wfv_browse import build_plan, build_staged_plan, execute_visual_plan, execute_visual_stage, inspect_manifest
 
 
 @pytest.mark.real_sample
@@ -66,6 +66,50 @@ def test_browse_plan_writes_deterministic_report(tmp_path):
         },
         "width": 2,
     }
+
+
+def test_browse_plan_v3_declares_intermediate_artifacts_and_stage_dependencies(tmp_path):
+    image = tmp_path / "browse.jpg"
+    Image.new("RGB", (2, 2), (10, 20, 30)).save(image)
+    candidate = {
+        "packageId": "GF6-WFV-LEVEL1A-test",
+        "profileKey": {"productCode": "GF-6-WFV-BROWSE", "profileVersion": "v1"},
+        "supportStatus": "SUPPORTED", "dataShape": "RASTER_GRID",
+        "files": [{"role": "BROWSE_IMAGE", "path": str(image)}],
+    }
+    plan = build_staged_plan(candidate, {"schemaVersion": "1", "operation": "DEFAULT_PROCESS"})
+    assert plan["version"] == "plan-v3"
+    assert [stage["stageKey"] for stage in plan["stages"]] == [
+        "VALIDATE_BROWSE", "GEOREFERENCE_BROWSE", "EXTRACT_VISUAL_FEATURES", "WRITE_BROWSE_REPORT"
+    ]
+    assert all(stage["outputs"][0]["retention"] == "INTERMEDIATE" for stage in plan["stages"][:3])
+    assert plan["stages"][-1]["outputs"][0]["retention"] == "FINAL"
+    assert plan["stages"][-1]["dependsOnStageKeys"] == ["EXTRACT_VISUAL_FEATURES"]
+
+
+def test_browse_staged_executor_writes_real_intermediates_and_final_report(tmp_path):
+    image = tmp_path / "browse.jpg"
+    Image.new("RGB", (2, 2), (10, 20, 30)).save(image)
+    candidate = {
+        "packageId": "GF6-WFV-LEVEL1A-test",
+        "profileKey": {"productCode": "GF-6-WFV-BROWSE", "profileVersion": "v1"},
+        "supportStatus": "SUPPORTED", "dataShape": "RASTER_GRID",
+        "files": [{"role": "BROWSE_IMAGE", "path": str(image)}],
+    }
+    root = tmp_path / "output"
+    manifest = {"inputs": [{"path": str(image), "role": "BROWSE_IMAGE", "ordinal": 0}]}
+    validate = execute_visual_stage("VALIDATE_BROWSE", candidate, manifest, root)
+    assert validate["artifacts"][0]["type"] == "BROWSE_VALIDATION_JSON"
+    georef = execute_visual_stage("GEOREFERENCE_BROWSE", candidate, manifest, root)
+    assert georef["artifacts"][0]["type"] == "BROWSE_GEOREFERENCE_JSON"
+    features = execute_visual_stage("EXTRACT_VISUAL_FEATURES", candidate, manifest, root)
+    assert features["artifacts"][0]["type"] == "BROWSE_FEATURES_JSON"
+    report = execute_visual_stage("WRITE_BROWSE_REPORT", candidate, manifest, root)
+    assert report["artifacts"][0]["type"] == "BROWSE_REPORT_JSON"
+    assert (root / "intermediate" / "validation.json").is_file()
+    assert (root / "intermediate" / "georeference.json").is_file()
+    assert (root / "intermediate" / "features.json").is_file()
+    assert (root / "browse-report.json").is_file()
 
 
 def _minimal_group(tmp_path):

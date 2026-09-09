@@ -49,6 +49,7 @@ class WorkerContractCodecTest {
         assertThat(root.path("payload").path("stageId").asLong()).isEqualTo(201L);
         assertThat(root.path("payload").path("executionId").asText()).isEqualTo("exec-01");
         assertThat(root.path("payload").path("inputs")).hasSize(1);
+        assertThat(root.path("payload").path("outputs")).hasSize(0);
         assertThat(root.path("payload").path("outputUri").asText()).isEqualTo("rs://output/task-101");
     }
 
