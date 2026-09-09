@@ -30,6 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Objects;
+import java.util.List;
 import java.util.function.Supplier;
 
 @RestController
@@ -108,13 +109,45 @@ public class ProcessingExecutionController {
                 return new ExecutionProgressResponse.StageProgressResponse(
                     stage.id().value(), stage.stageKey(), stage.status().name(), stage.attempt(),
                     stage.errorCode() == null && stage.errorMessage() == null ? null : safeFailure.code(),
-                    stage.errorCode() == null && stage.errorMessage() == null ? null : safeFailure.message()
+                    stage.errorCode() == null && stage.errorMessage() == null ? null : safeFailure.message(),
+                    stage.executionId(), stage.startedAt(), stage.finishedAt(), durationMs(stage.startedAt(), stage.finishedAt()),
+                    stage.stageKey(), declaredOutputs(detail.plan().stages(), stage.stageKey())
                 );
             }).toList(),
             detail.artifacts().stream().map(artifact -> new ExecutionProgressResponse.ArtifactProgressResponse(
-                artifact.stageId().value(), artifact.type(), artifact.uri().value(), artifact.checksum()
+                artifact.stageId().value(), artifact.type(), artifact.uri().value(), artifact.checksum(), artifact.sizeBytes(),
+                artifact.retention(), true, mediaType(artifact.type()), previewable(artifact.type()), displayName(artifact)
             )).toList()
         )));
+    }
+
+    private static Long durationMs(java.time.Instant startedAt, java.time.Instant finishedAt) {
+        return startedAt == null || finishedAt == null ? null : java.time.Duration.between(startedAt, finishedAt).toMillis();
+    }
+
+    private static List<String> declaredOutputs(java.util.List<com.htht.multisource.domain.model.ProcessingStage> stages, String key) {
+        return stages.stream().filter(stage -> stage.stageKey().equals(key)).findFirst()
+            .map(stage -> stage.outputs().stream().map(output -> output.artifactType()).toList()).orElse(List.of());
+    }
+
+    private static String displayName(com.htht.multisource.application.usecase.model.TaskArtifactView artifact) {
+        String value = artifact.uri().value();
+        int slash = Math.max(value.lastIndexOf('/'), value.lastIndexOf('\\'));
+        return slash >= 0 && slash + 1 < value.length() ? value.substring(slash + 1) : artifact.type();
+    }
+
+    private static String mediaType(String type) {
+        String upper = type.toUpperCase(java.util.Locale.ROOT);
+        if (upper.contains("JSON") || upper.contains("SUMMARY")) return "application/json";
+        if (upper.contains("PNG")) return "image/png";
+        if (upper.contains("JPEG") || upper.contains("JPG")) return "image/jpeg";
+        if (upper.contains("COG") || upper.contains("TIFF")) return "image/tiff";
+        return "application/octet-stream";
+    }
+
+    private static boolean previewable(String type) {
+        String media = mediaType(type);
+        return media.startsWith("image/") || "application/json".equals(media);
     }
 
     @PostMapping("/processing-tasks/{taskId}/result-download-ticket")

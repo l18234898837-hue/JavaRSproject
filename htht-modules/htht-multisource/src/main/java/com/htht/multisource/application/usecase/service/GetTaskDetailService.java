@@ -45,12 +45,14 @@ public final class GetTaskDetailService implements GetTaskDetailUseCase {
                     stage.id(), stage.stageKey(), stage.status(), stage.attempt(),
                     stage.execution() == null ? null : stage.execution().executionId().value(),
                     stage.execution() == null ? null : stage.execution().errorCode(),
-                    stage.execution() == null ? null : stage.execution().errorMessage()
+                    stage.execution() == null ? null : stage.execution().errorMessage(),
+                    stage.execution() == null ? null : stage.execution().startedAt(),
+                    stage.execution() == null ? null : stage.execution().finishedAt()
                 ))
                 .toList(),
             artifactRepository.findByTaskId(taskId).stream()
                 .map(artifact -> new TaskArtifactView(
-                    artifact.stageId(), artifact.type(), artifact.uri(), artifact.checksum()
+                    artifact.stageId(), artifact.type(), artifact.uri(), artifact.checksum(), artifact.sizeBytes(), null
                 ))
                 .toList()
         );
