@@ -48,13 +48,14 @@ public final class WorkerResultTranslator {
             for (JsonNode dependency : requiredArray(response, stage, "dependsOnStageKeys")) {
                 dependencies.add(dependency.asText());
             }
-            List<StageInput> inputs = "plan-v2".equals(version)
+            boolean hasStageContract = "plan-v2".equals(version) || "plan-v3".equals(version);
+            List<StageInput> inputs = hasStageContract
                 ? parseInputs(response, stage)
                 : List.of();
-            List<StageOutput> outputs = "plan-v2".equals(version)
+            List<StageOutput> outputs = hasStageContract
                 ? parseOutputs(response, stage)
                 : List.of();
-            String parameterSnapshot = "plan-v2".equals(version)
+            String parameterSnapshot = hasStageContract
                 ? requiredText(response, stage, "parameterSnapshot")
                 : "{}";
             stages.add(new ProcessingStage(

@@ -124,6 +124,31 @@ class WorkerContractCodecTest {
     }
 
     @Test
+    void decodesPlanV3StageContractsWithInputsOutputsAndSnapshots() {
+        String response = """
+            {"schemaVersion":"1.0","operation":"build-plan","requestId":"req-plan","payload":{
+              "version":"plan-v3","stages":[
+              {"stageKey":"WRITE","stageCode":"WRITE_STANDARD_COG","dependsOnStageKeys":[],
+               "inputs":[{"key":"raw","source":"RAW_INPUT","artifactType":"MAIN","required":true}],
+               "outputs":[{"artifactType":"STANDARD_COG","relativePath":"standard/result.tif","retention":"FINAL"}],
+               "parameterSnapshot":"{\\"mode\\":\\"standard\\"}"}
+            ]}}
+            """;
+
+        var plan = new WorkerResultTranslator(objectMapper).toPlan(
+            codec.decodeResponse("req-plan", WorkerOperation.BUILD_PLAN, response)
+        );
+
+        assertThat(plan.stages().get(0).inputs()).containsExactly(
+            new StageInput("raw", StageInput.Source.RAW_INPUT, "MAIN", true)
+        );
+        assertThat(plan.stages().get(0).outputs()).containsExactly(
+            new StageOutput("STANDARD_COG", "standard/result.tif", StageOutput.Retention.FINAL)
+        );
+        assertThat(plan.stages().get(0).parameterSnapshot()).contains("standard");
+    }
+
+    @Test
     void preservesWorkerDeclaredFailureDetails() {
         String response = """
             {"schemaVersion":"1.0","operation":"inspect","requestId":"req-01",
