@@ -135,6 +135,20 @@ def test_registry_inspects_and_builds_the_fy4b_integrated_plan(tmp_path):
     assert [stage["stageKey"] for stage in plan["stages"]] == ["STANDARDIZE_FY4B_AGRI"]
 
 
+def test_registry_builds_requested_plan_v3_for_fy4b_package(tmp_path):
+    root = tmp_path / "fy4b-v3"
+    root.mkdir()
+    manifest = _manifest_with_storage_uris(make_fy4b_package(root))
+    candidate = dispatch({"operation": "inspect", "payload": {}}, manifest)["candidates"][0]
+    plan = dispatch({"operation": "build-plan", "payload": {
+        "candidate": candidate, "requestedPlanVersion": "plan-v3", "parameterSnapshot": {},
+    }}, manifest)
+
+    assert plan["version"] == "plan-v3"
+    assert plan["stages"][0]["stageKey"] == "VALIDATE_FY4B_PACKAGE"
+    assert plan["stages"][0]["stageKey"] != "STANDARDIZE_FY4B_AGRI"
+
+
 def test_registry_inspect_and_build_plan_accept_fy4b_uuid_physical_names(tmp_path):
     root = tmp_path / "fy4b-uuid"
     root.mkdir()
@@ -178,6 +192,23 @@ def test_registry_inspects_and_builds_the_gf6_l1a_integrated_plan(tmp_path):
 
     assert candidate["profileKey"] == {"productCode": "GF-6-WFV-L1A", "profileVersion": "v1"}
     assert [stage["stageKey"] for stage in plan["stages"]] == ["STANDARDIZE_GF6_WFV_L1A"]
+
+
+def test_registry_builds_requested_plan_v3_for_gf6_l1a_with_staged_dag(tmp_path):
+    manifest = _manifest_with_storage_uris(make_gf6_package(tmp_path / "gf6-v3"))
+    candidate = dispatch({"operation": "inspect", "payload": {}}, manifest)["candidates"][0]
+
+    plan = dispatch({"operation": "build-plan", "payload": {
+        "candidate": candidate,
+        "requestedPlanVersion": "plan-v3",
+        "parameterSnapshot": {},
+    }}, manifest)
+
+    assert plan["version"] == "plan-v3"
+    keys = [stage["stageKey"] for stage in plan["stages"]]
+    assert keys[:2] == ["VALIDATE_GF6_WFV_L1A", "WRITE_GF6_STANDARD_COG"]
+    assert "STANDARDIZE_GF6_WFV_L1A" not in keys
+    assert plan["stages"][0]["outputs"][0]["retention"] == "INTERMEDIATE"
 
 
 def test_registry_inspect_and_build_plan_accept_gf6_uuid_physical_names(tmp_path):

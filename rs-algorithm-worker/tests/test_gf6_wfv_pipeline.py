@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 
 from gf6_fixture import make_gf6_package
-from rs_algorithm_worker.gf6_wfv_pipeline import execute_gf6_product
+from rs_algorithm_worker.gf6_wfv_pipeline import execute_gf6_product, execute_gf6_stage
 
 
 def test_integrated_executor_writes_standard_once_and_reuses_it_for_all_optional_outputs(tmp_path, monkeypatch):
@@ -33,6 +33,25 @@ def test_integrated_executor_writes_standard_once_and_reuses_it_for_all_optional
 
     assert calls[0] == "standard"
     assert calls[1:] == [standard, standard, standard]
+
+
+def test_staged_executor_validates_then_writes_standard_artifacts(tmp_path, monkeypatch):
+    manifest = make_gf6_package(tmp_path / "input-staged")
+    root = tmp_path / "output-staged"; manifest["output"] = {"path": str(root)}
+    def write_standard(_, path, __):
+        path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b"standard")
+    def write_summary(*_):
+        path = root / "standard" / "summary.json"; path.write_text("{}", encoding="utf-8"); return path
+    monkeypatch.setattr("rs_algorithm_worker.gf6_wfv_pipeline._write_standard_cog", write_standard)
+    monkeypatch.setattr("rs_algorithm_worker.gf6_wfv_pipeline._write_processing_summary", write_summary)
+
+    validation = execute_gf6_stage({"stageKey": "VALIDATE_GF6_WFV_L1A", "outputUri": "rs://output/gf6"}, manifest)
+    assert validation["status"] == "SUCCEEDED"
+    assert validation["artifacts"][0]["type"] == "GF6_INPUT_VALIDATION_JSON"
+
+    standard = execute_gf6_stage({"stageKey": "WRITE_GF6_STANDARD_COG", "outputUri": "rs://output/gf6", "parameterSnapshot": {}}, manifest)
+    assert standard["status"] == "SUCCEEDED"
+    assert {item["type"] for item in standard["artifacts"]} == {"GF6_STANDARD_COG", "GF6_PROCESSING_SUMMARY_JSON"}
 
 
 def test_execute_stage_accepts_uuid_physical_names_with_manifest_original_names(tmp_path, monkeypatch):

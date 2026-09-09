@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from .fy3h_mersi_pipeline import execute_fy3h_product, execute_fy3h_stage
-from .fy4b_agri_pipeline import execute_fy4b_product
-from .gf6_wfv_pipeline import execute_gf6_product
+from .fy4b_agri_pipeline import execute_fy4b_product, execute_fy4b_stage
+from .gf6_wfv_pipeline import execute_gf6_product, execute_gf6_stage
 from .hy2d_pipeline import execute_hy2d_product, execute_hy2d_stage
 from .l2a_pipeline import execute_l2a_product, execute_l2a_staged_stage
 from .product_adapters import fy3h_mersi, fy4b_agri, gf6_wfv_browse, gf6_wfv_l1a, hy1c_czi, hy1c_czi_l2a, hy2d_altimeter
@@ -49,16 +49,17 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
             return _with_requested_plan_version(builder(candidate, _parameter_snapshot(payload)), requested_version)
         if adapter is fy4b_agri:
             candidate = _recognized_fy4b_candidate(manifest, payload.get("candidate", {}).get("packageId"))
-            builder = fy4b_agri.build_plan if requested_version == "plan-v3" else fy4b_agri.build_integrated_plan
+            builder = fy4b_agri.build_staged_plan if requested_version == "plan-v3" else fy4b_agri.build_integrated_plan
             return _with_requested_plan_version(builder(candidate, _parameter_snapshot(payload)), requested_version)
         if adapter is gf6_wfv_l1a:
             candidate = _recognized_gf6_l1a_candidate(manifest, payload.get("candidate", {}).get("packageId"))
             if requested_version == "plan-v3":
-                raise ValueError("GF-6 WFV L1A plan-v3 is not implemented")
+                return gf6_wfv_l1a.build_staged_plan(candidate, _parameter_snapshot(payload))
             return gf6_wfv_l1a.build_integrated_plan(candidate, _parameter_snapshot(payload))
         if adapter is gf6_wfv_browse:
             candidate = _recognized_gf_candidate(manifest, payload.get("candidate", {}).get("packageId"))
-            return _with_requested_plan_version(adapter.build_plan(candidate, _parameter_snapshot(payload)), requested_version)
+            builder = adapter.build_staged_plan if requested_version == "plan-v3" else adapter.build_plan
+            return _with_requested_plan_version(builder(candidate, _parameter_snapshot(payload)), requested_version)
         return {"version": "plan-v1", "stages": [{
             "stageKey": "VALIDATE_SOURCE",
             "stageCode": "VALIDATE_SOURCE",
@@ -75,10 +76,14 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
                 "artifacts": execute_l2a_product(manifest, _parameter_snapshot(payload), _logical_output_uri(payload.get("outputUri"))),
             }
         if payload.get("profileCode") == "FY-4B-AGRI":
+            if payload.get("planVersion") == "plan-v3":
+                return execute_fy4b_stage(payload, manifest)
             if payload.get("stageKey") != "STANDARDIZE_FY4B_AGRI":
                 raise ValueError("unsupported FY-4B AGRI stage")
             return execute_fy4b_product(payload, manifest)
         if payload.get("profileCode") == "GF-6-WFV-L1A":
+            if payload.get("planVersion") == "plan-v3":
+                return execute_gf6_stage(payload, manifest)
             if payload.get("stageKey") != "STANDARDIZE_GF6_WFV_L1A":
                 raise ValueError("unsupported GF6 L1A stage")
             return execute_gf6_product(payload, manifest)
@@ -102,6 +107,16 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
                 raise ValueError("unsupported HY-2D stage")
             return execute_hy2d_stage(payload, manifest)
         if adapter is gf6_wfv_browse:
+            if payload.get("planVersion") == "plan-v3":
+                package_id = payload.get("packageId")
+                if package_id:
+                    candidate = _recognized_gf_candidate(manifest, package_id)
+                else:
+                    candidates = gf6_wfv_browse.inspect_manifest(manifest)
+                    if len(candidates) != 1:
+                        raise ValueError("recognized GF-6 packageId is required")
+                    candidate = candidates[0]
+                return gf6_wfv_browse.execute_visual_stage(payload.get("stageKey"), candidate, manifest, (manifest.get("output") or {}).get("path"), payload.get("outputUri"))
             return _execute_gf_browse_stage(payload, manifest)
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": []}
     raise ValueError(f"unsupported operation: {operation}")

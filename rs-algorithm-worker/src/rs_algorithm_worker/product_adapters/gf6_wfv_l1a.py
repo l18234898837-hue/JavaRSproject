@@ -166,6 +166,36 @@ def build_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str,
     return {"version": "plan-v2", "stages": [{"stageKey": "STANDARDIZE_GF6_WFV_L1A", "stageCode": "STANDARDIZE_GF6_WFV_L1A", "dependsOnStageKeys": [], "inputs": inputs, "outputs": outputs, "parameterSnapshot": json.dumps(parameters, sort_keys=True, separators=(",", ":"))}]}
 
 
+def build_staged_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Build the reviewed multi-stage DAG for GF-6 WFV L1A (plan-v3)."""
+    integrated = build_integrated_plan(product, parameter_snapshot)
+    base = integrated["stages"][0]
+    snapshot = base["parameterSnapshot"]
+    raw_inputs = base["inputs"]
+    stages: list[dict[str, Any]] = [
+        {"stageKey": "VALIDATE_GF6_WFV_L1A", "stageCode": "VALIDATE_GF6_WFV_L1A", "dependsOnStageKeys": [],
+         "inputs": raw_inputs, "outputs": [{"artifactType": "GF6_INPUT_VALIDATION_JSON", "relativePath": "validation/package.json", "retention": "INTERMEDIATE"}], "parameterSnapshot": snapshot},
+        {"stageKey": "WRITE_GF6_STANDARD_COG", "stageCode": "WRITE_GF6_STANDARD_COG", "dependsOnStageKeys": ["VALIDATE_GF6_WFV_L1A"],
+         "inputs": [{"key": "validation", "source": "STAGE_ARTIFACT", "artifactType": "GF6_INPUT_VALIDATION_JSON", "required": True}],
+         "outputs": [item for item in base["outputs"] if item["artifactType"] in {"GF6_STANDARD_COG", "GF6_PROCESSING_SUMMARY_JSON"}], "parameterSnapshot": snapshot},
+    ]
+    previous = "WRITE_GF6_STANDARD_COG"
+    p = json.loads(snapshot)
+    if p["features"]["enabled"]:
+        stages.append({"stageKey": "EXTRACT_GF6_FEATURES", "stageCode": "EXTRACT_GF6_FEATURES", "dependsOnStageKeys": [previous],
+                       "inputs": [{"key": "standard", "source": "STAGE_ARTIFACT", "artifactType": "GF6_STANDARD_COG", "required": True}],
+                       "outputs": [item for item in base["outputs"] if item["artifactType"].startswith("GF6_FEATURES_")], "parameterSnapshot": snapshot}); previous = "EXTRACT_GF6_FEATURES"
+    if p["fusion"]["enabled"]:
+        stages.append({"stageKey": "FUSE_GF6_RGB", "stageCode": "FUSE_GF6_RGB", "dependsOnStageKeys": ["WRITE_GF6_STANDARD_COG"],
+                       "inputs": [{"key": "standard", "source": "STAGE_ARTIFACT", "artifactType": "GF6_STANDARD_COG", "required": True}],
+                       "outputs": [item for item in base["outputs"] if item["artifactType"].startswith("GF6_RGB_") or item["artifactType"].startswith("GF6_FUSION_")], "parameterSnapshot": snapshot})
+    if p["saliency"]["enabled"]:
+        stages.append({"stageKey": "DETECT_GF6_SALIENCY", "stageCode": "DETECT_GF6_SALIENCY", "dependsOnStageKeys": ["WRITE_GF6_STANDARD_COG"],
+                       "inputs": [{"key": "standard", "source": "STAGE_ARTIFACT", "artifactType": "GF6_STANDARD_COG", "required": True}],
+                       "outputs": [item for item in base["outputs"] if item["artifactType"].startswith("GF6_SALIENCY_")], "parameterSnapshot": snapshot})
+    return {"version": "plan-v3", "stages": stages}
+
+
 def _output(artifact_type: str, relative_path: str) -> dict[str, Any]: return {"artifactType": artifact_type, "relativePath": relative_path, "retention": "FINAL"}
 def _is_number(value: Any) -> bool: return type(value) in (int, float) and math.isfinite(value)
 def _canonical_crs(value: Any) -> str:

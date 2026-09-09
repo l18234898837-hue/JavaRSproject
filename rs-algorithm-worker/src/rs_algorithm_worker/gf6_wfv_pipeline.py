@@ -17,7 +17,7 @@ from .gf6_processing import detect_gf6_saliency, extract_gf6_features
 from .models_gf6 import Gf6ProductEvidence
 from .operators.gf6_rpc import as_rasterio_rpc, build_nominal_rpc_grid, crop_nominal_rpc_grid
 from .operators.windowed_cog import open_windowed_cog
-from .product_adapters.gf6_wfv_l1a import inspect_evidence, parse_parameters
+from .product_adapters.gf6_wfv_l1a import PROFILE_KEY, inspect_evidence, parse_parameters
 
 
 _NODATA = -9999.0
@@ -51,6 +51,42 @@ def execute_gf6_product(payload: dict[str, Any], manifest: dict[str, Any]) -> di
     if parameters["fusion"]["enabled"]: artifacts.extend(_write_fusion(standard, directory, parameters))
     if parameters["saliency"]["enabled"]: artifacts.extend(_write_saliency(standard, directory, parameters))
     return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, kind, path, directory) for kind, path in artifacts], "metadata": {"navigationStatus": "NOMINAL_RPC_NO_DEM", "accuracyStatus": "UNVALIDATED"}}
+
+
+def execute_gf6_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    """Execute one GF-6 WFV L1A plan-v3 stage using the task output directory."""
+    stage = payload.get("stageKey")
+    output_uri = payload.get("outputUri")
+    output = manifest.get("output")
+    if not isinstance(stage, str) or not isinstance(output_uri, str) or not output_uri.startswith("rs://output/"):
+        raise ValueError("GF6 L1A stage and logical output URI are required")
+    if not isinstance(output, dict) or not isinstance(output.get("path"), str):
+        raise ValueError("GF6 L1A temporary output directory is required")
+    directory = Path(output["path"]).resolve(); directory.mkdir(parents=True, exist_ok=True)
+    if stage == "VALIDATE_GF6_WFV_L1A":
+        evidence = inspect_evidence(manifest)
+        path = directory / "validation" / "package.json"; path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"profileKey": PROFILE_KEY, "packageId": evidence.package_id, "valid": True}, sort_keys=True) + "\n", encoding="utf-8")
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, "GF6_INPUT_VALIDATION_JSON", path, directory)]}
+    parameters = parse_parameters(_payload_parameters(payload))
+    evidence = inspect_evidence(manifest)
+    if stage == "WRITE_GF6_STANDARD_COG":
+        standard = directory / "standard" / "gf6-standard.tif"; standard.parent.mkdir(parents=True, exist_ok=True)
+        _write_standard_cog(evidence, standard, parameters)
+        summary = _write_processing_summary(standard, evidence, parameters)
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, "GF6_STANDARD_COG", standard, directory), _artifact(output_uri, "GF6_PROCESSING_SUMMARY_JSON", summary, directory)], "metadata": {"navigationStatus": "NOMINAL_RPC_NO_DEM", "accuracyStatus": "UNVALIDATED"}}
+    standard = directory / "standard" / "gf6-standard.tif"
+    if stage == "EXTRACT_GF6_FEATURES":
+        return _stage_artifacts(output_uri, directory, _write_features(standard, directory, parameters))
+    if stage == "FUSE_GF6_RGB":
+        return _stage_artifacts(output_uri, directory, _write_fusion(standard, directory, parameters))
+    if stage == "DETECT_GF6_SALIENCY":
+        return _stage_artifacts(output_uri, directory, _write_saliency(standard, directory, parameters))
+    raise ValueError("unsupported GF6 L1A stage")
+
+
+def _stage_artifacts(output_uri: str, directory: Path, artifacts: list[tuple[str, Path]]) -> dict[str, Any]:
+    return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, kind, path, directory) for kind, path in artifacts]}
 
 
 def _write_standard_cog(evidence: Gf6ProductEvidence, path: Path, parameters: dict[str, Any]) -> None:
