@@ -156,13 +156,23 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
                 return;
             }
             DispatchReceipt receipt = dispatchWithRefresh(() -> {
+                boolean declaresOnlyRawInputs = !planStage.inputs().isEmpty()
+                    && planStage.inputs().stream().allMatch(input ->
+                        input.source() == com.htht.multisource.application.port.out.model.StageInput.Source.RAW_INPUT);
+                var stageInputs = !declaresOnlyRawInputs
+                    ? candidate.files()
+                    : candidate.files().stream()
+                        .filter(asset -> planStage.inputs().stream().anyMatch(input ->
+                            input.source() == com.htht.multisource.application.port.out.model.StageInput.Source.RAW_INPUT
+                                && input.artifactType().equals(asset.role())))
+                        .toList();
                 var grant = assetStorage.grant(new ExecutionGrantRequest(
-                    task.id(), stage.id(), executionId, stage.attempt(), candidate.files(), task.outputUri()
+                    task.id(), stage.id(), executionId, stage.attempt(), stageInputs, task.outputUri()
                 ));
                 return new StageExecutionRequest(
                     task.id(), stage.id(), planStage.stageKey(), stage.attempt(), executionId,
                     "1.0", candidate.profileKey().productCode(), candidate.profileKey().profileVersion(),
-                    task.plan().processorVersion(), task.parameterSnapshot(), candidate.files(), task.outputUri(), grant,
+                    task.plan().processorVersion(), task.parameterSnapshot(), stageInputs, task.outputUri(), grant,
                     task.plan().version(), planStage.outputs()
                 );
             });
