@@ -153,6 +153,8 @@ def _adapter_for_manifest(manifest):
         return hy1c_czi
     if _has_fy4b_agri_evidence(manifest, roles):
         return fy4b_agri
+    if any(Path(_manifest_input_name(item)).suffix.lower() == ".hdf" for item in manifest.get("inputs", [])):
+        return fy3h_mersi
     return base
 
 
