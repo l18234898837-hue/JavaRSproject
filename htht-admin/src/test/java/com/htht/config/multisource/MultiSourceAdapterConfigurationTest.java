@@ -1,6 +1,7 @@
 package com.htht.config.multisource;
 
 import com.htht.multisource.application.port.out.AssetStorage;
+import com.htht.multisource.application.port.out.TaskArtifactStore;
 import com.htht.multisource.application.usecase.CreateProcessingBatchUseCase;
 import com.htht.multisource.application.usecase.CreateProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
@@ -35,7 +36,8 @@ class MultiSourceAdapterConfigurationTest {
     void assemblesSliceAWithEnvironmentBoundWorkerSettings() {
         contextRunner().run(context -> {
             assertThat(context).hasNotFailed();
-            assertThat(context).hasSingleBean(AssetStorage.class);
+            assertThat(context.getBean(AssetStorage.class)).isInstanceOf(CompositeLocalWorkerAssetResolver.class);
+            assertThat(context).hasSingleBean(TaskArtifactStore.class);
             assertThat(context).hasSingleBean(PreflightProductUseCase.class);
             assertThat(context).hasSingleBean(CreateProcessingTaskUseCase.class);
             assertThat(context).hasSingleBean(CreateProcessingBatchUseCase.class);

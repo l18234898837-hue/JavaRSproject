@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -127,7 +128,7 @@ class StageInputResolverTest {
     }
 
     @Test
-    void convertsADeclaredUpstreamArtifactIntoAStageKeyedTaskArtifactInput() {
+    void resolvesALegacyUpstreamArtifactFromItsCompletedWorkerExecution() {
         ProcessingStage read = new ProcessingStage("READ", "READ_SOURCE", List.of(), List.of(), List.of(
             output("DECODED")
         ), "{}");
@@ -135,15 +136,16 @@ class StageInputResolverTest {
             new StageInput("decoded", StageInput.Source.UPSTREAM_ARTIFACT, "DECODED", true)
         ), List.of(), "{}");
         ProcessingTask task = task(List.of(read, apply), List.of(input("MAIN", 0, "main.nc")));
-        TaskStage readStage = stage(201L, "READ");
-        Artifact artifact = new Artifact(TASK_ID, readStage.id(), "DECODED", new StorageUri("rs://artifact/decoded.nc"),
+        TaskStage readStage = succeededStage(201L, "READ", "exec-01");
+        Artifact artifact = new Artifact(TASK_ID, readStage.id(), "DECODED",
+            new StorageUri("rs://output/7/task-01/decoded/czi.npz"),
             "sha256:decoded", 10L);
 
         List<InputAsset> resolved = resolver.resolve(task, apply, List.of(readStage, stage(202L, "APPLY")), List.of(artifact));
 
         assertThat(resolved).containsExactly(new InputAsset("decoded", 0,
-            new AssetReference("TASK_ARTIFACT", "rs://artifact/decoded.nc"),
-            new StorageUri("rs://task-artifact/legacy/101/201"), "sha256:decoded", true));
+            new AssetReference("TASK_ARTIFACT", "rs://output/7/task-01/decoded/czi.npz"),
+            new StorageUri("rs://worker-output/exec-01/decoded/czi.npz"), "sha256:decoded", true));
     }
 
     private static ProcessingTask task(List<ProcessingStage> stages, List<InputAsset> assets) {
@@ -161,6 +163,14 @@ class StageInputResolverTest {
 
     private static TaskStage stage(long id, String key) {
         return new TaskStage(new StageId(id), TASK_ID, key, StageExecutionStatus.PENDING, 1);
+    }
+
+    private static TaskStage succeededStage(long id, String key, String executionId) {
+        Instant startedAt = Instant.parse("2026-09-10T05:00:00Z");
+        var running = stage(id, key).start(new com.htht.multisource.domain.model.ExecutionId(executionId),
+            "worker-local", startedAt, startedAt.plusSeconds(300));
+        return running.succeed(new com.htht.multisource.domain.model.ExecutionId(executionId), 1,
+            startedAt.plusSeconds(10));
     }
 
     private static StageOutput output(String type) {

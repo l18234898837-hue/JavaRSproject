@@ -1,10 +1,13 @@
 package com.htht.web.controller.multisource;
 
+import com.htht.config.multisource.LocalWorkerResultArchiveService;
+import com.htht.config.multisource.MultiSourceWorkerProperties;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.DispatchNextStageUseCase;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
 import com.htht.multisource.application.usecase.RetryFailedStageUseCase;
 import com.htht.multisource.application.usecase.model.TaskDetailView;
+import com.htht.multisource.application.usecase.model.TaskArtifactView;
 import com.htht.multisource.application.usecase.model.TaskStageView;
 import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.domain.model.ProcessingPlan;
@@ -14,9 +17,17 @@ import com.htht.multisource.domain.model.StageExecutionStatus;
 import com.htht.multisource.domain.model.StageId;
 import com.htht.multisource.domain.model.TaskId;
 import com.htht.multisource.domain.model.TaskLifecycleStatus;
+import com.htht.multisource.domain.model.StorageUri;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,12 +35,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @Tag("dev")
 class ProcessingExecutionControllerTest {
     private static final AccessSubject OWNER = new AccessSubject(7L);
     private static final TaskId TASK_ID = TaskId.of(101L);
     private static final StageId STAGE_ID = new StageId(201L);
+
+    @TempDir
+    Path temporaryDirectory;
 
     @Test
     void dispatchAuthorizesOwnerBeforeDispatchAndDoesNotExposeExecutionId() {
@@ -128,9 +146,73 @@ class ProcessingExecutionControllerTest {
         });
     }
 
+    @Test
+    void downloadsALegacyArtifactFromItsCompletedWorkerExecution() throws Exception {
+        Path workRoot = Files.createDirectories(temporaryDirectory.resolve("worker"));
+        Path artifactRoot = Files.createDirectories(temporaryDirectory.resolve("artifacts"));
+        Path source = Files.writeString(
+            Files.createDirectories(workRoot.resolve("exec-01/output/validation")).resolve("source.json"),
+            "{\"valid\":true}"
+        );
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        when(details.get(TASK_ID, OWNER)).thenReturn(detailWithArtifact(source, "exec-01"));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controllerWithDownloads(details, workRoot, artifactRoot)).build();
+
+        mvc.perform(get("/api/multisource/processing-tasks/101/artifacts/HY1C_INPUT_VALIDATION_JSON/download"))
+            .andExpect(status().isOk())
+            .andExpect(content().contentType("application/json"))
+            .andExpect(header().string("Content-Disposition", "attachment; filename=\"source.json\""))
+            .andExpect(content().string("{\"valid\":true}"));
+    }
+
+    @Test
+    void downloadsAMaterializedArtifactAfterTheWorkerExecutionIsUnavailable() throws Exception {
+        Path workRoot = Files.createDirectories(temporaryDirectory.resolve("worker"));
+        Path artifactRoot = Files.createDirectories(temporaryDirectory.resolve("artifacts"));
+        Path source = Files.writeString(
+            Files.createDirectories(artifactRoot.resolve("101/work/READ/1/validation")).resolve("source.json"),
+            "{\"valid\":true}"
+        );
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        when(details.get(TASK_ID, OWNER)).thenReturn(detailWithArtifact(source, null));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controllerWithDownloads(details, workRoot, artifactRoot)).build();
+
+        mvc.perform(get("/api/multisource/processing-tasks/101/artifacts/HY1C_INPUT_VALIDATION_JSON/download"))
+            .andExpect(status().isOk())
+            .andExpect(content().string("{\"valid\":true}"));
+    }
+
     private ProcessingExecutionController controller(GetTaskDetailUseCase details, DispatchNextStageUseCase dispatch,
                                                      CancelProcessingTaskUseCase cancel, RetryFailedStageUseCase retry) {
         return new ProcessingExecutionController(() -> OWNER, details, dispatch, cancel, retry);
+    }
+
+    private ProcessingExecutionController controllerWithDownloads(GetTaskDetailUseCase details, Path workRoot,
+                                                                  Path artifactRoot) {
+        MultiSourceWorkerProperties properties = new MultiSourceWorkerProperties();
+        properties.setCommand(List.of("worker"));
+        properties.setWorkRoot(workRoot);
+        properties.setArtifactRoot(artifactRoot);
+        properties.setTimeout(Duration.ofMinutes(10));
+        return new ProcessingExecutionController(() -> OWNER, details, mock(DispatchNextStageUseCase.class),
+            mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class),
+            new LocalWorkerResultArchiveService(properties), null);
+    }
+
+    private TaskDetailView detailWithArtifact(Path source, String executionId) throws Exception {
+        return new TaskDetailView(TASK_ID, 33L, TaskLifecycleStatus.FAILED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-1", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of()))), List.of(),
+            List.of(new TaskStageView(STAGE_ID, "READ", StageExecutionStatus.SUCCEEDED, 1,
+                executionId, null, null, null, null)),
+            List.of(new TaskArtifactView(STAGE_ID, "HY1C_INPUT_VALIDATION_JSON",
+                new StorageUri("rs://output/7/task-01/validation/source.json"), checksum(source), Files.size(source),
+                "INTERMEDIATE")));
+    }
+
+    private static String checksum(Path path) throws Exception {
+        return "sha256:" + java.util.HexFormat.of().formatHex(
+            MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path))
+        );
     }
 
     private TaskDetailView detail() {
