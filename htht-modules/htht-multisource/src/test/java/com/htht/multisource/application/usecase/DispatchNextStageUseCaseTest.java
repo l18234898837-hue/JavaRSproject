@@ -1,6 +1,7 @@
 package com.htht.multisource.application.usecase;
 
 import com.htht.multisource.application.port.out.AssetStorage;
+import com.htht.multisource.application.port.out.ArtifactRepository;
 import com.htht.multisource.application.port.out.ExecutionClock;
 import com.htht.multisource.application.port.out.ExecutionIdGenerator;
 import com.htht.multisource.application.port.out.ProcessingTaskRepository;
@@ -11,6 +12,7 @@ import com.htht.multisource.application.port.out.model.ExecutionGrant;
 import com.htht.multisource.application.port.out.model.ExecutionGrantRequest;
 import com.htht.multisource.application.port.out.model.StageClaim;
 import com.htht.multisource.application.port.out.model.StageExecutionRequest;
+import com.htht.multisource.application.port.out.model.StageInput;
 import com.htht.multisource.application.port.out.model.StageOutput;
 import com.htht.multisource.application.usecase.service.DispatchNextStageService;
 import com.htht.multisource.application.usecase.service.AcceptWorkerEventService;
@@ -18,6 +20,7 @@ import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.infrastructure.worker.WorkerOperation;
 import com.htht.multisource.infrastructure.worker.WorkerProtocolException;
 import com.htht.multisource.domain.model.AssetReference;
+import com.htht.multisource.domain.model.Artifact;
 import com.htht.multisource.domain.model.ExecutionId;
 import com.htht.multisource.domain.model.InputAsset;
 import com.htht.multisource.domain.model.ProcessingBatch;
@@ -50,6 +53,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.groups.Tuple.tuple;
 
 @Tag("dev")
 class DispatchNextStageUseCaseTest {
@@ -227,6 +231,83 @@ class DispatchNextStageUseCaseTest {
         assertThat(dispatchedStages).containsExactly("READ", "WRITE");
         assertThat(stages.findByTaskId(TASK_ID)).extracting(TaskStage::status)
             .containsExactly(StageExecutionStatus.SUCCEEDED, StageExecutionStatus.SUCCEEDED);
+    }
+
+    @Test
+    void dispatchesDeclaredUpstreamArtifactInsteadOfRawCandidateFiles() {
+        TaskStage completedRead = pending(201L, "READ")
+            .start(new ExecutionId("exec-read"), null, NOW, LEASE_EXPIRES_AT)
+            .succeed(new ExecutionId("exec-read"), 1, NOW);
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(completedRead, pending(202L, "WRITE")),
+            Map.of("READ", List.of(), "WRITE", List.of("READ"))
+        );
+        RecordingAssetStorage storage = new RecordingAssetStorage();
+        EmptyRecordingDispatcher dispatcher = new EmptyRecordingDispatcher();
+        Artifact upstream = new Artifact(
+            TASK_ID, new StageId(201L), "DECODED_RASTER",
+            new StorageUri("rs://output/7/task-01/intermediate/decoded.tif"),
+            "7/task-01/intermediate/decoded.tif", "sha256:decoded", 128L
+        );
+        SingleTaskRepository tasks = new SingleTaskRepository(taskWithUpstreamInput());
+
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            tasks, stages, dispatcher, storage, () -> new ExecutionId("exec-write"), () -> NOW,
+            java.time.Duration.ofMinutes(5),
+            new AcceptWorkerEventService(stages, new InMemoryExecutionEventRepository(),
+                (taskId, stageId, outputUri, executionId, artifacts) -> { }, tasks),
+            new InMemoryArtifactRepository(List.of(upstream)),
+            (taskId, stageId, executionId, outputUri, candidate) -> { }, Runnable::run
+        );
+
+        assertThat(useCase.dispatch(TASK_ID)).isPresent();
+
+        assertThat(storage.request.inputs()).singleElement().satisfies(input -> {
+            assertThat(input.role()).isEqualTo("decoded");
+            assertThat(input.reference()).isEqualTo(new AssetReference(
+                "TASK_ARTIFACT", "rs://output/7/task-01/intermediate/decoded.tif"));
+            assertThat(input.storageUriSnapshot()).isEqualTo(new StorageUri(
+                "rs://task-artifact/7/task-01/intermediate/decoded.tif"));
+        });
+        assertThat(dispatcher.request.inputs()).containsExactlyElementsOf(storage.request.inputs());
+    }
+
+    @Test
+    void dispatchesRepeatedRawInputRolesByOrdinal() {
+        InputAsset tile0 = new InputAsset("MAIN_TIFF_TILE", 0, new AssetReference("SYS_FILE", "42"),
+            new StorageUri("rs://sys-file/42"), "sha256:tile-0", true);
+        InputAsset tile1 = new InputAsset("MAIN_TIFF_TILE", 1, new AssetReference("SYS_FILE", "43"),
+            new StorageUri("rs://sys-file/43"), "sha256:tile-1", true);
+        ProductCandidate candidate = new ProductCandidate("package-01", new ProductProfileKey("GF-6-WFV-L1A", "v1"),
+            ProductDataShape.RASTER_GRID, ProductSupportStatus.SUPPORTED, List.of(tile0, tile1), "{}", 0.99);
+        ProcessingStage stage = new ProcessingStage(
+            "WRITE", "WRITE", List.of(),
+            List.of(
+                new StageInput("raw-0", StageInput.Source.RAW_INPUT, "MAIN_TIFF_TILE", true),
+                new StageInput("raw-1", StageInput.Source.RAW_INPUT, "MAIN_TIFF_TILE", true)
+            ),
+            List.of(), "{}"
+        );
+        ProcessingTask task = new ProcessingTask(
+            TASK_ID, "task-01", new AccessSubject(7L), TaskLifecycleStatus.CREATED, QualityStatus.NOT_CHECKED,
+            "{}", new StorageUri("rs://output/7/task-01"),
+            new ProcessingPlan("plan-v3", "worker-1.2.3", List.of(stage)),
+            new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate)), List.of(candidate)
+        );
+        InMemoryStageRepository stages = new InMemoryStageRepository(
+            List.of(pending(201L, "WRITE")), Map.of("WRITE", List.of())
+        );
+        RecordingAssetStorage storage = new RecordingAssetStorage();
+
+        DispatchNextStageUseCase useCase = new DispatchNextStageService(
+            new SingleTaskRepository(task), stages, new EmptyRecordingDispatcher(), storage,
+            () -> new ExecutionId("exec-01"), () -> NOW, java.time.Duration.ofMinutes(5),
+            new AcceptWorkerEventService(stages, new InMemoryExecutionEventRepository())
+        );
+
+        assertThat(useCase.dispatch(TASK_ID)).isPresent();
+        assertThat(storage.request.inputs()).extracting(InputAsset::role, InputAsset::ordinal)
+            .containsExactly(tuple("MAIN_TIFF_TILE", 0), tuple("MAIN_TIFF_TILE", 1));
     }
 
     @Test
@@ -470,6 +551,27 @@ class DispatchNextStageUseCaseTest {
             new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate)), List.of(candidate));
     }
 
+    private static ProcessingTask taskWithUpstreamInput() {
+        InputAsset input = new InputAsset("MAIN", 0, new AssetReference("SYS_FILE", "42"),
+            new StorageUri("rs://sys-file/42"), "sha256:input", true);
+        ProductCandidate candidate = new ProductCandidate("package-01", new ProductProfileKey("GENERIC", "v1"),
+            ProductDataShape.RASTER_GRID, ProductSupportStatus.SUPPORTED, List.of(input), "{}", 0.91);
+        ProcessingStage read = new ProcessingStage(
+            "READ", "READ", List.of(), List.of(),
+            List.of(new StageOutput("DECODED_RASTER", "intermediate/decoded.tif", StageOutput.Retention.INTERMEDIATE)),
+            "{}"
+        );
+        ProcessingStage write = new ProcessingStage(
+            "WRITE", "WRITE", List.of("READ"),
+            List.of(new StageInput("decoded", StageInput.Source.UPSTREAM_ARTIFACT, "DECODED_RASTER", true)),
+            List.of(), "{}"
+        );
+        return new ProcessingTask(TASK_ID, "task-01", new AccessSubject(7L), TaskLifecycleStatus.RUNNING,
+            QualityStatus.NOT_CHECKED, "{}", new StorageUri("rs://output/7/task-01"),
+            new ProcessingPlan("plan-v3", "worker-1.2.3", List.of(read, write)),
+            new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate)), List.of(candidate));
+    }
+
     private static TaskDispatcher dispatcherThrowing(RuntimeException failure) {
         return new TaskDispatcher() {
             @Override
@@ -544,6 +646,24 @@ class DispatchNextStageUseCaseTest {
         @Override
         public void save(ProcessingTask task) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class InMemoryArtifactRepository implements ArtifactRepository {
+        private final List<Artifact> artifacts;
+
+        private InMemoryArtifactRepository(List<Artifact> artifacts) {
+            this.artifacts = new java.util.ArrayList<>(artifacts);
+        }
+
+        @Override
+        public List<Artifact> findByTaskId(TaskId taskId) {
+            return artifacts.stream().filter(artifact -> artifact.taskId().equals(taskId)).toList();
+        }
+
+        @Override
+        public void save(Artifact artifact) {
+            artifacts.add(artifact);
         }
     }
 

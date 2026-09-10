@@ -235,6 +235,108 @@ def test_l2a_staged_plan_declares_real_dag(synthetic_l2a_manifest):
     ]
 
 
+def test_registry_executes_l2a_staged_validation_with_logical_artifact(synthetic_l2a_manifest, tmp_path):
+    output_dir = tmp_path / "output"
+    manifest = synthetic_l2a_manifest | {"output": {"path": str(output_dir)}}
+
+    response = dispatch({
+        "operation": "execute-stage",
+        "payload": {
+            "profileCode": "HY-1C-CZI",
+            "profileVersion": "L2A-v1",
+            "planVersion": "plan-v3",
+            "stageKey": "VALIDATE_SOURCE",
+            "parameterSnapshot": json.dumps(_standard_l2a_snapshot()),
+            "outputUri": "rs://output/task-101/validation",
+        },
+    }, manifest)
+
+    assert response["status"] == "SUCCEEDED"
+    assert response["artifacts"][0]["type"] == "HY1C_INPUT_VALIDATION_JSON"
+    assert response["artifacts"][0]["uri"] == "rs://output/task-101/validation/validation/source.json"
+    assert response["artifacts"][0]["checksum"].startswith("sha256:")
+    assert (output_dir / "validation" / "source.json").is_file()
+
+
+def test_registry_executes_every_l2a_plan_v3_stage(synthetic_l2a_manifest, tmp_path):
+    snapshot = _standard_l2a_snapshot()
+    snapshot["roiWgs84"] = {
+        "minLon": 120.0,
+        "minLat": 30.0,
+        "maxLon": 120.01,
+        "maxLat": 30.01,
+    }
+    snapshot["algorithms"] = {
+        "features": {"enabled": True, "metrics": ["statistics", "gradient"], "windowSize": 3},
+        "fusion": {
+            "enabled": True,
+            "red": "B650",
+            "green": "B560",
+            "blue": "B460",
+            "lowPercentile": 0,
+            "highPercentile": 100,
+        },
+        "saliency": {"enabled": True, "source": "B560", "threshold": 0.5, "windowSize": 3},
+    }
+    output_dir = tmp_path / "output"
+    raw_inputs = synthetic_l2a_manifest["inputs"]
+
+    def run(stage_key, inputs):
+        return dispatch({
+            "operation": "execute-stage",
+            "payload": {
+                "profileCode": "HY-1C-CZI",
+                "profileVersion": "L2A-v1",
+                "planVersion": "plan-v3",
+                "stageKey": stage_key,
+                "parameterSnapshot": json.dumps(snapshot),
+                "outputUri": "rs://output/task-102",
+            },
+        }, {"inputs": inputs, "output": {"path": str(output_dir)}})
+
+    run("VALIDATE_SOURCE", raw_inputs)
+    run("DECODE_SCALE_AND_NODATA", [raw_inputs[0]])
+    run("APPLY_L2_FLAGS", [
+        {"role": "decoded", "path": str(output_dir / "decoded" / "czi.npz")},
+        raw_inputs[0],
+    ])
+    run("GEOLOCATE_AND_GRID", [
+        {"role": "quality", "path": str(output_dir / "quality" / "czi.npz")},
+        raw_inputs[0],
+    ])
+    run("CROP_CZI", [{"role": "grid", "path": str(output_dir / "grid" / "czi.npz")}])
+    standard = run("WRITE_STANDARD_COG", [
+        {"role": "cropped", "path": str(output_dir / "crop" / "czi.npz")}
+    ])
+    features = run("EXTRACT_CZI_FEATURES", [
+        {"role": "cropped", "path": str(output_dir / "crop" / "czi.npz")}
+    ])
+    fusion = run("FUSE_CZI_BANDS", [
+        {"role": "cropped", "path": str(output_dir / "crop" / "czi.npz")}
+    ])
+    saliency = run("DETECT_CZI_SALIENCY", [
+        {"role": "source", "path": str(output_dir / "crop" / "czi.npz")}
+    ])
+
+    assert {item["type"] for item in standard["artifacts"]} == {
+        "STANDARD_COG",
+        "STANDARD_METADATA_JSON",
+    }
+    assert {item["type"] for item in features["artifacts"]} == {
+        "FEATURE_COG",
+        "FEATURE_METADATA_JSON",
+    }
+    assert {item["type"] for item in fusion["artifacts"]} == {
+        "FUSION_COG",
+        "FUSION_PREVIEW_PNG",
+    }
+    assert {item["type"] for item in saliency["artifacts"]} == {
+        "SALIENCY_SCORE_COG",
+        "SALIENCY_MASK_COG",
+        "SALIENCY_PREVIEW_PNG",
+    }
+
+
 def test_registry_standardizes_l2a_into_archiveable_output_artifacts(synthetic_l2a_manifest, tmp_path):
     snapshot = _standard_l2a_snapshot()
     snapshot["roiWgs84"] = {"minLon": 119.999, "minLat": 29.999, "maxLon": 120.011, "maxLat": 30.011}

@@ -343,7 +343,7 @@ def _input_roles(manifest: Mapping[str, Any]) -> dict[str, Path]:
     for item in inputs:
         if not isinstance(item, dict) or not isinstance(item.get("role"), str) or not isinstance(item.get("path"), str):
             return {}
-        role = item["role"]
+        role = {"observation": "OBSERVATION", "geo": "GEO1K"}.get(item["role"], item["role"])
         if role in roles:
             raise ValueError("FY-3H MERSI stage input roles must be unique")
         roles[role] = Path(item["path"])

@@ -54,6 +54,44 @@ def test_staged_executor_validates_then_writes_standard_artifacts(tmp_path, monk
     assert {item["type"] for item in standard["artifacts"]} == {"GF6_STANDARD_COG", "GF6_PROCESSING_SUMMARY_JSON"}
 
 
+def test_optional_stages_read_standard_cog_from_upstream_manifest(tmp_path, monkeypatch):
+    standard = tmp_path / "persisted" / "gf6-standard.tif"
+    standard.parent.mkdir(parents=True)
+    standard.write_bytes(b"standard")
+    output = tmp_path / "isolated-stage-output"
+    manifest = {
+        "inputs": [{"path": str(standard), "role": "standard", "ordinal": 0}],
+        "output": {"path": str(output)},
+    }
+    parameters = {
+        "features": {"enabled": True, "metrics": ["gradient"]},
+        "fusion": {"enabled": True, "red": 3, "green": 2, "blue": 1, "percentiles": [2, 98]},
+        "saliency": {"enabled": True, "source": "B3", "windowSize": 9, "threshold": 0.95},
+    }
+    seen = []
+
+    def write_optional(path, directory, _parameters):
+        seen.append((path, directory))
+        artifact = directory / "derived" / "result.tif"
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_bytes(b"derived")
+        return [("DERIVED", artifact)]
+
+    monkeypatch.setattr("rs_algorithm_worker.gf6_wfv_pipeline._write_features", write_optional)
+    monkeypatch.setattr("rs_algorithm_worker.gf6_wfv_pipeline._write_fusion", write_optional)
+    monkeypatch.setattr("rs_algorithm_worker.gf6_wfv_pipeline._write_saliency", write_optional)
+
+    for stage in ("EXTRACT_GF6_FEATURES", "FUSE_GF6_RGB", "DETECT_GF6_SALIENCY"):
+        response = execute_gf6_stage({
+            "stageKey": stage,
+            "outputUri": "rs://output/gf6",
+            "parameterSnapshot": parameters,
+        }, manifest)
+        assert response["status"] == "SUCCEEDED"
+
+    assert seen == [(standard, output.resolve())] * 3
+
+
 def test_execute_stage_accepts_uuid_physical_names_with_manifest_original_names(tmp_path, monkeypatch):
     manifest = make_gf6_package(tmp_path / "input-uuid")
     for index, item in enumerate(manifest["inputs"]):

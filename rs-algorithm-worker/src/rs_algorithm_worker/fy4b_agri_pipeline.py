@@ -326,8 +326,8 @@ def execute_fy4b_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         return _stage_response(output_uri, directory, _build_fy4b_nominal_grid(geo, directory))
     if stage == "CALIBRATE_AND_GEOREFERENCE_FY4B":
         _require_paths(raw_paths, ROLE_ORDER, "FY-4B calibration requires all raw roles")
-        grid_path = raw_paths.get("FY4B_NOMINAL_GRID_JSON") or directory / "navigation" / "nominal-grid.json"
-        if not Path(grid_path).is_file():
+        grid_path = raw_paths.get("FY4B_NOMINAL_GRID_JSON")
+        if grid_path is None or not Path(grid_path).is_file():
             raise ValueError("FY-4B calibration requires nominal grid")
         return _stage_response(output_uri, directory, _calibrate_and_georeference_fy4b(raw_paths, [("FY4B_NOMINAL_GRID_JSON", Path(grid_path))], parameters, directory))
     if stage == "REPROJECT_AND_CROP_FY4B":
@@ -335,8 +335,8 @@ def execute_fy4b_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         for resolution in ("0500M", "1000M", "2000M", "4000M"):
             for suffix in ("RASTER", "QUALITY"):
                 key = f"FY4B_NATIVE_{resolution}_{suffix}"
-                path = raw_paths.get(key) or directory / "native" / (f"{resolution.lower()}.tif" if suffix == "RASTER" else f"quality-{resolution.lower()}.tif")
-                if not Path(path).is_file():
+                path = raw_paths.get(key)
+                if path is None or not Path(path).is_file():
                     raise ValueError(f"FY-4B reprojection requires {key}")
                 native.append((key, Path(path)))
         return _stage_response(output_uri, directory, _reproject_and_crop_fy4b(native, parameters, directory))
@@ -345,21 +345,25 @@ def execute_fy4b_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         for resolution in ("0500M", "1000M", "2000M", "4000M"):
             for suffix in ("RASTER", "QUALITY"):
                 key = f"FY4B_GRIDDED_{resolution}_{suffix}"
-                path = raw_paths.get(key) or directory / "grid" / (f"{resolution.lower()}.tif" if suffix == "RASTER" else f"quality-{resolution.lower()}.tif")
-                if not Path(path).is_file():
+                path = raw_paths.get(key)
+                if path is None or not Path(path).is_file():
                     raise ValueError(f"FY-4B standard COG requires {key}")
                 gridded.append((key, Path(path)))
         return _stage_response(output_uri, directory, _write_fy4b_standard_cog(gridded, directory))
     if stage == "EXTRACT_FY4B_FEATURES":
-        standard = {"FY4B_VIS_NIR_1000M_COG": raw_paths.get("FY4B_VIS_NIR_1000M_COG") or directory / "standard" / "1000m.tif",
-                    "FY4B_RED_500M_COG": raw_paths.get("FY4B_RED_500M_COG") or directory / "standard" / "0500m.tif"}
+        standard = {"FY4B_VIS_NIR_1000M_COG": raw_paths.get("FY4B_VIS_NIR_1000M_COG"),
+                    "FY4B_RED_500M_COG": raw_paths.get("FY4B_RED_500M_COG")}
+        _require_paths(standard, tuple(standard), "FY-4B feature extraction requires standard artifacts")
         return _stage_response(output_uri, directory, _write_fy4b_features({k: Path(v) for k, v in standard.items()}, directory, parameters))
     if stage == "FUSE_FY4B_BANDS":
-        standard = {k: Path(raw_paths.get(k) or directory / "standard" / name) for k, name in (("FY4B_VIS_NIR_1000M_COG", "1000m.tif"), ("FY4B_RED_500M_COG", "0500m.tif"), ("FY4B_MULTISPECTRAL_4000M_COG", "4000m.tif"))}
+        standard = {k: raw_paths.get(k) for k in ("FY4B_VIS_NIR_1000M_COG", "FY4B_RED_500M_COG", "FY4B_MULTISPECTRAL_4000M_COG")}
+        _require_paths(standard, tuple(standard), "FY-4B fusion requires standard artifacts")
         return _stage_response(output_uri, directory, _write_fy4b_fusion(standard, directory, parameters))
     if stage == "DETECT_FY4B_SALIENCY":
         source = raw_paths.get("FY4B_FEATURE_COG") if parameters["saliency"]["source"].startswith(("gradient:", "local_variance:")) else raw_paths.get("FY4B_VIS_NIR_1000M_COG")
-        source = Path(source or directory / ("features/fy4b-features.tif" if parameters["saliency"]["source"].startswith(("gradient:", "local_variance:")) else "standard/1000m.tif"))
+        if source is None:
+            raise ValueError("FY-4B saliency requires an authorized source artifact")
+        source = Path(source)
         return _stage_response(output_uri, directory, _write_fy4b_saliency({"FY4B_FEATURE_COG": source, "FY4B_VIS_NIR_1000M_COG": source}, directory, parameters))
     raise ValueError("unsupported FY-4B AGRI stage")
 
@@ -921,8 +925,26 @@ def _raw_paths(manifest: dict[str, Any]) -> dict[str, Path]:
             continue
         key = item.get("artifactType", item.get("role"))
         if isinstance(key, str):
-            result[key] = Path(item["path"])
+            result[_canonical_stage_input_key(key)] = Path(item["path"])
     return result
+
+
+def _canonical_stage_input_key(key: str) -> str:
+    normalized = key.lower()
+    aliases = {
+        "l1_0500m": "L1_0500M", "l1_1000m": "L1_1000M", "l1_2000m": "L1_2000M",
+        "l1_4000m": "L1_4000M", "geo_4000m": "GEO_4000M", "validation": "FY4B_INPUT_VALIDATION_JSON",
+        "grid": "FY4B_NOMINAL_GRID_JSON", "standard": "FY4B_VIS_NIR_1000M_COG",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    for prefix, artifact_prefix in (("nativequality", "FY4B_NATIVE_"), ("native", "FY4B_NATIVE_"),
+                                    ("gridquality", "FY4B_GRIDDED_"), ("grid", "FY4B_GRIDDED_")):
+        if normalized.startswith(prefix):
+            resolution = key[len(prefix):].upper()
+            suffix = "QUALITY" if prefix.endswith("quality") else "RASTER"
+            return f"{artifact_prefix}{resolution}_{suffix}"
+    return key
 
 
 def _require_paths(paths: dict[str, Path], keys: tuple[str, ...], message: str) -> None:

@@ -235,6 +235,13 @@ def test_registry_builds_requested_plan_v3_for_gf6_l1a_with_staged_dag(tmp_path)
     assert keys[:2] == ["VALIDATE_GF6_WFV_L1A", "WRITE_GF6_STANDARD_COG"]
     assert "STANDARDIZE_GF6_WFV_L1A" not in keys
     assert plan["stages"][0]["outputs"][0]["retention"] == "INTERMEDIATE"
+    allowed_sources = {"RAW_INPUT", "UPSTREAM_ARTIFACT"}
+    assert all(
+        item["source"] in allowed_sources
+        for stage in plan["stages"]
+        for item in stage["inputs"]
+    )
+    assert plan["stages"][1]["inputs"] == plan["stages"][0]["inputs"]
 
 
 def test_registry_inspect_and_build_plan_accept_gf6_uuid_physical_names(tmp_path):

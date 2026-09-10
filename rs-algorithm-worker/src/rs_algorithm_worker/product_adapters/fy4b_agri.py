@@ -293,7 +293,9 @@ def _raw_input(key: str, artifact_type: str) -> dict[str, Any]:
 
 
 def _upstream(key: str, artifact_type: str) -> dict[str, Any]:
-    return {"key": key, "source": "UPSTREAM_ARTIFACT", "artifactType": artifact_type, "required": True}
+    # Use the artifact type as the manifest role so independent stage invocations
+    # can unambiguously locate one of several same-shaped upstream products.
+    return {"key": artifact_type, "source": "UPSTREAM_ARTIFACT", "artifactType": artifact_type, "required": True}
 
 
 def _output(artifact_type: str, relative_path: str, retention: str = "FINAL") -> dict[str, Any]:

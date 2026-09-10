@@ -197,7 +197,10 @@ def _output_directory(manifest: dict[str, Any]) -> Path:
 
 
 def _input_path(manifest: dict[str, Any], role: str) -> Path:
-    paths = [Path(item["path"]) for item in manifest.get("inputs", []) if item.get("role") == role and isinstance(item.get("path"), str)]
+    paths = [Path(item["path"]) for item in manifest.get("inputs", [])
+             if isinstance(item, dict)
+             and str(item.get("role", "")).upper() == role.upper()
+             and isinstance(item.get("path"), str)]
     if len(paths) != 1 or not paths[0].is_file():
         raise ValueError(f"HY-2D stage requires one authorized {role} input")
     return paths[0]

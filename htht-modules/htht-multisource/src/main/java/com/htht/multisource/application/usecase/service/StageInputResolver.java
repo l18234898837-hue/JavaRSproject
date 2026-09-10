@@ -10,6 +10,7 @@ import com.htht.multisource.domain.model.StageId;
 import com.htht.multisource.domain.model.TaskStage;
 
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -31,8 +32,20 @@ public final class StageInputResolver {
             .filter(taskStage -> task.id().equals(taskStage.taskId()))
             .collect(Collectors.toMap(TaskStage::id, TaskStage::stageKey));
 
+        Map<String, Long> rawDeclarationCounts = stage.inputs().stream()
+            .filter(input -> input.source() == StageInput.Source.RAW_INPUT)
+            .collect(Collectors.groupingBy(StageInput::artifactType, Collectors.counting()));
+        Map<String, Integer> rawOffsets = new HashMap<>();
         return stage.inputs().stream()
-            .flatMap(input -> resolveInput(task, stage, input, stageKeysById, artifacts).stream())
+            .flatMap(input -> resolveInput(
+                task,
+                stage,
+                input,
+                stageKeysById,
+                artifacts,
+                rawDeclarationCounts,
+                rawOffsets
+            ).stream())
             .toList();
     }
 
@@ -41,12 +54,12 @@ public final class StageInputResolver {
         ProcessingStage stage,
         StageInput input,
         Map<StageId, String> stageKeysById,
-        List<Artifact> artifacts
+        List<Artifact> artifacts,
+        Map<String, Long> rawDeclarationCounts,
+        Map<String, Integer> rawOffsets
     ) {
         List<InputAsset> matches = switch (input.source()) {
-            case RAW_INPUT -> task.candidates().get(0).files().stream()
-                .filter(asset -> asset.role().equals(input.artifactType()))
-                .toList();
+            case RAW_INPUT -> rawMatches(task, input, rawDeclarationCounts, rawOffsets);
             case UPSTREAM_ARTIFACT -> upstreamMatches(task, stage, input, stageKeysById, artifacts);
         };
         if (matches.isEmpty() && !input.required()) {
@@ -58,6 +71,30 @@ public final class StageInputResolver {
             );
         }
         return matches;
+    }
+
+    private List<InputAsset> rawMatches(
+        ProcessingTask task,
+        StageInput input,
+        Map<String, Long> declarationCounts,
+        Map<String, Integer> offsets
+    ) {
+        List<InputAsset> matches = task.candidates().get(0).files().stream()
+            .filter(asset -> asset.role().equals(input.artifactType()))
+            .sorted(java.util.Comparator.comparingInt(InputAsset::ordinal))
+            .toList();
+        long declarationCount = declarationCounts.getOrDefault(input.artifactType(), 0L);
+        if (declarationCount <= 1 || matches.isEmpty()) {
+            return matches;
+        }
+        if (matches.size() != declarationCount) {
+            throw new IllegalArgumentException(
+                "Repeated stage input type '%s' declares %d assets but found %d."
+                    .formatted(input.artifactType(), declarationCount, matches.size())
+            );
+        }
+        int offset = offsets.merge(input.artifactType(), 1, Integer::sum) - 1;
+        return List.of(matches.get(offset));
     }
 
     private List<InputAsset> upstreamMatches(

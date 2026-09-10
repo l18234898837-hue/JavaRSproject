@@ -69,13 +69,13 @@ def execute_gf6_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dict
         path.write_text(json.dumps({"profileKey": PROFILE_KEY, "packageId": evidence.package_id, "valid": True}, sort_keys=True) + "\n", encoding="utf-8")
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, "GF6_INPUT_VALIDATION_JSON", path, directory)]}
     parameters = parse_parameters(_payload_parameters(payload))
-    evidence = inspect_evidence(manifest)
     if stage == "WRITE_GF6_STANDARD_COG":
+        evidence = inspect_evidence(manifest)
         standard = directory / "standard" / "gf6-standard.tif"; standard.parent.mkdir(parents=True, exist_ok=True)
         _write_standard_cog(evidence, standard, parameters)
         summary = _write_processing_summary(standard, evidence, parameters)
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, "GF6_STANDARD_COG", standard, directory), _artifact(output_uri, "GF6_PROCESSING_SUMMARY_JSON", summary, directory)], "metadata": {"navigationStatus": "NOMINAL_RPC_NO_DEM", "accuracyStatus": "UNVALIDATED"}}
-    standard = directory / "standard" / "gf6-standard.tif"
+    standard = _manifest_role_path(manifest, "standard")
     if stage == "EXTRACT_GF6_FEATURES":
         return _stage_artifacts(output_uri, directory, _write_features(standard, directory, parameters))
     if stage == "FUSE_GF6_RGB":
@@ -87,6 +87,17 @@ def execute_gf6_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dict
 
 def _stage_artifacts(output_uri: str, directory: Path, artifacts: list[tuple[str, Path]]) -> dict[str, Any]:
     return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, kind, path, directory) for kind, path in artifacts]}
+
+
+def _manifest_role_path(manifest: dict[str, Any], role: str) -> Path:
+    matches = [
+        Path(item["path"])
+        for item in manifest.get("inputs", [])
+        if isinstance(item, dict) and item.get("role") == role and isinstance(item.get("path"), str)
+    ]
+    if len(matches) != 1 or not matches[0].is_file():
+        raise ValueError(f"GF6 stage requires one authorized {role} input")
+    return matches[0]
 
 
 def _write_standard_cog(evidence: Gf6ProductEvidence, path: Path, parameters: dict[str, Any]) -> None:

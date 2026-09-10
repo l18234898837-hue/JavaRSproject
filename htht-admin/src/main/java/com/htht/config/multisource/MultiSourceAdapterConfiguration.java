@@ -265,12 +265,13 @@ public class MultiSourceAdapterConfiguration {
                                                              LocalProcessWorkerGateway workerGateway,
                                                              SysFileAssetStorageAdapter assetStorage,
                                                              ExecutionIdGenerator executionIdGenerator,
-                                                             ExecutionClock executionClock,
-                                                             AcceptWorkerEventUseCase eventUseCase,
-                                                             ArtifactValidator artifactValidator,
+                                                              ExecutionClock executionClock,
+                                                              AcceptWorkerEventUseCase eventUseCase,
+                                                              ArtifactRepository artifactRepository,
+                                                              ArtifactValidator artifactValidator,
                                                              @Qualifier("multisourceStageExecutor") Executor dispatchExecutor) {
         return new DispatchNextStageService(taskRepository, stageRepository, workerGateway, assetStorage,
-            executionIdGenerator, executionClock, EXECUTION_LEASE_DURATION, eventUseCase, artifactValidator,
+            executionIdGenerator, executionClock, EXECUTION_LEASE_DURATION, eventUseCase, artifactRepository, artifactValidator,
             dispatchExecutor);
     }
 

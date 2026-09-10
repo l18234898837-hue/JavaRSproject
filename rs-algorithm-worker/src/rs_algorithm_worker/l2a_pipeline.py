@@ -17,6 +17,7 @@ from .algorithms.features import FeatureParameters, extract_features
 from .algorithms.fusion import FusionParameters, fuse_bands
 from .algorithms.saliency import SaliencyParameters, detect_saliency
 from .models import BandMetadata, BandSet, RasterData
+from .output_uri import logical_output_uri
 from .operators.cog import COGWriteResult, write_cog
 from .operators.quality_mask import apply_quality_mask
 from .product_adapters.hy1c_czi_l2a import (
@@ -157,9 +158,8 @@ def execute_l2a_staged_stage(
         raise ValueError("HY-1C staged execution requires stageKey and output directory")
     output_dir = Path(output["path"]).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    parameters = _parameters_from_payload(payload, manifest)
     inputs = _manifest_inputs(manifest)
-    output_uri = _logical_output_uri(payload.get("outputUri"))
+    output_uri = logical_output_uri(payload.get("outputUri"))
 
     if stage_key == "VALIDATE_SOURCE":
         candidate = inspect_l2a_manifest(manifest)
@@ -187,6 +187,7 @@ def execute_l2a_staged_stage(
         ]}
     if stage_key == "GEOLOCATE_AND_GRID":
         main = _required_input(inputs, "main")
+        parameters = _parameters_from_main_input(payload, main)
         raster = _grid_l2a_source(main, load_reviewed_mapping(), parameters, output_dir)
         path = output_dir / "grid" / "czi.npz"
         _write_raster_intermediate(path, raster, None, stage_key)
@@ -211,6 +212,27 @@ def execute_l2a_staged_stage(
             _cog_artifact(output_uri, output_dir, "STANDARD_COG", result),
             _file_artifact(output_uri, output_dir, "STANDARD_METADATA_JSON", metadata_path),
         ]}
+    if stage_key == "EXTRACT_CZI_FEATURES":
+        raster = _read_raster_intermediate(
+            _required_input(inputs, "cropped"), "CROPPED_CZI"
+        )[0]
+        parameters = _parameters_without_scene(payload)
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts":
+                _feature_artifacts(output_uri, output_dir, raster, parameters.algorithms["features"])}
+    if stage_key == "FUSE_CZI_BANDS":
+        raster = _read_raster_intermediate(
+            _required_input(inputs, "cropped"), "CROPPED_CZI"
+        )[0]
+        parameters = _parameters_without_scene(payload)
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts":
+                _fusion_artifacts(output_uri, output_dir, raster, parameters.algorithms["fusion"])}
+    if stage_key == "DETECT_CZI_SALIENCY":
+        raster = _read_raster_intermediate(
+            _required_input(inputs, "source"), "CROPPED_CZI"
+        )[0]
+        parameters = _parameters_without_scene(payload)
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts":
+                _saliency_artifacts(output_uri, output_dir, raster, parameters.algorithms["saliency"])}
     raise ValueError(f"unsupported HY-1C CZI L2A staged stage: {stage_key}")
 
 
@@ -232,12 +254,20 @@ def _required_input(inputs: dict[str, Path], key: str) -> Path:
     return value
 
 
-def _parameters_from_payload(payload: dict[str, Any], manifest: dict[str, Any]) -> Any:
+def _parameters_from_main_input(payload: dict[str, Any], main: Path) -> Any:
     from .l2a_profile import parse_l2a_parameters
-    candidate = inspect_l2a_manifest(manifest)
-    centre = candidate["metadataSnapshot"]["sceneCentre"]
+    with h5py.File(main, "r") as handle:
+        longitude = float(handle.attrs["Scene Center Longitude"])
+        latitude = float(handle.attrs["Scene Center Latitude"])
     return parse_l2a_parameters(_parameter_snapshot_value(payload),
-                                centre_longitude=centre["longitude"], centre_latitude=centre["latitude"])
+                                centre_longitude=longitude, centre_latitude=latitude)
+
+
+def _parameters_without_scene(payload: dict[str, Any]) -> Any:
+    from .l2a_profile import parse_l2a_parameters
+    return parse_l2a_parameters(
+        _parameter_snapshot_value(payload), centre_longitude=0.0, centre_latitude=0.0
+    )
 
 
 def _parameter_snapshot_value(payload: dict[str, Any]) -> dict[str, Any]:

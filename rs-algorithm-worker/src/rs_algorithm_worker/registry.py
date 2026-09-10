@@ -13,11 +13,9 @@ from .fy4b_agri_pipeline import execute_fy4b_product, execute_fy4b_stage
 from .gf6_wfv_pipeline import execute_gf6_product, execute_gf6_stage
 from .hy2d_pipeline import execute_hy2d_product, execute_hy2d_stage
 from .l2a_pipeline import execute_l2a_product, execute_l2a_staged_stage
+from .output_uri import logical_output_uri
 from .product_adapters import base, fy3h_mersi, fy4b_agri, gf6_wfv_browse, gf6_wfv_l1a, hy1c_czi, hy1c_czi_l2a, hy2d_altimeter
 from .product_adapters.base import logical_file_name
-
-
-LOGICAL_OUTPUT_URI = re.compile(r"rs://output/[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*/?")
 
 
 def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
@@ -79,7 +77,7 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
             return {
                 "workerId": "worker-local",
                 "status": "SUCCEEDED",
-                "artifacts": execute_l2a_product(manifest, _parameter_snapshot(payload), _logical_output_uri(payload.get("outputUri"))),
+                "artifacts": execute_l2a_product(manifest, _parameter_snapshot(payload), logical_output_uri(payload.get("outputUri"))),
             }
         if payload.get("profileCode") == "FY-4B-AGRI":
             if payload.get("planVersion") == "plan-v3":
@@ -309,7 +307,7 @@ def _execute_gf_browse_stage(payload: dict[str, Any], manifest: dict[str, Any]) 
 
     output = manifest.get("output")
     output_dir = output.get("path") if isinstance(output, dict) else None
-    output_uri = _logical_output_uri(payload.get("outputUri"))
+    output_uri = logical_output_uri(payload.get("outputUri"))
     if not isinstance(output_dir, str):
         raise ValueError("GF-6 browse report output is required")
     report = gf6_wfv_browse.execute_visual_plan(candidate, output_dir)
@@ -321,12 +319,3 @@ def _execute_gf_browse_stage(payload: dict[str, Any], manifest: dict[str, Any]) 
         "checksum": "sha256:" + hashlib.sha256(content).hexdigest(),
     }]
     return result
-
-
-def _logical_output_uri(value: Any) -> str:
-    if not isinstance(value, str) or not LOGICAL_OUTPUT_URI.fullmatch(value):
-        raise ValueError("GF-6 browse report requires a logical output URI")
-    segments = value.removeprefix("rs://output/").rstrip("/").split("/")
-    if any(segment in {".", ".."} for segment in segments):
-        raise ValueError("GF-6 browse report requires a logical output URI")
-    return value.rstrip("/")

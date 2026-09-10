@@ -1,6 +1,7 @@
 package com.htht.multisource.application.usecase.service;
 
 import com.htht.multisource.application.port.out.AssetStorage;
+import com.htht.multisource.application.port.out.ArtifactRepository;
 import com.htht.multisource.application.port.out.ArtifactValidator;
 import com.htht.multisource.application.port.out.ExecutionClock;
 import com.htht.multisource.application.port.out.ExecutionIdGenerator;
@@ -49,6 +50,8 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
     private final Duration leaseDuration;
     private final AcceptWorkerEventUseCase eventUseCase;
     private final ArtifactValidator artifactValidator;
+    private final ArtifactRepository artifactRepository;
+    private final StageInputResolver inputResolver;
     private final StageOutputContractValidator outputContractValidator;
     private final Executor dispatchExecutor;
 
@@ -63,7 +66,8 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
         AcceptWorkerEventUseCase eventUseCase
     ) {
         this(taskRepository, stageRepository, dispatcher, assetStorage, executionIdGenerator, clock, leaseDuration,
-            eventUseCase, (taskId, stageId, executionId, outputUri, candidate) -> { }, Runnable::run);
+            eventUseCase, emptyArtifactRepository(),
+            (taskId, stageId, executionId, outputUri, candidate) -> { }, Runnable::run);
     }
 
     public DispatchNextStageService(
@@ -78,7 +82,7 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
         ArtifactValidator artifactValidator
     ) {
         this(taskRepository, stageRepository, dispatcher, assetStorage, executionIdGenerator, clock, leaseDuration,
-            eventUseCase, artifactValidator, Runnable::run);
+            eventUseCase, emptyArtifactRepository(), artifactValidator, Runnable::run);
     }
 
     public DispatchNextStageService(
@@ -93,6 +97,23 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
         ArtifactValidator artifactValidator,
         Executor dispatchExecutor
     ) {
+        this(taskRepository, stageRepository, dispatcher, assetStorage, executionIdGenerator, clock, leaseDuration,
+            eventUseCase, emptyArtifactRepository(), artifactValidator, dispatchExecutor);
+    }
+
+    public DispatchNextStageService(
+        ProcessingTaskRepository taskRepository,
+        TaskStageRepository stageRepository,
+        TaskDispatcher dispatcher,
+        AssetStorage assetStorage,
+        ExecutionIdGenerator executionIdGenerator,
+        ExecutionClock clock,
+        Duration leaseDuration,
+        AcceptWorkerEventUseCase eventUseCase,
+        ArtifactRepository artifactRepository,
+        ArtifactValidator artifactValidator,
+        Executor dispatchExecutor
+    ) {
         this.taskRepository = Objects.requireNonNull(taskRepository, "taskRepository");
         this.stageRepository = Objects.requireNonNull(stageRepository, "stageRepository");
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
@@ -101,9 +122,11 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
         this.clock = Objects.requireNonNull(clock, "clock");
         this.leaseDuration = Objects.requireNonNull(leaseDuration, "leaseDuration");
         this.eventUseCase = Objects.requireNonNull(eventUseCase, "eventUseCase");
+        this.artifactRepository = Objects.requireNonNull(artifactRepository, "artifactRepository");
         this.artifactValidator = Objects.requireNonNull(artifactValidator, "artifactValidator");
         this.dispatchExecutor = Objects.requireNonNull(dispatchExecutor, "dispatchExecutor");
         this.outputContractValidator = new StageOutputContractValidator();
+        this.inputResolver = new StageInputResolver();
         if (leaseDuration.isZero() || leaseDuration.isNegative()) {
             throw new IllegalArgumentException("Lease duration must be positive.");
         }
@@ -156,16 +179,14 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
                 return;
             }
             DispatchReceipt receipt = dispatchWithRefresh(() -> {
-                boolean declaresOnlyRawInputs = !planStage.inputs().isEmpty()
-                    && planStage.inputs().stream().allMatch(input ->
-                        input.source() == com.htht.multisource.application.port.out.model.StageInput.Source.RAW_INPUT);
-                var stageInputs = !declaresOnlyRawInputs
+                var stageInputs = planStage.inputs().isEmpty()
                     ? candidate.files()
-                    : candidate.files().stream()
-                        .filter(asset -> planStage.inputs().stream().anyMatch(input ->
-                            input.source() == com.htht.multisource.application.port.out.model.StageInput.Source.RAW_INPUT
-                                && input.artifactType().equals(asset.role())))
-                        .toList();
+                    : inputResolver.resolve(
+                        task,
+                        planStage,
+                        stageRepository.findByTaskId(task.id()),
+                        artifactRepository.findByTaskId(task.id())
+                    );
                 var grant = assetStorage.grant(new ExecutionGrantRequest(
                     task.id(), stage.id(), executionId, stage.attempt(), stageInputs, task.outputUri()
                 ));
@@ -254,5 +275,19 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
         }
         return value.replace("\\", "\\\\").replace("\"", "\\\"")
             .replace("\r", "\\r").replace("\n", "\\n");
+    }
+
+    private static ArtifactRepository emptyArtifactRepository() {
+        return new ArtifactRepository() {
+            @Override
+            public java.util.List<com.htht.multisource.domain.model.Artifact> findByTaskId(TaskId taskId) {
+                return java.util.List.of();
+            }
+
+            @Override
+            public void save(com.htht.multisource.domain.model.Artifact artifact) {
+                throw new UnsupportedOperationException();
+            }
+        };
     }
 }
