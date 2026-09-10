@@ -23,7 +23,7 @@ import java.util.Set;
 public final class LocalWorkerAssetManifestWriter {
 
     private final Path workRoot;
-    private final Path assetRoot;
+    private final List<Path> assetRoots;
     private final LocalWorkerAssetResolver resolver;
     private final Clock clock;
     private final ObjectMapper objectMapper;
@@ -34,8 +34,21 @@ public final class LocalWorkerAssetManifestWriter {
         LocalWorkerAssetResolver resolver,
         Clock clock
     ) {
+        this(workRoot, List.of(assetRoot), resolver, clock);
+    }
+
+    public LocalWorkerAssetManifestWriter(
+        Path workRoot,
+        List<Path> assetRoots,
+        LocalWorkerAssetResolver resolver,
+        Clock clock
+    ) {
         this.workRoot = absoluteDirectory(workRoot, "workRoot");
-        this.assetRoot = absoluteDirectory(assetRoot, "assetRoot");
+        this.assetRoots = List.copyOf(Objects.requireNonNull(assetRoots, "assetRoots").stream()
+            .map(path -> absoluteDirectory(path, "assetRoot")).toList());
+        if (this.assetRoots.isEmpty()) {
+            throw new IllegalArgumentException("At least one asset root is required.");
+        }
         this.resolver = Objects.requireNonNull(resolver, "resolver");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.objectMapper = new ObjectMapper();
@@ -133,8 +146,14 @@ public final class LocalWorkerAssetManifestWriter {
         }
         try {
             Path real = resolved.toRealPath();
-            Path root = assetRoot.toRealPath();
-            if (!real.startsWith(root) || !Files.isRegularFile(real) || !Files.isReadable(real)) {
+            boolean insideAllowedRoot = assetRoots.stream().anyMatch(root -> {
+                try {
+                    return real.startsWith(root.toRealPath());
+                } catch (IOException exception) {
+                    return false;
+                }
+            });
+            if (!insideAllowedRoot || !Files.isRegularFile(real) || !Files.isReadable(real)) {
                 throw failure(requestId, "asset path escapes configured asset root");
             }
             return real;

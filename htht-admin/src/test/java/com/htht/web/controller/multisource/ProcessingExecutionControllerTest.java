@@ -2,6 +2,7 @@ package com.htht.web.controller.multisource;
 
 import com.htht.config.multisource.LocalWorkerResultArchiveService;
 import com.htht.config.multisource.MultiSourceWorkerProperties;
+import com.htht.config.multisource.ResultDownloadTicketService;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.DispatchNextStageUseCase;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
@@ -196,7 +197,7 @@ class ProcessingExecutionControllerTest {
         properties.setTimeout(Duration.ofMinutes(10));
         return new ProcessingExecutionController(() -> OWNER, details, mock(DispatchNextStageUseCase.class),
             mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class),
-            new LocalWorkerResultArchiveService(properties), null);
+            new LocalWorkerResultArchiveService(properties), new ResultDownloadTicketService());
     }
 
     private TaskDetailView detailWithArtifact(Path source, String executionId) throws Exception {

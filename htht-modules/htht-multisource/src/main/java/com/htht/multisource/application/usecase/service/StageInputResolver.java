@@ -8,6 +8,7 @@ import com.htht.multisource.domain.model.ProcessingStage;
 import com.htht.multisource.domain.model.ProcessingTask;
 import com.htht.multisource.domain.model.StageId;
 import com.htht.multisource.domain.model.TaskStage;
+import com.htht.multisource.domain.model.StorageUri;
 
 import java.util.List;
 import java.util.HashMap;
@@ -31,6 +32,9 @@ public final class StageInputResolver {
         Map<StageId, String> stageKeysById = taskStages.stream()
             .filter(taskStage -> task.id().equals(taskStage.taskId()))
             .collect(Collectors.toMap(TaskStage::id, TaskStage::stageKey));
+        Map<StageId, TaskStage> taskStagesById = taskStages.stream()
+            .filter(taskStage -> task.id().equals(taskStage.taskId()))
+            .collect(Collectors.toMap(TaskStage::id, taskStage -> taskStage));
 
         Map<String, Long> rawDeclarationCounts = stage.inputs().stream()
             .filter(input -> input.source() == StageInput.Source.RAW_INPUT)
@@ -42,6 +46,7 @@ public final class StageInputResolver {
                 stage,
                 input,
                 stageKeysById,
+                taskStagesById,
                 artifacts,
                 rawDeclarationCounts,
                 rawOffsets
@@ -54,13 +59,14 @@ public final class StageInputResolver {
         ProcessingStage stage,
         StageInput input,
         Map<StageId, String> stageKeysById,
+        Map<StageId, TaskStage> taskStagesById,
         List<Artifact> artifacts,
         Map<String, Long> rawDeclarationCounts,
         Map<String, Integer> rawOffsets
     ) {
         List<InputAsset> matches = switch (input.source()) {
             case RAW_INPUT -> rawMatches(task, input, rawDeclarationCounts, rawOffsets);
-            case UPSTREAM_ARTIFACT -> upstreamMatches(task, stage, input, stageKeysById, artifacts);
+            case UPSTREAM_ARTIFACT -> upstreamMatches(task, stage, input, stageKeysById, taskStagesById, artifacts);
         };
         if (matches.isEmpty() && !input.required()) {
             return List.of();
@@ -102,6 +108,7 @@ public final class StageInputResolver {
         ProcessingStage stage,
         StageInput input,
         Map<StageId, String> stageKeysById,
+        Map<StageId, TaskStage> taskStagesById,
         List<Artifact> artifacts
     ) {
         List<Artifact> matchingArtifacts = artifacts.stream()
@@ -118,15 +125,28 @@ public final class StageInputResolver {
             }
         }
 
-        return matchingArtifacts.stream()
-            .map(artifact -> new InputAsset(
-                input.key(),
-                0,
-                new AssetReference("TASK_ARTIFACT", artifact.uri().value()),
-                new com.htht.multisource.domain.model.StorageUri("rs://task-artifact/" + artifact.storageKey()),
-                artifact.checksum(),
-                input.required()
-            ))
-            .toList();
+        return matchingArtifacts.stream().map(artifact -> new InputAsset(
+            input.key(), 0, new AssetReference("TASK_ARTIFACT", artifact.uri().value()),
+            upstreamStorageUri(artifact, taskStagesById), artifact.checksum(), input.required()
+        )).toList();
+    }
+
+    private static StorageUri upstreamStorageUri(Artifact artifact, Map<StageId, TaskStage> stages) {
+        if (!artifact.storageKey().startsWith("legacy/")) {
+            return new StorageUri("rs://task-artifact/" + artifact.storageKey());
+        }
+        TaskStage producer = java.util.Optional.ofNullable(stages.get(artifact.stageId()))
+            .orElseThrow(() -> new IllegalArgumentException("Legacy artifact producer stage is unavailable."));
+        String executionId = producer.execution() == null ? null : producer.execution().executionId().value();
+        String uri = artifact.uri().value();
+        String[] uriSegments = uri.startsWith("rs://output/")
+            ? uri.substring("rs://output/".length()).split("/", 3) : new String[0];
+        String relative = uriSegments.length == 3 ? uriSegments[2] : null;
+        if (executionId == null || !executionId.matches("[A-Za-z0-9][A-Za-z0-9._-]*")
+            || relative == null || relative.isBlank() || relative.indexOf('\\') >= 0
+            || java.nio.file.Path.of(relative).isAbsolute() || java.nio.file.Path.of(relative).normalize().startsWith("..")) {
+            throw new IllegalArgumentException("Legacy artifact cannot be resolved from its worker execution.");
+        }
+        return new StorageUri("rs://worker-output/" + executionId + "/" + relative);
     }
 }

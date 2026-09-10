@@ -150,6 +150,17 @@ public class ProcessingExecutionController {
         return media.startsWith("image/") || "application/json".equals(media);
     }
 
+    @GetMapping("/processing-tasks/{taskId}/artifacts/{type}/download")
+    public void downloadArtifact(@PathVariable long taskId, @PathVariable String type,
+                                 javax.servlet.http.HttpServletResponse response) throws java.io.IOException {
+        if (resultArchiveService == null) {
+            throw new IllegalStateException("Result artifact service is not configured.");
+        }
+        AccessSubject subject = currentSubject.get();
+        var detail = detailUseCase.get(TaskId.of(taskId), subject);
+        resultArchiveService.writeArtifact(detail, subject, type, response);
+    }
+
     @PostMapping("/processing-tasks/{taskId}/result-download-ticket")
     public ResponseEntity<R<ResultDownloadTicketResponse>> createResultDownloadTicket(
         @PathVariable long taskId, @RequestBody ResultDownloadTicketRequest request) {

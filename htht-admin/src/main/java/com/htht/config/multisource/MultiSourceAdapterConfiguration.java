@@ -17,6 +17,7 @@ import com.htht.multisource.application.port.out.ProcessingTaskRepository;
 import com.htht.multisource.application.port.out.ProductInspector;
 import com.htht.multisource.application.port.out.StageIdGenerator;
 import com.htht.multisource.application.port.out.TaskIdGenerator;
+import com.htht.multisource.application.port.out.TaskArtifactStore;
 import com.htht.multisource.application.port.out.TaskStageRepository;
 import com.htht.multisource.application.usecase.AcceptWorkerEventUseCase;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
@@ -68,6 +69,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 import java.nio.file.Path;
 import java.time.Clock;
@@ -165,8 +167,25 @@ public class MultiSourceAdapterConfiguration {
 
     @Bean
     public ArtifactRegistration multisourceArtifactRegistration(ArtifactValidator validator,
-                                                                 ArtifactRepository artifactRepository) {
-        return new ArtifactRegistrationService(validator, artifactRepository);
+                                                                 ArtifactRepository artifactRepository,
+                                                                 TaskArtifactStore artifactStore) {
+        return new ArtifactRegistrationService(validator, artifactRepository, artifactStore);
+    }
+
+    @Bean
+    public TaskArtifactStore taskArtifactStore(MultiSourceWorkerProperties properties) {
+        return new LocalTaskArtifactStore(properties.toLocalProcessProperties().workRoot(),
+            properties.requireArtifactRoot());
+    }
+
+    @Bean
+    @Primary
+    public CompositeLocalWorkerAssetResolver multisourceWorkerAssetResolver(
+        SysFileAssetStorageAdapter sysFileStorage,
+        MultiSourceWorkerProperties properties
+    ) {
+        return new CompositeLocalWorkerAssetResolver(sysFileStorage, properties.requireArtifactRoot(),
+            properties.toLocalProcessProperties().workRoot());
     }
 
     @Bean
@@ -186,12 +205,14 @@ public class MultiSourceAdapterConfiguration {
 
     @Bean
     public LocalProcessWorkerGateway multisourceWorkerGateway(MultiSourceWorkerProperties properties,
-                                                               SysFileAssetStorageAdapter assetStorage,
+                                                               CompositeLocalWorkerAssetResolver assetStorage,
                                                                @Value("${file.upload-path}") String uploadPath) {
         ObjectMapper objectMapper = new ObjectMapper();
         var workerProperties = properties.toLocalProcessProperties();
         Path uploadRoot = resolveUploadRoot(uploadPath);
-        var manifestWriter = new LocalWorkerAssetManifestWriter(workerProperties.workRoot(), uploadRoot, assetStorage, Clock.systemUTC());
+        var manifestWriter = new LocalWorkerAssetManifestWriter(workerProperties.workRoot(),
+            java.util.List.of(uploadRoot, properties.requireArtifactRoot(), workerProperties.workRoot()),
+            assetStorage, Clock.systemUTC());
         return new LocalProcessWorkerGateway(
             new WorkerContractCodec(objectMapper), new WorkerResultTranslator(objectMapper),
             new LocalWorkerProcessLauncher(workerProperties), () -> UUID.randomUUID().toString(), manifestWriter
@@ -205,7 +226,7 @@ public class MultiSourceAdapterConfiguration {
 
     @Bean
     public PreflightProductUseCase preflightProductUseCase(LocalProcessWorkerGateway workerGateway,
-                                                           SysFileAssetStorageAdapter assetStorage) {
+                                                           CompositeLocalWorkerAssetResolver assetStorage) {
         return new PreflightProductService((ProductInspector) workerGateway, assetStorage);
     }
 
@@ -213,7 +234,7 @@ public class MultiSourceAdapterConfiguration {
     public TaskCreationCoordinator multisourceTaskCreationCoordinator(ProcessingTaskRepository taskRepository,
                                                                        TaskStageRepository stageRepository,
                                                                        LocalProcessWorkerGateway workerGateway,
-                                                                       SysFileAssetStorageAdapter assetStorage,
+                                                                       CompositeLocalWorkerAssetResolver assetStorage,
                                                                        TaskIdGenerator taskIdGenerator,
                                                                        StageIdGenerator stageIdGenerator) {
         return new TaskCreationCoordinator(taskRepository, stageRepository, (ProcessingPlanner) workerGateway,
@@ -263,7 +284,7 @@ public class MultiSourceAdapterConfiguration {
     public DispatchNextStageUseCase dispatchNextStageUseCase(ProcessingTaskRepository taskRepository,
                                                              TaskStageRepository stageRepository,
                                                              LocalProcessWorkerGateway workerGateway,
-                                                             SysFileAssetStorageAdapter assetStorage,
+                                                             CompositeLocalWorkerAssetResolver assetStorage,
                                                              ExecutionIdGenerator executionIdGenerator,
                                                               ExecutionClock executionClock,
                                                               AcceptWorkerEventUseCase eventUseCase,

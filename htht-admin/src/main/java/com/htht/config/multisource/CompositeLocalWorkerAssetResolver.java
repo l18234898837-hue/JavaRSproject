@@ -25,11 +25,17 @@ import java.util.stream.Collectors;
 public final class CompositeLocalWorkerAssetResolver implements AssetStorage, LocalWorkerAssetResolver {
     private final SysFileAssetStorageAdapter sysFiles;
     private final Path artifactRoot;
+    private final Path workRoot;
     private final ConcurrentHashMap<String, GrantScope> grants = new ConcurrentHashMap<>();
 
     public CompositeLocalWorkerAssetResolver(SysFileAssetStorageAdapter sysFiles, Path artifactRoot) {
+        this(sysFiles, artifactRoot, artifactRoot);
+    }
+
+    public CompositeLocalWorkerAssetResolver(SysFileAssetStorageAdapter sysFiles, Path artifactRoot, Path workRoot) {
         this.sysFiles = sysFiles;
         this.artifactRoot = artifactRoot.toAbsolutePath().normalize();
+        this.workRoot = workRoot.toAbsolutePath().normalize();
     }
 
     @Override
@@ -41,6 +47,9 @@ public final class CompositeLocalWorkerAssetResolver implements AssetStorage, Lo
         }
         if (storageUri.value().startsWith("rs://sys-file/")) {
             return sysFiles.resolve(grantReference, storageUri);
+        }
+        if (storageUri.value().startsWith("rs://worker-output/")) {
+            return resolveWorkerOutput(storageUri.value().substring("rs://worker-output/".length()));
         }
         if (!storageUri.value().startsWith("rs://task-artifact/")) {
             throw new IllegalArgumentException("Unsupported asset storage URI.");
@@ -71,7 +80,10 @@ public final class CompositeLocalWorkerAssetResolver implements AssetStorage, Lo
     @Override public AssetAccessGrant grantRead(AccessSubject subject, List<InputAsset> inputs) {
         String ref = UUID.randomUUID().toString();
         Instant expires = Instant.now().plusSeconds(300);
-        grants.put(ref, new GrantScope(expires, inputs.stream().map(i -> i.storageUriSnapshot().value()).collect(Collectors.toUnmodifiableSet())));
+        Set<String> uris = inputs.stream().map(i -> i.storageUriSnapshot().value()).collect(Collectors.toUnmodifiableSet());
+        grants.put(ref, new GrantScope(expires, uris));
+        sysFiles.authorize(ref, expires, uris.stream().filter(uri -> uri.startsWith("rs://sys-file/"))
+            .collect(Collectors.toUnmodifiableSet()));
         return new AssetAccessGrant(ref, expires);
     }
     @Override public ExecutionGrant grant(TaskId taskId, List<InputAsset> inputs, StorageUri outputUri) {
@@ -79,6 +91,29 @@ public final class CompositeLocalWorkerAssetResolver implements AssetStorage, Lo
     }
     @Override public com.htht.multisource.application.port.out.model.AssetMetadata resolve(AccessSubject subject, AssetReference reference) {
         return sysFiles.resolve(subject, reference);
+    }
+
+    private Path resolveWorkerOutput(String value) {
+        String[] segments = value.split("/", 2);
+        if (segments.length != 2 || !segments[0].matches("[A-Za-z0-9][A-Za-z0-9._-]*")
+            || !safeRelativePath(segments[1])) {
+            throw new IllegalArgumentException("Worker output URI is invalid.");
+        }
+        Path outputRoot = workRoot.resolve(segments[0]).resolve("output").normalize();
+        Path path = outputRoot.resolve(segments[1]).normalize();
+        if (!path.startsWith(outputRoot) || !Files.isRegularFile(path) || !Files.isReadable(path)) {
+            throw new IllegalArgumentException("Worker output artifact is unavailable.");
+        }
+        try {
+            return path.toRealPath();
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Worker output artifact cannot be read.", exception);
+        }
+    }
+
+    private static boolean safeRelativePath(String value) {
+        return value != null && !value.isBlank() && value.indexOf('\\') < 0 && !Path.of(value).isAbsolute()
+            && !Path.of(value).normalize().startsWith("..");
     }
 
     private record GrantScope(Instant expiresAt, Set<String> storageUris) { }

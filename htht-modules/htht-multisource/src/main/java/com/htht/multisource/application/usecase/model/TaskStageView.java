@@ -25,6 +25,11 @@ public record TaskStageView(
     }
 
     public TaskStageView(StageId id, String stageKey, StageExecutionStatus status, int attempt,
+                         String executionId, String errorCode, String errorMessage) {
+        this(id, stageKey, status, attempt, executionId, errorCode, errorMessage, null, null);
+    }
+
+    public TaskStageView(StageId id, String stageKey, StageExecutionStatus status, int attempt,
                          String executionId, String errorCode, String errorMessage,
                          Instant startedAt, Instant finishedAt) {
         this.id = id;

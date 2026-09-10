@@ -24,9 +24,12 @@ import java.util.zip.ZipOutputStream;
 public final class LocalWorkerResultArchiveService {
     private static final int RESPONSE_BUFFER_SIZE = 64 * 1024;
     private final Path workRoot;
+    private final Path artifactRoot;
 
     public LocalWorkerResultArchiveService(MultiSourceWorkerProperties properties) {
         this.workRoot = properties.toLocalProcessProperties().workRoot().toAbsolutePath().normalize();
+        this.artifactRoot = properties.getArtifactRoot() == null
+            ? this.workRoot.resolve("artifacts") : properties.requireArtifactRoot().toAbsolutePath().normalize();
     }
 
     public void write(TaskDetailView detail, AccessSubject subject, HttpServletResponse response) throws IOException {
@@ -41,21 +44,12 @@ public final class LocalWorkerResultArchiveService {
         String uriPrefix = "rs://output/" + subject.userId() + "/";
         List<ArchiveEntry> entries = new ArrayList<>();
         for (TaskArtifactView artifact : detail.artifacts()) {
-            String value = artifact.uri().value();
-            if (!value.startsWith(uriPrefix)) {
-                throw new IllegalArgumentException("Artifact URI is not owned by the current user.");
-            }
-            String[] segments = value.substring(uriPrefix.length()).split("/", 2);
-            if (segments.length != 2 || !segments[0].matches("[A-Za-z0-9][A-Za-z0-9-]*")
-                || segments[1].isBlank() || segments[1].contains("\\")
-                || Path.of(segments[1]).isAbsolute() || Path.of(segments[1]).normalize().startsWith("..")) {
-                throw new IllegalArgumentException("Artifact URI is invalid.");
-            }
-            Path file = findArtifact(detail, artifact, segments[1]);
+            String relative = relativeFor(subject, artifact);
+            Path file = findArtifact(detail, artifact, relative);
             if (file == null) {
                 throw new IOException("Registered artifact file is unavailable.");
             }
-            entries.add(new ArchiveEntry(archiveName(segments[1], entries), file));
+            entries.add(new ArchiveEntry(archiveName(relative, entries), file));
         }
         if (entries.isEmpty()) {
             throw new IOException("Processing task has no downloadable artifacts.");
@@ -91,6 +85,31 @@ public final class LocalWorkerResultArchiveService {
         }
     }
 
+    public void writeArtifact(TaskDetailView detail, AccessSubject subject, String type,
+                              HttpServletResponse response) throws IOException {
+        if (type == null || type.isBlank()) {
+            throw new IllegalArgumentException("Artifact type is required.");
+        }
+        TaskArtifactView artifact = detail.artifacts().stream().filter(item -> type.equals(item.type()))
+            .reduce((first, second) -> {
+                throw new IllegalArgumentException("Artifact type is ambiguous for this processing task.");
+            }).orElseThrow(() -> new java.util.NoSuchElementException("Processing artifact not found."));
+        String relative = relativeFor(subject, artifact);
+        Path file = findArtifact(detail, artifact, relative);
+        if (file == null) {
+            throw new IOException("Registered artifact file is unavailable.");
+        }
+        response.setContentType(mediaType(relative));
+        response.setContentLengthLong(Files.size(file));
+        response.setHeader("Content-Disposition", "attachment; filename=\"" + Path.of(relative).getFileName() + "\"");
+        response.setHeader("Cache-Control", "private, no-store");
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setHeader("Referrer-Policy", "no-referrer");
+        response.setBufferSize(RESPONSE_BUFFER_SIZE);
+        response.flushBuffer();
+        Files.copy(file, response.getOutputStream());
+    }
+
     private Path cachedArchive(TaskDetailView detail, List<ArchiveEntry> entries) throws IOException {
         Path archive = workRoot.resolve("archives")
             .resolve(Long.toString(detail.id().value()))
@@ -109,6 +128,10 @@ public final class LocalWorkerResultArchiveService {
     }
 
     private Path findArtifact(TaskDetailView detail, TaskArtifactView artifact, String relative) throws IOException {
+        Path promoted = promotedArtifact(detail, artifact, relative);
+        if (promoted != null) {
+            return promoted;
+        }
         String executionId = detail.stages().stream()
             .filter(stage -> stage.id().equals(artifact.stageId()))
             .map(stage -> stage.executionId())
@@ -125,6 +148,60 @@ public final class LocalWorkerResultArchiveService {
             return file;
         }
         return null;
+    }
+
+    private Path promotedArtifact(TaskDetailView detail, TaskArtifactView artifact, String relative) throws IOException {
+        String storageKey = artifact.storageKey();
+        if (storageKey == null || storageKey.isBlank() || storageKey.startsWith("legacy/")) {
+            storageKey = inferredStorageKey(detail, artifact, relative);
+        }
+        if (!safeRelative(storageKey)) {
+            return null;
+        }
+        Path file = artifactRoot.resolve(storageKey).normalize();
+        if (file.startsWith(artifactRoot) && Files.isRegularFile(file)
+            && checksum(file).equalsIgnoreCase(artifact.checksum())) {
+            return file;
+        }
+        return null;
+    }
+
+    private static String inferredStorageKey(TaskDetailView detail, TaskArtifactView artifact, String relative) {
+        var stage = detail.stages().stream().filter(item -> item.id().equals(artifact.stageId())).findFirst();
+        if (stage.isEmpty()) {
+            return null;
+        }
+        if ("FINAL".equals(artifact.retention())) {
+            return detail.id().value() + "/output/" + relative;
+        }
+        return detail.id().value() + "/work/" + stage.get().stageKey() + "/" + stage.get().attempt() + "/" + relative;
+    }
+
+    private static String relativeFor(AccessSubject subject, TaskArtifactView artifact) {
+        String uriPrefix = "rs://output/" + subject.userId() + "/";
+        String value = artifact.uri().value();
+        if (!value.startsWith(uriPrefix)) {
+            throw new IllegalArgumentException("Artifact URI is not owned by the current user.");
+        }
+        String[] segments = value.substring(uriPrefix.length()).split("/", 2);
+        if (segments.length != 2 || !segments[0].matches("[A-Za-z0-9][A-Za-z0-9-]*") || !safeRelative(segments[1])) {
+            throw new IllegalArgumentException("Artifact URI is invalid.");
+        }
+        return segments[1];
+    }
+
+    private static boolean safeRelative(String value) {
+        return value != null && !value.isBlank() && value.indexOf('\\') < 0 && !Path.of(value).isAbsolute()
+            && !Path.of(value).normalize().startsWith("..");
+    }
+
+    private static String mediaType(String value) {
+        String lower = value.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".json")) return "application/json";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".tif") || lower.endsWith(".tiff")) return "image/tiff";
+        return "application/octet-stream";
     }
 
     private static String archiveName(String relative, List<ArchiveEntry> entries) {
