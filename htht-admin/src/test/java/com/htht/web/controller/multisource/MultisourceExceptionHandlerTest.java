@@ -85,4 +85,35 @@ class MultisourceExceptionHandlerTest {
         assertThat(response.getMsg()).doesNotContain("C:\\secret");
         assertThat(response.getMsg()).doesNotContain("stack detail");
     }
+
+    @Test
+    void returnsActionableArchiveUploadCompletionErrors() {
+        MultisourceExceptionHandler handler = new MultisourceExceptionHandler();
+        HttpServletRequest request = new MockHttpServletRequest(
+            "POST", "/api/multisource/archive-upload/sessions/upload-01/complete"
+        );
+
+        assertThat(handler.handleIllegalState(
+            new IllegalStateException("仍有分片未上传"), request
+        ).getMsg()).isEqualTo("ZIP 上传不完整，请重新上传");
+        assertThat(handler.handleIllegalState(
+            new IllegalStateException("分片合并失败"), request
+        ).getMsg()).isEqualTo("ZIP 分片合并失败，请重新上传");
+        assertThat(handler.handleIllegalState(
+            new IllegalStateException("解析任务繁忙，请稍后重试"), request
+        ).getMsg()).isEqualTo("解析任务繁忙，请稍后重试");
+    }
+
+    @Test
+    void keepsUnknownArchiveStateErrorsGeneric() {
+        MultisourceExceptionHandler handler = new MultisourceExceptionHandler();
+
+        R<Void> response = handler.handleIllegalState(
+            new IllegalStateException("merge path C:\\secret\\archive.zip failed"),
+            new MockHttpServletRequest("POST", "/api/multisource/archive-upload/sessions/upload-01/complete")
+        );
+
+        assertThat(response.getMsg()).isEqualTo("多源处理状态不可用，请重试");
+        assertThat(response.getMsg()).doesNotContain("C:\\secret");
+    }
 }

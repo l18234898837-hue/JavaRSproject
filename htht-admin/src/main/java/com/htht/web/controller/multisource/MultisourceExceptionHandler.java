@@ -16,6 +16,7 @@ import javax.servlet.http.HttpServletRequest;
 public final class MultisourceExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(MultisourceExceptionHandler.class);
+    private static final String ARCHIVE_UPLOAD_PATH = "/api/multisource/archive-upload";
     @ExceptionHandler(WorkerProtocolException.class)
     public R<Void> handleWorkerProtocolException(WorkerProtocolException error, HttpServletRequest request) {
         if (WorkerFailurePresentation.GF6_OUTPUT_LIMIT_EXCEEDED.equals(error.code())) {
@@ -44,13 +45,33 @@ public final class MultisourceExceptionHandler {
             return R.fail("预检会话已失效，请重新点击预检或开始处理");
         }
         String message = error.getMessage();
-        if (message != null && (message.contains("临时空间不足") || message.contains("解析任务繁忙")
-            || message.contains("解析服务正在停止"))) {
-            log.warn("请求地址'{}' 多源归档资源受限: {}", request.getRequestURI(), message);
-            return R.fail(message);
+        String archiveMessage = archiveUploadMessage(request, message);
+        if (archiveMessage != null) {
+            log.warn("请求地址'{}' 多源归档状态异常: {}", request.getRequestURI(), message);
+            return R.fail(archiveMessage);
         }
         log.error("请求地址'{}' 多源处理状态异常: {}", request.getRequestURI(), error.getMessage(), error);
         return R.fail("多源处理状态不可用，请重试");
+    }
+
+    private String archiveUploadMessage(HttpServletRequest request, String message) {
+        if (message == null || !request.getRequestURI().startsWith(ARCHIVE_UPLOAD_PATH)) {
+            return null;
+        }
+        if (message.contains("仍有分片未上传")) {
+            return "ZIP 上传不完整，请重新上传";
+        }
+        if (message.contains("分片合并失败")) {
+            return "ZIP 分片合并失败，请重新上传";
+        }
+        if (message.contains("上传会话已结束")) {
+            return "ZIP 上传已取消或会话已结束，请重新选择文件";
+        }
+        if (message.contains("临时空间不足") || message.contains("解析任务繁忙")
+            || message.contains("解析服务正在停止")) {
+            return message;
+        }
+        return null;
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
