@@ -3,6 +3,8 @@ package com.htht.web.controller.multisource;
 import com.htht.config.multisource.LocalWorkerResultArchiveService;
 import com.htht.config.multisource.MultiSourceWorkerProperties;
 import com.htht.config.multisource.ResultDownloadTicketService;
+import com.htht.config.multisource.ArtifactPreviewTicketService;
+import com.htht.config.multisource.ArtifactRasterPreviewService;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.DispatchNextStageUseCase;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
@@ -33,9 +35,11 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -102,6 +106,63 @@ class ProcessingExecutionControllerTest {
             assertThat(stage.attempt()).isEqualTo(1);
         });
         verify(details).get(TASK_ID, OWNER);
+    }
+
+    @Test
+    void tilePreviewIssuesOnlyAnOpaqueRelativeTileTemplate() {
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        var artifact = artifact("STANDARD_COG", "standard.tif");
+        var detail = new TaskDetailView(
+            TASK_ID, 33L, TaskLifecycleStatus.SUCCEEDED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-1", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of()))), List.of(),
+            List.of(new TaskStageView(STAGE_ID, "READ", StageExecutionStatus.SUCCEEDED, 1)), List.of(artifact)
+        );
+        when(details.get(TASK_ID, OWNER)).thenReturn(detail);
+        ArtifactRasterPreviewService rasterPreview = mock(ArtifactRasterPreviewService.class);
+        when(rasterPreview.describe(any(), any(), any(), org.mockito.ArgumentMatchers.eq("COG"))).thenReturn(
+            new ArtifactRasterPreviewService.RasterPreview(true, null, "EPSG:4326", List.of(110d, 30d, 111d, 31d),
+                0, 16, java.util.Map.of("kind", "rgb", "bands", List.of(1, 2, 3)), null)
+        );
+        ProcessingExecutionController controller = controllerWithRasterPreview(details, rasterPreview);
+
+        var response = controller.tilePreview(101L, "STANDARD_COG");
+
+        assertThat(response.getBody().getData().tileUrl()).contains("{z}/{x}/{y}.png?ticket=");
+        assertThat(response.getBody().getData().tileUrl()).doesNotContain("C:\\", "storageKey", "rs://");
+        assertThat(response.getBody().getData().bounds()).containsExactly(110d, 30d, 111d, 31d);
+        assertThat(response.getBody().getData().crs()).isEqualTo("EPSG:4326");
+    }
+
+    @Test
+    void tileRequiresItsMatchingTicketAndReturnsPngOnly() {
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        var artifact = artifact("STANDARD_COG", "standard.tif");
+        var detail = new TaskDetailView(
+            TASK_ID, 33L, TaskLifecycleStatus.SUCCEEDED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-1", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of()))), List.of(),
+            List.of(new TaskStageView(STAGE_ID, "READ", StageExecutionStatus.SUCCEEDED, 1)), List.of(artifact)
+        );
+        when(details.get(TASK_ID, OWNER)).thenReturn(detail);
+        ArtifactRasterPreviewService rasterPreview = mock(ArtifactRasterPreviewService.class);
+        var preview = new ArtifactRasterPreviewService.RasterPreview(true, null, "EPSG:4326", List.of(110d, 30d, 111d, 31d),
+            0, 16, java.util.Map.of("kind", "rgb"), null);
+        when(rasterPreview.describe(any(), any(), any(), org.mockito.ArgumentMatchers.eq("COG"))).thenReturn(preview);
+        when(rasterPreview.renderTile(any(), any(), any(), org.mockito.ArgumentMatchers.eq("COG"),
+            org.mockito.ArgumentMatchers.eq(preview), org.mockito.ArgumentMatchers.eq(4),
+            org.mockito.ArgumentMatchers.eq(13), org.mockito.ArgumentMatchers.eq(7))).thenReturn(new byte[] {1, 2, 3});
+        var tickets = new ArtifactPreviewTicketService();
+        ProcessingExecutionController controller = controllerWithRasterPreview(details, rasterPreview, tickets);
+        String ticket = tickets.issue(101L, OWNER, "STANDARD_COG", artifact.checksum()).token();
+
+        var response = controller.tile(101L, "STANDARD_COG", 4, 13, 7, ticket);
+
+        assertThat(response.getHeaders().getContentType()).isEqualTo(org.springframework.http.MediaType.IMAGE_PNG);
+        assertThat(response.getHeaders().getCacheControl()).isEqualTo("private, max-age=60");
+        assertThat(response.getBody()).containsExactly(1, 2, 3);
+        assertThatThrownBy(() -> controller.tile(101L, "STANDARD_COG", 4, 16, 7, ticket))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> controller.tile(101L, "STANDARD_COG", 4, 13, 7, "other"))
+            .isInstanceOf(SecurityException.class);
     }
 
     @Test
@@ -252,6 +313,25 @@ class ProcessingExecutionControllerTest {
         return new ProcessingExecutionController(() -> OWNER, details, mock(DispatchNextStageUseCase.class),
             mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class),
             new LocalWorkerResultArchiveService(properties), new ResultDownloadTicketService());
+    }
+
+    private ProcessingExecutionController controllerWithRasterPreview(GetTaskDetailUseCase details,
+                                                                       ArtifactRasterPreviewService rasterPreview) {
+        return controllerWithRasterPreview(details, rasterPreview, new ArtifactPreviewTicketService());
+    }
+
+    private ProcessingExecutionController controllerWithRasterPreview(GetTaskDetailUseCase details,
+                                                                       ArtifactRasterPreviewService rasterPreview,
+                                                                       ArtifactPreviewTicketService tickets) {
+        MultiSourceWorkerProperties properties = new MultiSourceWorkerProperties();
+        properties.setCommand(List.of("worker"));
+        properties.setWorkRoot(temporaryDirectory.resolve("raster-worker"));
+        properties.setArtifactRoot(temporaryDirectory.resolve("raster-artifacts"));
+        properties.setTimeout(Duration.ofMinutes(10));
+        return new ProcessingExecutionController(() -> OWNER, details, mock(DispatchNextStageUseCase.class),
+            mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class),
+            new LocalWorkerResultArchiveService(properties), new ResultDownloadTicketService(), null,
+            tickets, rasterPreview);
     }
 
     private TaskDetailView detailWithArtifact(Path source, String executionId) throws Exception {

@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.htht.multisource.application.port.out.model.StageExecutionRequest;
 import com.htht.multisource.application.port.out.model.ArtifactInspectionRequest;
+import com.htht.multisource.application.port.out.model.ArtifactRasterInspectionRequest;
+import com.htht.multisource.application.port.out.model.ArtifactRasterTileRequest;
 import com.htht.multisource.application.port.out.model.InspectionRequest;
 import com.htht.multisource.application.port.out.model.PlanRequest;
 
@@ -63,6 +65,22 @@ public final class WorkerContractCodec {
         return encodeEnvelope(requestId, WorkerOperation.INSPECT_ARTIFACT, payload);
     }
 
+    public String encodeRasterInspection(String requestId, ArtifactRasterInspectionRequest request) {
+        Objects.requireNonNull(request, "request");
+        ObjectNode payload = encodeRasterPayload(request);
+        return encodeEnvelope(requestId, WorkerOperation.INSPECT_RASTER_ARTIFACT, payload);
+    }
+
+    public String encodeRasterTile(String requestId, ArtifactRasterTileRequest request) {
+        Objects.requireNonNull(request, "request");
+        ObjectNode payload = encodeRasterPayload(request.raster());
+        payload.put("z", request.z());
+        payload.put("x", request.x());
+        payload.put("y", request.y());
+        payload.set("style", objectMapper.valueToTree(request.style()));
+        return encodeEnvelope(requestId, WorkerOperation.RENDER_ARTIFACT_TILE, payload);
+    }
+
     public String encodeBuildPlan(String requestId, PlanRequest request) {
         Objects.requireNonNull(request, "request");
         ObjectNode payload = objectMapper.createObjectNode();
@@ -79,6 +97,15 @@ public final class WorkerContractCodec {
         grant.put("grantReference", grantReference);
         grant.put("expiresAt", expiresAt);
         return grant;
+    }
+
+    private ObjectNode encodeRasterPayload(ArtifactRasterInspectionRequest request) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("format", request.format());
+        payload.put("artifactType", request.artifactType());
+        payload.set("inputs", objectMapper.valueToTree(java.util.List.of(request.artifact())));
+        payload.set("readGrant", encodeGrant(request.readGrant().grantReference(), request.readGrant().expiresAt().toString()));
+        return payload;
     }
 
     public DecodedWorkerResponse decodeResponse(String requestId, WorkerOperation expectedOperation, String responseJson) {

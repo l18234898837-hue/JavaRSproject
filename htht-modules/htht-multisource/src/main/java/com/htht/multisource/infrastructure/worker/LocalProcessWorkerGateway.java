@@ -5,6 +5,8 @@ import com.htht.multisource.application.port.out.ProductInspector;
 import com.htht.multisource.application.port.out.TaskDispatcher;
 import com.htht.multisource.application.port.out.model.DispatchReceipt;
 import com.htht.multisource.application.port.out.model.ArtifactInspectionRequest;
+import com.htht.multisource.application.port.out.model.ArtifactRasterInspectionRequest;
+import com.htht.multisource.application.port.out.model.ArtifactRasterTileRequest;
 import com.htht.multisource.application.port.out.model.InspectionRequest;
 import com.htht.multisource.application.port.out.model.InspectionResponse;
 import com.htht.multisource.application.port.out.model.PlanRequest;
@@ -63,6 +65,23 @@ public final class LocalProcessWorkerGateway implements ProductInspector, Proces
         String requestId = nextRequestId(WorkerOperation.INSPECT_ARTIFACT);
         return invoke(requestId, WorkerOperation.INSPECT_ARTIFACT, codec.encodeArtifactInspection(requestId, request),
             manifestWriter == null ? null : manifestWriter.write(requestId, request.readGrant(), java.util.List.of(request.artifact()))
+        ).payload();
+    }
+
+    public com.fasterxml.jackson.databind.JsonNode inspectRasterArtifact(ArtifactRasterInspectionRequest request) {
+        Objects.requireNonNull(request, "request");
+        String requestId = nextRequestId(WorkerOperation.INSPECT_RASTER_ARTIFACT);
+        return invoke(requestId, WorkerOperation.INSPECT_RASTER_ARTIFACT, codec.encodeRasterInspection(requestId, request),
+            manifestWriter == null ? null : manifestWriter.write(requestId, request.readGrant(), java.util.List.of(request.artifact()))
+        ).payload();
+    }
+
+    public com.fasterxml.jackson.databind.JsonNode renderArtifactTile(ArtifactRasterTileRequest request) {
+        Objects.requireNonNull(request, "request");
+        String requestId = nextRequestId(WorkerOperation.RENDER_ARTIFACT_TILE);
+        var raster = request.raster();
+        return invoke(requestId, WorkerOperation.RENDER_ARTIFACT_TILE, codec.encodeRasterTile(requestId, request),
+            manifestWriter == null ? null : manifestWriter.write(requestId, raster.readGrant(), java.util.List.of(raster.artifact()))
         ).payload();
     }
 

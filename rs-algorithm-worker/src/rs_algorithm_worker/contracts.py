@@ -93,6 +93,9 @@ def _request_uris(request: dict[str, Any]) -> list[str]:
     operation = request.get("operation")
     if operation in {"inspect", "inspect-artifact"}:
         inputs = payload.get("inputs")
+    elif operation in {"inspect-raster-artifact", "render-artifact-tile"}:
+        _validate_raster_payload(payload, operation)
+        inputs = payload.get("inputs")
     elif operation == "execute-stage":
         inputs = payload.get("inputs")
     elif operation == "build-plan":
@@ -119,6 +122,32 @@ def _request_uris(request: dict[str, Any]) -> list[str]:
             raise ProtocolError("request input storageUri is required")
         result.append(uri)
     return result
+
+
+def _validate_raster_payload(payload: dict[str, Any], operation: str) -> None:
+    allowed = {"format", "artifactType", "inputs", "readGrant"}
+    required = {"format", "artifactType", "inputs"}
+    if operation == "render-artifact-tile":
+        allowed |= {"z", "x", "y", "style"}
+        required |= {"z", "x", "y", "style"}
+    if set(payload) - allowed or not required.issubset(payload):
+        raise ProtocolError("raster preview payload is invalid")
+    if not isinstance(payload["format"], str) or not payload["format"].strip():
+        raise ProtocolError("raster preview format is invalid")
+    if not isinstance(payload["artifactType"], str) or not payload["artifactType"].strip():
+        raise ProtocolError("raster preview artifact type is invalid")
+    inputs = payload["inputs"]
+    if not isinstance(inputs, list) or len(inputs) != 1:
+        raise ProtocolError("raster preview requires exactly one input")
+    if operation == "render-artifact-tile":
+        if any(
+            isinstance(payload[key], bool) or not isinstance(payload[key], int)
+            for key in ("z", "x", "y")
+        ):
+            raise ProtocolError("raster preview tile coordinate is invalid")
+        style = payload["style"]
+        if not isinstance(style, dict) or not isinstance(style.get("kind"), str):
+            raise ProtocolError("raster preview style is invalid")
 
 
 def _parse_time(value: Any, label: str) -> datetime:

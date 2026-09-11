@@ -204,6 +204,8 @@ class LocalProcessWorkerGatewayTest {
             String operation = switch (invocation.operation()) {
                 case INSPECT -> "inspect";
                 case INSPECT_ARTIFACT -> "inspect-artifact";
+                case INSPECT_RASTER_ARTIFACT -> "inspect-raster-artifact";
+                case RENDER_ARTIFACT_TILE -> "render-artifact-tile";
                 case BUILD_PLAN -> "build-plan";
                 case EXECUTE_STAGE -> "execute-stage";
             };
@@ -215,6 +217,8 @@ class LocalProcessWorkerGatewayTest {
                     + "\"storageUriSnapshot\":{\"value\":\"rs://input/package-01.hdf\"},\"checksum\":\"sha256:package-01\",\"required\":true}],"
                     + "\"metadataSnapshot\":{},\"confidence\":0.91}]}";
                 case INSPECT_ARTIFACT -> "{\"format\":\"JSON\",\"kind\":\"table\",\"columns\":[],\"rowCount\":0,\"rows\":[]}";
+                case INSPECT_RASTER_ARTIFACT -> "{\"kind\":\"raster\",\"renderable\":true,\"reason\":null,\"crs\":\"EPSG:4326\",\"bounds\":[110,30,111,31],\"minZoom\":0,\"maxZoom\":16,\"style\":{\"kind\":\"rgb\"},\"legend\":null}";
+                case RENDER_ARTIFACT_TILE -> "{\"contentType\":\"image/png\",\"pngBase64\":\"iVBORw0KGgo=\"}";
                 case BUILD_PLAN -> "{\"version\":\"plan-v1\",\"stages\":["
                     + "{\"stageKey\":\"READ\",\"stageCode\":\"READ_SOURCE\",\"dependsOnStageKeys\":[]}] }";
                 case EXECUTE_STAGE -> "{\"workerId\":\"worker-local-01\",\"status\":\"SUCCEEDED\",\"artifacts\":[]}";

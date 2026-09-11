@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import base64
 from pathlib import Path
 from typing import Any
 
 from .artifact_inspection import inspect_artifact
+from .artifact_tiles import inspect_raster_artifact, render_raster_tile
 from .fy3h_mersi_pipeline import execute_fy3h_product, execute_fy3h_stage
 from .fy4b_agri_pipeline import execute_fy4b_product, execute_fy4b_stage
 from .gf6_wfv_pipeline import execute_gf6_product, execute_gf6_stage
@@ -38,6 +40,26 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
         if not isinstance(path, str):
             raise ValueError("authorized artifact path is required")
         return inspect_artifact(Path(path), artifact_format)
+    if operation == "inspect-raster-artifact":
+        payload = _payload(request)
+        path = _single_authorized_artifact_path(manifest)
+        return inspect_raster_artifact(
+            path, payload["format"], payload["artifactType"]
+        )
+    if operation == "render-artifact-tile":
+        payload = _payload(request)
+        path = _single_authorized_artifact_path(manifest)
+        png = render_raster_tile(
+            path,
+            z=payload["z"],
+            x=payload["x"],
+            y=payload["y"],
+            style=payload["style"],
+        )
+        return {
+            "contentType": "image/png",
+            "pngBase64": base64.b64encode(png).decode("ascii"),
+        }
     if operation == "build-plan":
         payload = _payload(request)
         selected = payload.get("candidate")
@@ -137,6 +159,16 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
             return _execute_gf_browse_stage(payload, manifest)
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": []}
     raise ValueError(f"unsupported operation: {operation}")
+
+
+def _single_authorized_artifact_path(manifest: dict[str, Any]) -> Path:
+    inputs = manifest.get("inputs")
+    if not isinstance(inputs, list) or len(inputs) != 1:
+        raise ValueError("exactly one authorized artifact is required")
+    path = inputs[0].get("path")
+    if not isinstance(path, str):
+        raise ValueError("authorized artifact path is required")
+    return Path(path)
 
 
 def _with_requested_plan_version(plan: dict[str, Any], requested_version: Any) -> dict[str, Any]:

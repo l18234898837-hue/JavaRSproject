@@ -4,6 +4,8 @@ import cn.dev33.satoken.annotation.SaIgnore;
 import com.htht.common.core.domain.R;
 import com.htht.config.multisource.LocalWorkerResultArchiveService;
 import com.htht.config.multisource.ArtifactInspectionService;
+import com.htht.config.multisource.ArtifactPreviewTicketService;
+import com.htht.config.multisource.ArtifactRasterPreviewService;
 import com.htht.config.multisource.ResultDownloadTicketService;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.DispatchNextStageUseCase;
@@ -15,10 +17,13 @@ import com.htht.multisource.domain.model.TaskId;
 import com.htht.multisource.infrastructure.worker.WorkerFailurePresentation;
 import com.htht.web.controller.multisource.dto.DispatchStageResponse;
 import com.htht.web.controller.multisource.dto.ExecutionProgressResponse;
+import com.htht.web.controller.multisource.dto.ArtifactTilePreviewResponse;
 import com.htht.web.controller.multisource.dto.ResultDownloadTicketRequest;
 import com.htht.web.controller.multisource.dto.ResultDownloadTicketResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -46,24 +51,8 @@ public class ProcessingExecutionController {
     private final LocalWorkerResultArchiveService resultArchiveService;
     private final ResultDownloadTicketService downloadTicketService;
     private final ArtifactInspectionService artifactInspectionService;
-
-    @Autowired
-    public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
-                                         DispatchNextStageUseCase dispatchUseCase,
-                                         CancelProcessingTaskUseCase cancelUseCase,
-                                         RetryFailedStageUseCase retryUseCase,
-                                         LocalWorkerResultArchiveService resultArchiveService,
-                                         ResultDownloadTicketService downloadTicketService,
-                                         ArtifactInspectionService artifactInspectionService) {
-        this.currentSubject = Objects.requireNonNull(currentSubject, "currentSubject");
-        this.detailUseCase = Objects.requireNonNull(detailUseCase, "detailUseCase");
-        this.dispatchUseCase = Objects.requireNonNull(dispatchUseCase, "dispatchUseCase");
-        this.cancelUseCase = Objects.requireNonNull(cancelUseCase, "cancelUseCase");
-        this.retryUseCase = Objects.requireNonNull(retryUseCase, "retryUseCase");
-        this.resultArchiveService = Objects.requireNonNull(resultArchiveService, "resultArchiveService");
-        this.downloadTicketService = Objects.requireNonNull(downloadTicketService, "downloadTicketService");
-        this.artifactInspectionService = artifactInspectionService;
-    }
+    private final ArtifactPreviewTicketService artifactPreviewTicketService;
+    private final ArtifactRasterPreviewService artifactRasterPreviewService;
 
     public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
                                          DispatchNextStageUseCase dispatchUseCase,
@@ -72,7 +61,29 @@ public class ProcessingExecutionController {
                                          LocalWorkerResultArchiveService resultArchiveService,
                                          ResultDownloadTicketService downloadTicketService) {
         this(currentSubject, detailUseCase, dispatchUseCase, cancelUseCase, retryUseCase,
-            resultArchiveService, downloadTicketService, null);
+            resultArchiveService, downloadTicketService, null, null, null);
+    }
+
+    @Autowired
+    public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
+                                         DispatchNextStageUseCase dispatchUseCase,
+                                         CancelProcessingTaskUseCase cancelUseCase,
+                                         RetryFailedStageUseCase retryUseCase,
+                                         LocalWorkerResultArchiveService resultArchiveService,
+                                         ResultDownloadTicketService downloadTicketService,
+                                         ArtifactInspectionService artifactInspectionService,
+                                         ArtifactPreviewTicketService artifactPreviewTicketService,
+                                         ArtifactRasterPreviewService artifactRasterPreviewService) {
+        this.currentSubject = Objects.requireNonNull(currentSubject, "currentSubject");
+        this.detailUseCase = Objects.requireNonNull(detailUseCase, "detailUseCase");
+        this.dispatchUseCase = Objects.requireNonNull(dispatchUseCase, "dispatchUseCase");
+        this.cancelUseCase = Objects.requireNonNull(cancelUseCase, "cancelUseCase");
+        this.retryUseCase = Objects.requireNonNull(retryUseCase, "retryUseCase");
+        this.resultArchiveService = Objects.requireNonNull(resultArchiveService, "resultArchiveService");
+        this.downloadTicketService = Objects.requireNonNull(downloadTicketService, "downloadTicketService");
+        this.artifactInspectionService = artifactInspectionService;
+        this.artifactPreviewTicketService = artifactPreviewTicketService;
+        this.artifactRasterPreviewService = artifactRasterPreviewService;
     }
 
     public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
@@ -87,6 +98,8 @@ public class ProcessingExecutionController {
         this.resultArchiveService = null;
         this.downloadTicketService = null;
         this.artifactInspectionService = null;
+        this.artifactPreviewTicketService = null;
+        this.artifactRasterPreviewService = null;
     }
 
     @PostMapping("/processing-tasks/{taskId}/dispatch")
@@ -257,6 +270,81 @@ public class ProcessingExecutionController {
             throw new IllegalArgumentException("Artifact format does not support inspection.");
         }
         return ResponseEntity.ok(R.ok(artifactInspectionService.inspect(detail, subject, artifact, format)));
+    }
+
+    @PostMapping("/processing-tasks/{taskId}/artifacts/{type}/tile-preview")
+    public ResponseEntity<R<ArtifactTilePreviewResponse>> tilePreview(@PathVariable long taskId,
+                                                                        @PathVariable String type) {
+        requireRasterPreviewService();
+        AccessSubject subject = currentSubject.get();
+        var detail = detailUseCase.get(TaskId.of(taskId), subject);
+        var artifact = artifactByType(detail, type);
+        String format = artifactFormat(artifact);
+        requireRasterFormat(format);
+        var preview = artifactRasterPreviewService.describe(detail, subject, artifact, format);
+        if (!preview.renderable()) {
+            throw new IllegalArgumentException(preview.reason() == null ? "TIFF 暂不支持地图查看" : preview.reason());
+        }
+        String ticket = artifactPreviewTicketService.issue(taskId, subject, artifact.type(), artifact.checksum()).token();
+        String encodedType = java.net.URLEncoder.encode(artifact.type(), java.nio.charset.StandardCharsets.UTF_8);
+        String encodedTicket = java.net.URLEncoder.encode(ticket, java.nio.charset.StandardCharsets.UTF_8);
+        String tileUrl = "/api/multisource/processing-tasks/" + taskId + "/artifacts/" + encodedType
+            + "/tiles/{z}/{x}/{y}.png?ticket=" + encodedTicket;
+        return ResponseEntity.ok(R.ok(new ArtifactTilePreviewResponse(tileUrl, preview.bounds(), preview.crs(),
+            preview.minZoom(), preview.maxZoom(), preview.legend())));
+    }
+
+    @SaIgnore
+    @GetMapping("/processing-tasks/{taskId}/artifacts/{type}/tiles/{z}/{x}/{y}.png")
+    public ResponseEntity<byte[]> tile(@PathVariable long taskId, @PathVariable String type,
+                                       @PathVariable int z, @PathVariable int x, @PathVariable int y,
+                                       @RequestParam("ticket") String ticket) {
+        requireRasterPreviewService();
+        validateTileCoordinate(z, x, y);
+        var grant = artifactPreviewTicketService.resolve(taskId, type, ticket);
+        var detail = detailUseCase.get(TaskId.of(taskId), grant.subject());
+        var artifact = artifactByType(detail, type);
+        if (!grant.checksum().equals(artifact.checksum())) {
+            throw new SecurityException("Artifact preview ticket is invalid or expired.");
+        }
+        String format = artifactFormat(artifact);
+        requireRasterFormat(format);
+        var preview = artifactRasterPreviewService.describe(detail, grant.subject(), artifact, format);
+        byte[] png = artifactRasterPreviewService.renderTile(detail, grant.subject(), artifact, format, preview, z, x, y);
+        return ResponseEntity.ok().contentType(MediaType.IMAGE_PNG)
+            .header(HttpHeaders.CACHE_CONTROL, "private, max-age=60")
+            .header("X-Content-Type-Options", "nosniff")
+            .body(png);
+    }
+
+    private void requireRasterPreviewService() {
+        if (artifactPreviewTicketService == null || artifactRasterPreviewService == null) {
+            throw new IllegalStateException("Raster preview service is not configured.");
+        }
+    }
+
+    private static void requireRasterFormat(String format) {
+        if (!"COG".equals(format) && !"GEOTIFF".equals(format)) {
+            throw new IllegalArgumentException("Artifact is not a TIFF raster.");
+        }
+    }
+
+    private static void validateTileCoordinate(int z, int x, int y) {
+        if (z < 0 || z > 22) {
+            throw new IllegalArgumentException("Raster tile coordinate is invalid.");
+        }
+        int dimension = 1 << z;
+        if (x < 0 || y < 0 || x >= dimension || y >= dimension) {
+            throw new IllegalArgumentException("Raster tile coordinate is invalid.");
+        }
+    }
+
+    private static com.htht.multisource.application.usecase.model.TaskArtifactView artifactByType(
+        com.htht.multisource.application.usecase.model.TaskDetailView detail, String type
+    ) {
+        return detail.artifacts().stream().filter(item -> type.equals(item.type())).reduce((first, second) -> {
+            throw new IllegalArgumentException("Artifact type is ambiguous for this processing task.");
+        }).orElseThrow(() -> new java.util.NoSuchElementException("Processing artifact not found."));
     }
 
     @PostMapping("/processing-tasks/{taskId}/result-download-ticket")

@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.htht.multisource.application.port.out.model.ExecutionGrant;
 import com.htht.multisource.application.port.out.model.AssetAccessGrant;
 import com.htht.multisource.application.port.out.model.ArtifactInspectionRequest;
+import com.htht.multisource.application.port.out.model.ArtifactRasterInspectionRequest;
+import com.htht.multisource.application.port.out.model.ArtifactRasterTileRequest;
 import com.htht.multisource.application.port.out.model.InspectionRequest;
 import com.htht.multisource.application.port.out.model.PlanRequest;
 import com.htht.multisource.application.port.out.model.StageExecutionRequest;
@@ -86,6 +88,26 @@ class WorkerContractCodecTest {
         assertThat(root.path("payload").path("format").asText()).isEqualTo("PARQUET");
         assertThat(root.path("payload").path("inputs")).hasSize(1);
         assertThat(root.path("payload").path("readGrant").path("grantReference").asText()).isEqualTo("read-01");
+    }
+
+    @Test
+    void encodesSingleAuthorizedRasterInspectionAndTileRequests() throws Exception {
+        var raster = new ArtifactRasterInspectionRequest(
+            "COG", "STANDARD_COG", asset(), new AssetAccessGrant("read-01", Instant.parse("2026-08-20T00:00:00Z"))
+        );
+
+        JsonNode inspection = objectMapper.readTree(codec.encodeRasterInspection("req-raster", raster));
+        JsonNode tile = objectMapper.readTree(codec.encodeRasterTile("req-tile", new ArtifactRasterTileRequest(
+            raster, 8, 206, 104, java.util.Map.of("kind", "rgb", "bands", java.util.List.of(1, 2, 3))
+        )));
+
+        assertThat(inspection.path("operation").asText()).isEqualTo("inspect-raster-artifact");
+        assertThat(inspection.at("/payload/format").asText()).isEqualTo("COG");
+        assertThat(inspection.at("/payload/artifactType").asText()).isEqualTo("STANDARD_COG");
+        assertThat(inspection.at("/payload/inputs")).hasSize(1);
+        assertThat(tile.path("operation").asText()).isEqualTo("render-artifact-tile");
+        assertThat(tile.at("/payload/z").asInt()).isEqualTo(8);
+        assertThat(tile.at("/payload/style/kind").asText()).isEqualTo("rgb");
     }
 
     @Test

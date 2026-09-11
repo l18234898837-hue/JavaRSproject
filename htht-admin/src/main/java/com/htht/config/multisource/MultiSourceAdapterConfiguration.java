@@ -226,6 +226,12 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
+    public ArtifactRasterPreviewService artifactRasterPreviewService(ArtifactInspectionService inspectionService,
+                                                                     ObjectMapper objectMapper) {
+        return new WorkerArtifactRasterPreviewService(inspectionService, objectMapper);
+    }
+
+    @Bean
     public PreflightSessionStore multisourcePreflightSessionStore() {
         return new InMemoryPreflightSessionStore(Clock.systemUTC(), Duration.ofMinutes(30), () -> UUID.randomUUID().toString());
     }
