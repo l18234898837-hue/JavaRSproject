@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.htht.multisource.application.port.out.model.StageExecutionRequest;
+import com.htht.multisource.application.port.out.model.ArtifactInspectionRequest;
 import com.htht.multisource.application.port.out.model.InspectionRequest;
 import com.htht.multisource.application.port.out.model.PlanRequest;
 
@@ -51,6 +52,15 @@ public final class WorkerContractCodec {
         payload.set("inputs", objectMapper.valueToTree(request.inputs()));
         payload.set("readGrant", encodeGrant(request.readGrant().grantReference(), request.readGrant().expiresAt().toString()));
         return encodeEnvelope(requestId, WorkerOperation.INSPECT, payload);
+    }
+
+    public String encodeArtifactInspection(String requestId, ArtifactInspectionRequest request) {
+        Objects.requireNonNull(request, "request");
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("format", request.format());
+        payload.set("inputs", objectMapper.valueToTree(java.util.List.of(request.artifact())));
+        payload.set("readGrant", encodeGrant(request.readGrant().grantReference(), request.readGrant().expiresAt().toString()));
+        return encodeEnvelope(requestId, WorkerOperation.INSPECT_ARTIFACT, payload);
     }
 
     public String encodeBuildPlan(String requestId, PlanRequest request) {

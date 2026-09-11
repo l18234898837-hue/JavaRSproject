@@ -220,6 +220,12 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
+    public ArtifactInspectionService artifactInspectionService(LocalProcessWorkerGateway workerGateway,
+                                                               CompositeLocalWorkerAssetResolver assetStorage) {
+        return new ArtifactInspectionService(workerGateway, assetStorage);
+    }
+
+    @Bean
     public PreflightSessionStore multisourcePreflightSessionStore() {
         return new InMemoryPreflightSessionStore(Clock.systemUTC(), Duration.ofMinutes(30), () -> UUID.randomUUID().toString());
     }

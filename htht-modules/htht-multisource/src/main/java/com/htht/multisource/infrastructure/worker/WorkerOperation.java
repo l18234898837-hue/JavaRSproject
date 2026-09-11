@@ -5,6 +5,7 @@ import java.util.Arrays;
 public enum WorkerOperation {
 
     INSPECT("inspect"),
+    INSPECT_ARTIFACT("inspect-artifact"),
     BUILD_PLAN("build-plan"),
     EXECUTE_STAGE("execute-stage");
 

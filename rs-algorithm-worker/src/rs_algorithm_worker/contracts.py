@@ -91,7 +91,7 @@ def _request_uris(request: dict[str, Any]) -> list[str]:
     payload = request.get("payload")
     _require_object(payload, "request payload")
     operation = request.get("operation")
-    if operation == "inspect":
+    if operation in {"inspect", "inspect-artifact"}:
         inputs = payload.get("inputs")
     elif operation == "execute-stage":
         inputs = payload.get("inputs")

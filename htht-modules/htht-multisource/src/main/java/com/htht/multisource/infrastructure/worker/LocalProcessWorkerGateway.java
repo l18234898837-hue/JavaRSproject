@@ -4,6 +4,7 @@ import com.htht.multisource.application.port.out.ProcessingPlanner;
 import com.htht.multisource.application.port.out.ProductInspector;
 import com.htht.multisource.application.port.out.TaskDispatcher;
 import com.htht.multisource.application.port.out.model.DispatchReceipt;
+import com.htht.multisource.application.port.out.model.ArtifactInspectionRequest;
 import com.htht.multisource.application.port.out.model.InspectionRequest;
 import com.htht.multisource.application.port.out.model.InspectionResponse;
 import com.htht.multisource.application.port.out.model.PlanRequest;
@@ -55,6 +56,14 @@ public final class LocalProcessWorkerGateway implements ProductInspector, Proces
         String requestId = nextRequestId(WorkerOperation.INSPECT);
         return translator.toInspection(invoke(requestId, WorkerOperation.INSPECT, codec.encodeInspect(requestId, request),
             manifestWriter == null ? null : manifestWriter.write(requestId, request.readGrant(), request.inputs())));
+    }
+
+    public com.fasterxml.jackson.databind.JsonNode inspectArtifact(ArtifactInspectionRequest request) {
+        Objects.requireNonNull(request, "request");
+        String requestId = nextRequestId(WorkerOperation.INSPECT_ARTIFACT);
+        return invoke(requestId, WorkerOperation.INSPECT_ARTIFACT, codec.encodeArtifactInspection(requestId, request),
+            manifestWriter == null ? null : manifestWriter.write(requestId, request.readGrant(), java.util.List.of(request.artifact()))
+        ).payload();
     }
 
     @Override

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.htht.multisource.application.port.out.model.ExecutionGrant;
 import com.htht.multisource.application.port.out.model.AssetAccessGrant;
+import com.htht.multisource.application.port.out.model.ArtifactInspectionRequest;
 import com.htht.multisource.application.port.out.model.InspectionRequest;
 import com.htht.multisource.application.port.out.model.PlanRequest;
 import com.htht.multisource.application.port.out.model.StageExecutionRequest;
@@ -73,6 +74,18 @@ class WorkerContractCodecTest {
         assertThat(root.path("payload").path("inputs")).hasSize(1);
         assertThat(root.path("payload").path("readGrant").path("grantReference").asText())
             .isEqualTo("read-01");
+    }
+
+    @Test
+    void encodesSingleAuthorizedArtifactInspectionRequest() throws Exception {
+        JsonNode root = objectMapper.readTree(codec.encodeArtifactInspection("req-artifact", new ArtifactInspectionRequest(
+            "PARQUET", asset(), new AssetAccessGrant("read-01", Instant.parse("2026-08-20T00:00:00Z"))
+        )));
+
+        assertThat(root.path("operation").asText()).isEqualTo("inspect-artifact");
+        assertThat(root.path("payload").path("format").asText()).isEqualTo("PARQUET");
+        assertThat(root.path("payload").path("inputs")).hasSize(1);
+        assertThat(root.path("payload").path("readGrant").path("grantReference").asText()).isEqualTo("read-01");
     }
 
     @Test

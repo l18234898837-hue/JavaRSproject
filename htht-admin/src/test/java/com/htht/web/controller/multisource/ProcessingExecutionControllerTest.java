@@ -105,6 +105,60 @@ class ProcessingExecutionControllerTest {
     }
 
     @Test
+    void progressMarksOnlySupportedImageAndTextArtifactsAsPreviewable() {
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        when(details.get(TASK_ID, OWNER)).thenReturn(new TaskDetailView(
+            TASK_ID, 33L, TaskLifecycleStatus.SUCCEEDED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-1", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of()))), List.of(),
+            List.of(new TaskStageView(STAGE_ID, "READ", StageExecutionStatus.SUCCEEDED, 1)),
+            List.of(
+                artifact("PROCESSING_SUMMARY_JSON", "summary.json"),
+                artifact("MAP_PREVIEW_PNG", "preview.png"),
+                artifact("TRACK_GEOJSON", "track.geojson"),
+                artifact("STANDARD_COG", "standard.tif"),
+                artifact("STANDARD_TRACK_NETCDF", "track.nc"),
+                artifact("STANDARD_TRACK_PARQUET", "track.parquet"),
+                artifact("DECODED_CZI_RASTER", "decoded/czi.npz")
+            )
+        ));
+        ProcessingExecutionController controller = controller(details, mock(DispatchNextStageUseCase.class),
+            mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class));
+
+        var artifacts = controller.progress(101L).getBody().getData().artifacts();
+
+        assertThat(artifacts).extracting(artifact -> artifact.type(), artifact -> artifact.previewable())
+            .containsExactly(
+                org.assertj.core.groups.Tuple.tuple("PROCESSING_SUMMARY_JSON", true),
+                org.assertj.core.groups.Tuple.tuple("MAP_PREVIEW_PNG", true),
+                org.assertj.core.groups.Tuple.tuple("TRACK_GEOJSON", true),
+                org.assertj.core.groups.Tuple.tuple("STANDARD_COG", false),
+                org.assertj.core.groups.Tuple.tuple("STANDARD_TRACK_NETCDF", false),
+                org.assertj.core.groups.Tuple.tuple("STANDARD_TRACK_PARQUET", false),
+                org.assertj.core.groups.Tuple.tuple("DECODED_CZI_RASTER", false)
+            );
+        assertThat(artifacts).filteredOn(artifact -> artifact.type().equals("TRACK_GEOJSON"))
+            .singleElement().satisfies(artifact -> assertThat(artifact.mediaType()).isEqualTo("application/geo+json"));
+        assertThat(artifacts).filteredOn(artifact -> artifact.type().equals("STANDARD_COG"))
+            .singleElement().satisfies(artifact -> {
+                assertThat(artifact.format()).isEqualTo("COG");
+                assertThat(artifact.view().enabled()).isTrue();
+                assertThat(artifact.view().mode()).isEqualTo("map");
+            });
+        assertThat(artifacts).filteredOn(artifact -> artifact.type().equals("TRACK_GEOJSON"))
+            .singleElement().satisfies(artifact -> assertThat(artifact.view().mode()).isEqualTo("map"));
+        assertThat(artifacts).filteredOn(artifact -> artifact.type().equals("STANDARD_TRACK_NETCDF"))
+            .singleElement().satisfies(artifact -> assertThat(artifact.view().mode()).isEqualTo("dataset"));
+        assertThat(artifacts).filteredOn(artifact -> artifact.type().equals("STANDARD_TRACK_PARQUET"))
+            .singleElement().satisfies(artifact -> assertThat(artifact.view().mode()).isEqualTo("dataset"));
+        assertThat(artifacts).filteredOn(artifact -> artifact.type().equals("DECODED_CZI_RASTER"))
+            .singleElement().satisfies(artifact -> {
+                assertThat(artifact.format()).isEqualTo("NPZ");
+                assertThat(artifact.view().enabled()).isFalse();
+                assertThat(artifact.view().reason()).isEqualTo("NPZ 二进制中间数据暂不支持在线查看");
+            });
+    }
+
+    @Test
     void progressReturnsActionableStageFailureDetails() {
         GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
         when(details.get(TASK_ID, OWNER)).thenReturn(new TaskDetailView(
@@ -208,6 +262,11 @@ class ProcessingExecutionControllerTest {
             List.of(new TaskArtifactView(STAGE_ID, "HY1C_INPUT_VALIDATION_JSON",
                 new StorageUri("rs://output/7/task-01/validation/source.json"), checksum(source), Files.size(source),
                 "INTERMEDIATE")));
+    }
+
+    private TaskArtifactView artifact(String type, String fileName) {
+        return new TaskArtifactView(STAGE_ID, type,
+            new StorageUri("rs://output/7/task-01/" + fileName), "sha256:test", 32L, "INTERMEDIATE");
     }
 
     private static String checksum(Path path) throws Exception {

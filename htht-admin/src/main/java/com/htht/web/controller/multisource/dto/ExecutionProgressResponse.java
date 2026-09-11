@@ -22,9 +22,20 @@ public record ExecutionProgressResponse(
 
     public record ArtifactProgressResponse(long stageId, String type, String uri, String checksum,
                                            long sizeBytes, String retention, boolean downloadable,
-                                           String mediaType, boolean previewable, String displayName) {
+                                           String mediaType, boolean previewable, String displayName,
+                                           ArtifactVisualizationResponse visualization, String format,
+                                           ArtifactViewResponse view) {
         public ArtifactProgressResponse(long stageId, String type, String uri, String checksum) {
-            this(stageId, type, uri, checksum, 0L, null, true, null, false, null);
+            this(stageId, type, uri, checksum, 0L, null, true, null, false, null, null, null, null);
         }
     }
+
+    public record ArtifactVisualizationResponse(
+        String kind, String tileUrl, List<Double> bounds, String crs,
+        Integer minZoom, Integer maxZoom, Object legend
+    ) {}
+
+    public record ArtifactViewResponse(
+        boolean enabled, String mode, String reason, String inspectionUrl
+    ) {}
 }

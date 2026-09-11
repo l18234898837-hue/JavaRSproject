@@ -197,9 +197,15 @@ public final class LocalWorkerResultArchiveService {
 
     private static String mediaType(String value) {
         String lower = value.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".geojson")) return "application/geo+json";
         if (lower.endsWith(".json")) return "application/json";
         if (lower.endsWith(".png")) return "image/png";
         if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".csv")) return "text/csv";
+        if (lower.endsWith(".xml")) return "application/xml";
+        if (lower.endsWith(".txt") || lower.endsWith(".log")) return "text/plain";
         if (lower.endsWith(".tif") || lower.endsWith(".tiff")) return "image/tiff";
         return "application/octet-stream";
     }

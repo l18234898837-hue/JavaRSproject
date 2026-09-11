@@ -203,6 +203,7 @@ class LocalProcessWorkerGatewayTest {
             invocations.add(invocation);
             String operation = switch (invocation.operation()) {
                 case INSPECT -> "inspect";
+                case INSPECT_ARTIFACT -> "inspect-artifact";
                 case BUILD_PLAN -> "build-plan";
                 case EXECUTE_STAGE -> "execute-stage";
             };
@@ -213,6 +214,7 @@ class LocalProcessWorkerGatewayTest {
                     + "{\"role\":\"MAIN\",\"ordinal\":0,\"reference\":{\"sourceType\":\"LOCAL_FILE\",\"sourceId\":\"package-01.hdf\"},"
                     + "\"storageUriSnapshot\":{\"value\":\"rs://input/package-01.hdf\"},\"checksum\":\"sha256:package-01\",\"required\":true}],"
                     + "\"metadataSnapshot\":{},\"confidence\":0.91}]}";
+                case INSPECT_ARTIFACT -> "{\"format\":\"JSON\",\"kind\":\"table\",\"columns\":[],\"rowCount\":0,\"rows\":[]}";
                 case BUILD_PLAN -> "{\"version\":\"plan-v1\",\"stages\":["
                     + "{\"stageKey\":\"READ\",\"stageCode\":\"READ_SOURCE\",\"dependsOnStageKeys\":[]}] }";
                 case EXECUTE_STAGE -> "{\"workerId\":\"worker-local-01\",\"status\":\"SUCCEEDED\",\"artifacts\":[]}";

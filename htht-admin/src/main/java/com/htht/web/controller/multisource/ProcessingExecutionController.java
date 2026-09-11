@@ -3,6 +3,7 @@ package com.htht.web.controller.multisource;
 import cn.dev33.satoken.annotation.SaIgnore;
 import com.htht.common.core.domain.R;
 import com.htht.config.multisource.LocalWorkerResultArchiveService;
+import com.htht.config.multisource.ArtifactInspectionService;
 import com.htht.config.multisource.ResultDownloadTicketService;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.DispatchNextStageUseCase;
@@ -44,6 +45,7 @@ public class ProcessingExecutionController {
     private final RetryFailedStageUseCase retryUseCase;
     private final LocalWorkerResultArchiveService resultArchiveService;
     private final ResultDownloadTicketService downloadTicketService;
+    private final ArtifactInspectionService artifactInspectionService;
 
     @Autowired
     public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
@@ -51,7 +53,8 @@ public class ProcessingExecutionController {
                                          CancelProcessingTaskUseCase cancelUseCase,
                                          RetryFailedStageUseCase retryUseCase,
                                          LocalWorkerResultArchiveService resultArchiveService,
-                                         ResultDownloadTicketService downloadTicketService) {
+                                         ResultDownloadTicketService downloadTicketService,
+                                         ArtifactInspectionService artifactInspectionService) {
         this.currentSubject = Objects.requireNonNull(currentSubject, "currentSubject");
         this.detailUseCase = Objects.requireNonNull(detailUseCase, "detailUseCase");
         this.dispatchUseCase = Objects.requireNonNull(dispatchUseCase, "dispatchUseCase");
@@ -59,6 +62,17 @@ public class ProcessingExecutionController {
         this.retryUseCase = Objects.requireNonNull(retryUseCase, "retryUseCase");
         this.resultArchiveService = Objects.requireNonNull(resultArchiveService, "resultArchiveService");
         this.downloadTicketService = Objects.requireNonNull(downloadTicketService, "downloadTicketService");
+        this.artifactInspectionService = artifactInspectionService;
+    }
+
+    public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
+                                         DispatchNextStageUseCase dispatchUseCase,
+                                         CancelProcessingTaskUseCase cancelUseCase,
+                                         RetryFailedStageUseCase retryUseCase,
+                                         LocalWorkerResultArchiveService resultArchiveService,
+                                         ResultDownloadTicketService downloadTicketService) {
+        this(currentSubject, detailUseCase, dispatchUseCase, cancelUseCase, retryUseCase,
+            resultArchiveService, downloadTicketService, null);
     }
 
     public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
@@ -72,6 +86,7 @@ public class ProcessingExecutionController {
         this.retryUseCase = Objects.requireNonNull(retryUseCase, "retryUseCase");
         this.resultArchiveService = null;
         this.downloadTicketService = null;
+        this.artifactInspectionService = null;
     }
 
     @PostMapping("/processing-tasks/{taskId}/dispatch")
@@ -114,10 +129,14 @@ public class ProcessingExecutionController {
                     stage.stageKey(), declaredOutputs(detail.plan().stages(), stage.stageKey())
                 );
             }).toList(),
-            detail.artifacts().stream().map(artifact -> new ExecutionProgressResponse.ArtifactProgressResponse(
-                artifact.stageId().value(), artifact.type(), artifact.uri().value(), artifact.checksum(), artifact.sizeBytes(),
-                artifact.retention(), true, mediaType(artifact.type()), previewable(artifact.type()), displayName(artifact)
-            )).toList()
+            detail.artifacts().stream().map(artifact -> {
+                String format = artifactFormat(artifact);
+                return new ExecutionProgressResponse.ArtifactProgressResponse(
+                    artifact.stageId().value(), artifact.type(), artifact.uri().value(), artifact.checksum(), artifact.sizeBytes(),
+                    artifact.retention(), true, mediaType(format), previewable(format), displayName(artifact), null,
+                    format, artifactView(taskId, artifact, format)
+                );
+            }).toList()
         )));
     }
 
@@ -136,18 +155,79 @@ public class ProcessingExecutionController {
         return slash >= 0 && slash + 1 < value.length() ? value.substring(slash + 1) : artifact.type();
     }
 
-    private static String mediaType(String type) {
-        String upper = type.toUpperCase(java.util.Locale.ROOT);
-        if (upper.contains("JSON") || upper.contains("SUMMARY")) return "application/json";
-        if (upper.contains("PNG")) return "image/png";
-        if (upper.contains("JPEG") || upper.contains("JPG")) return "image/jpeg";
-        if (upper.contains("COG") || upper.contains("TIFF")) return "image/tiff";
+    private static String artifactFormat(com.htht.multisource.application.usecase.model.TaskArtifactView artifact) {
+        String fileName = displayName(artifact).toLowerCase(java.util.Locale.ROOT);
+        String type = artifact.type().toUpperCase(java.util.Locale.ROOT);
+        if (fileName.endsWith(".geojson") || type.contains("GEOJSON")) return "GEOJSON";
+        if (fileName.endsWith(".csv")) return "CSV";
+        if (fileName.endsWith(".nc")) return "NETCDF";
+        if (fileName.endsWith(".parquet")) return "PARQUET";
+        if (fileName.endsWith(".json")) return "JSON";
+        if (fileName.endsWith(".png")) return "PNG";
+        if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) return "JPEG";
+        if (fileName.endsWith(".webp")) return "WEBP";
+        if (fileName.endsWith(".gif")) return "GIF";
+        if (fileName.endsWith(".xml")) return "XML";
+        if (fileName.endsWith(".txt") || fileName.endsWith(".log")) return "TEXT";
+        if (fileName.endsWith(".npz")) return "NPZ";
+        if (fileName.endsWith(".tif") || fileName.endsWith(".tiff")) {
+            return type.contains("COG") ? "COG" : "GEOTIFF";
+        }
+        return "BINARY";
+    }
+
+    private static String mediaType(String format) {
+        if ("GEOJSON".equals(format)) return "application/geo+json";
+        if ("JSON".equals(format)) return "application/json";
+        if ("PNG".equals(format)) return "image/png";
+        if ("JPEG".equals(format)) return "image/jpeg";
+        if ("WEBP".equals(format)) return "image/webp";
+        if ("GIF".equals(format)) return "image/gif";
+        if ("CSV".equals(format)) return "text/csv";
+        if ("XML".equals(format)) return "application/xml";
+        if ("TEXT".equals(format)) return "text/plain";
+        if ("COG".equals(format) || "GEOTIFF".equals(format)) return "image/tiff";
+        if ("NETCDF".equals(format)) return "application/x-netcdf";
+        if ("PARQUET".equals(format)) return "application/vnd.apache.parquet";
         return "application/octet-stream";
     }
 
-    private static boolean previewable(String type) {
-        String media = mediaType(type);
-        return media.startsWith("image/") || "application/json".equals(media);
+    private static boolean previewable(String format) {
+        String media = mediaType(format);
+        return "image/png".equals(media) || "image/jpeg".equals(media)
+            || "image/webp".equals(media) || "image/gif".equals(media)
+            || "application/json".equals(media) || "application/geo+json".equals(media)
+            || "text/csv".equals(media)
+            || "application/xml".equals(media) || "text/plain".equals(media);
+    }
+
+    private static ExecutionProgressResponse.ArtifactViewResponse artifactView(
+        long taskId, com.htht.multisource.application.usecase.model.TaskArtifactView artifact, String format
+    ) {
+        String mode = switch (format) {
+            case "COG", "GEOTIFF", "GEOJSON" -> "map";
+            case "PNG", "JPEG", "WEBP", "GIF" -> "image";
+            case "JSON" -> "json";
+            case "CSV" -> "table";
+            case "NETCDF", "PARQUET" -> "dataset";
+            case "XML", "TEXT" -> "text";
+            default -> "disabled";
+        };
+        if ("NPZ".equals(format)) {
+            return new ExecutionProgressResponse.ArtifactViewResponse(
+                false, "disabled", "NPZ 二进制中间数据暂不支持在线查看", null
+            );
+        }
+        if ("BINARY".equals(format)) {
+            return new ExecutionProgressResponse.ArtifactViewResponse(
+                false, "disabled", "该二进制产物暂不支持在线查看", null
+            );
+        }
+        return new ExecutionProgressResponse.ArtifactViewResponse(
+            true, mode, null,
+            "/api/multisource/processing-tasks/" + taskId + "/artifacts/"
+                + java.net.URLEncoder.encode(artifact.type(), java.nio.charset.StandardCharsets.UTF_8) + "/inspection"
+        );
     }
 
     @GetMapping("/processing-tasks/{taskId}/artifacts/{type}/download")
@@ -159,6 +239,24 @@ public class ProcessingExecutionController {
         AccessSubject subject = currentSubject.get();
         var detail = detailUseCase.get(TaskId.of(taskId), subject);
         resultArchiveService.writeArtifact(detail, subject, type, response);
+    }
+
+    @GetMapping("/processing-tasks/{taskId}/artifacts/{type}/inspection")
+    public ResponseEntity<R<com.fasterxml.jackson.databind.JsonNode>> inspectArtifact(@PathVariable long taskId,
+                                                                                       @PathVariable String type) {
+        if (artifactInspectionService == null) {
+            throw new IllegalStateException("Artifact inspection service is not configured.");
+        }
+        AccessSubject subject = currentSubject.get();
+        var detail = detailUseCase.get(TaskId.of(taskId), subject);
+        var artifact = detail.artifacts().stream().filter(item -> type.equals(item.type())).reduce((first, second) -> {
+            throw new IllegalArgumentException("Artifact type is ambiguous for this processing task.");
+        }).orElseThrow(() -> new java.util.NoSuchElementException("Processing artifact not found."));
+        String format = artifactFormat(artifact);
+        if (!artifactView(taskId, artifact, format).enabled()) {
+            throw new IllegalArgumentException("Artifact format does not support inspection.");
+        }
+        return ResponseEntity.ok(R.ok(artifactInspectionService.inspect(detail, subject, artifact, format)));
     }
 
     @PostMapping("/processing-tasks/{taskId}/result-download-ticket")

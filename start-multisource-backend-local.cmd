@@ -22,6 +22,7 @@ if not exist "%MULTISOURCE_WORK_ROOT%" mkdir "%MULTISOURCE_WORK_ROOT%"
 if not exist "%MULTISOURCE_ARTIFACT_ROOT%" mkdir "%MULTISOURCE_ARTIFACT_ROOT%"
 if not exist "%PROJECT_ROOT%\runtime-tmp" mkdir "%PROJECT_ROOT%\runtime-tmp"
 
+rem The assembled JAR is a Spring Boot executable archive with classes under BOOT-INF.
 java -Djava.io.tmpdir="%PROJECT_ROOT%\runtime-tmp" -jar "%BACKEND_ROOT%\htht-admin\target\htht-admin.jar" ^
   --spring.profiles.active=dev ^
   --spring.flyway.out-of-order=true ^

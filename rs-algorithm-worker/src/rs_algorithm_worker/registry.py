@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .artifact_inspection import inspect_artifact
 from .fy3h_mersi_pipeline import execute_fy3h_product, execute_fy3h_stage
 from .fy4b_agri_pipeline import execute_fy4b_product, execute_fy4b_stage
 from .gf6_wfv_pipeline import execute_gf6_product, execute_gf6_stage
@@ -25,6 +26,18 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
         candidates = adapter.inspect_manifest(manifest)
         return {"rulePackageVersion": "rules-2026.08",
                 "candidates": [_to_response_candidate(item, manifest) for item in candidates]}
+    if operation == "inspect-artifact":
+        payload = _payload(request)
+        artifact_format = payload.get("format")
+        inputs = manifest.get("inputs")
+        if not isinstance(artifact_format, str) or not artifact_format:
+            raise ValueError("artifact format is required")
+        if not isinstance(inputs, list) or len(inputs) != 1:
+            raise ValueError("exactly one authorized artifact is required")
+        path = inputs[0].get("path")
+        if not isinstance(path, str):
+            raise ValueError("authorized artifact path is required")
+        return inspect_artifact(Path(path), artifact_format)
     if operation == "build-plan":
         payload = _payload(request)
         selected = payload.get("candidate")
