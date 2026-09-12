@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 import java.util.function.LongSupplier;
 
@@ -162,7 +163,9 @@ public class ArchiveUploadService {
     }
 
     private void parse(ArchiveUploadSession s, Path archive) {
-        try (ZipInputStream zin = new ZipInputStream(Files.newInputStream(archive))) {
+        try {
+            preflightArchiveCompatibility(s, archive);
+            try (ZipInputStream zin = new ZipInputStream(Files.newInputStream(archive))) {
             int count = 0; long expanded = 0; byte[] buffer = new byte[8192]; ZipEntry entry;
             while ((entry = zin.getNextEntry()) != null) {
                 if (s.cancelRequested.get()) { s.status = ArchiveUploadStatus.CANCELED; return; }
@@ -181,6 +184,7 @@ public class ArchiveUploadService {
             s.totalFiles = count; s.currentFile = null;
             matchAndRegister(s);
             s.status = ArchiveUploadStatus.COMPLETED;
+            }
         } catch (Exception e) { s.status = s.cancelRequested.get() ? ArchiveUploadStatus.CANCELED : ArchiveUploadStatus.FAILED; s.error = e.getMessage(); }
         finally {
             parsePermits.release();
@@ -243,21 +247,81 @@ public class ArchiveUploadService {
             stream.filter(Files::isRegularFile).forEach(files::add);
         } catch (IOException e) { throw new IllegalStateException("解析文件读取失败", e); }
         files.sort(java.util.Comparator.comparing(path -> path.getFileName().toString(), String.CASE_INSENSITIVE_ORDER));
+        var candidates = new java.util.ArrayList<MatchedCandidate>();
+        var candidateSlots = new java.util.HashSet<String>();
         for (Path path : files) {
             String name = path.getFileName().toString();
             String lower = name.toLowerCase(java.util.Locale.ROOT);
             String slot = slotFor(s.templateId, name, lower, s);
             if (slot == null || s.matchedSlots.contains(slot)) continue;
-            String id = register(path, name);
-            s.matchedFiles.add(new ArchiveUploadProgress.MatchedFile(slot, name, id));
-            s.matchedSlots.add(slot);
+            if (!candidateSlots.add(slot)) {
+                throw new IllegalArgumentException("ZIP 中存在重复匹配文件：" + slot);
+            }
+            candidates.add(new MatchedCandidate(slot, path, name));
         }
-        if (s.templateId != null && s.templateId.toLowerCase().contains("gf6-wfv-l1a")) {
-            for (String required : java.util.List.of("mainTiffTile0","mainTiffTile1","mainTiffTile2","metadataXml","rpcRpb","nav","tileIndexTil")) {
-                if (!s.matchedSlots.contains(required)) s.missingSlots.add(required);
+        var required = requiredSlots(s.templateId);
+        for (String slot : required) {
+            if (candidates.stream().noneMatch(candidate -> candidate.slot().equals(slot))) {
+                s.missingSlots.add(slot);
             }
         }
+        if (!s.missingSlots.isEmpty()) {
+            throw new IllegalArgumentException("ZIP 缺少必需文件：" + String.join("、", s.missingSlots));
+        }
+        for (MatchedCandidate candidate : candidates) {
+            String id = register(candidate.path(), candidate.name());
+            s.matchedFiles.add(new ArchiveUploadProgress.MatchedFile(candidate.slot(), candidate.name(), id));
+            s.matchedSlots.add(candidate.slot());
+        }
     }
+
+    private void preflightArchiveCompatibility(ArchiveUploadSession s, Path archive) throws IOException {
+        var names = new java.util.ArrayList<String>();
+        try (ZipFile zip = new ZipFile(archive.toFile())) {
+            var entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                if (!entry.isDirectory()) names.add(entry.getName());
+            }
+        }
+        String productConflict = productConflict(s.templateId, names);
+        if (productConflict != null) throw new IllegalArgumentException(productConflict);
+    }
+
+    private String productConflict(String template, java.util.List<String> names) {
+        if (template == null) return null;
+        String all = String.join("\n", names).toLowerCase(java.util.Locale.ROOT);
+        if (template.contains("hy1c-czi") && (all.contains("gf6") || all.contains("gf-6") || all.contains("wfv"))) {
+            return "当前选择的是 HY-1C，但上传压缩包疑似为 GF-6 产品，请切换数据类型或重新选择产品包";
+        }
+        if (template.contains("gf6-wfv") && (all.contains("hy1c") || all.contains("h1c") || all.contains("czi"))) {
+            return "当前选择的是 GF-6 WFV，但上传压缩包疑似为 HY-1C 产品，请切换数据类型或重新选择产品包";
+        }
+        if (template.contains("fy4b-agri") && (all.contains("gf6") || all.contains("hy1c") || all.contains("h1c"))) {
+            return "当前选择的是 FY-4B AGRI，但上传压缩包疑似不是 FY-4B 产品，请重新选择产品包";
+        }
+        if (template.contains("fy3h-mersi") && (all.contains("gf6") || all.contains("hy1c") || all.contains("h1c"))) {
+            return "当前选择的是 FY-3H MERSI，但上传压缩包疑似不是 FY-3H 产品，请重新选择产品包";
+        }
+        return null;
+    }
+
+    private java.util.List<String> requiredSlots(String template) {
+        if (template == null) return java.util.List.of();
+        if (template.contains("gf6-wfv-l1a")) {
+            return java.util.List.of("mainTiffTile0", "mainTiffTile1", "mainTiffTile2",
+                "metadataXml", "rpcRpb", "nav", "tileIndexTil");
+        }
+        if (template.contains("hy1c-czi")) return java.util.List.of("main", "metadata", "browse");
+        if (template.contains("fy4b-agri")) {
+            return java.util.List.of("l1_0500m", "l1_1000m", "l1_2000m", "l1_4000m", "geo_4000m");
+        }
+        if (template.contains("fy3h-mersi")) return java.util.List.of("observation", "geo1k");
+        if (template.contains("hy2d-altimeter")) return java.util.List.of("main");
+        return java.util.List.of();
+    }
+
+    private record MatchedCandidate(String slot, Path path, String name) {}
 
     private String slotFor(String template, String name, String lower, ArchiveUploadSession s) {
         if (template == null) return null;

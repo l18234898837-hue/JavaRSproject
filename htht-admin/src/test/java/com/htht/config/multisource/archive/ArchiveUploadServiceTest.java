@@ -92,6 +92,25 @@ class ArchiveUploadServiceTest {
     }
 
     @Test
+    void rejectsHy1cArchiveWithoutMainFileBeforeRegisteringPartialMatches() throws Exception {
+        byte[] zip = zipEntries(
+            new String[]{"GF6_scene.xml", "GF6_scene.jpg"},
+            new byte[]{1, 2});
+        ISysFileService files = mock(ISysFileService.class);
+        ArchiveUploadService service = service(files);
+        ArchiveUploadProgress created = service.createSession(
+            7, "wrong.zip", zip.length, zip.length, 1, "hy1c-czi-l2a-v1");
+        service.uploadChunk(7, created.uploadId(), 0, new ByteArrayInputStream(zip), zip.length);
+        service.complete(7, created.uploadId());
+
+        ArchiveUploadProgress progress = awaitFinished(service, created.uploadId());
+        assertThat(progress.status()).isEqualTo(ArchiveUploadStatus.FAILED);
+        assertThat(progress.error()).contains("HY-1C").contains("GF-6");
+        assertThat(progress.matchedFiles()).isEmpty();
+        org.mockito.Mockito.verifyNoInteractions(files);
+    }
+
+    @Test
     void cleansSessionDirectoryAfterFailedParse() throws Exception {
         byte[] zip = zip("../escape.tif", new byte[]{1});
         ArchiveUploadService service = service();
@@ -128,7 +147,9 @@ class ArchiveUploadServiceTest {
 
     @Test
     void limitsConcurrentParsing() throws Exception {
-        byte[] zip = zip("scene.xml", new byte[]{1});
+        byte[] zip = zipEntries(
+            new String[]{"scene.h5", "scene.xml", "scene.jpg"},
+            new byte[]{1, 2, 3});
         ArchiveUploadProperties properties = properties();
         properties.setMaxConcurrentParses(1);
         AtomicInteger uploads = new AtomicInteger();
@@ -145,11 +166,11 @@ class ArchiveUploadServiceTest {
             return result;
         });
         ArchiveUploadService service = new ArchiveUploadService(properties, temp.resolve("uploads").toString(), files, () -> Long.MAX_VALUE);
-        ArchiveUploadProgress first = service.createSession(7, "one.zip", zip.length, zip.length, 1, "gf6-wfv-l1a");
+        ArchiveUploadProgress first = service.createSession(7, "one.zip", zip.length, zip.length, 1, "hy1c-czi-l2a-v1");
         service.uploadChunk(7, first.uploadId(), 0, new ByteArrayInputStream(zip), zip.length);
         service.complete(7, first.uploadId());
         assertThat(parseStarted.await(1, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-        ArchiveUploadProgress second = service.createSession(7, "two.zip", zip.length, zip.length, 1, "gf6-wfv-l1a");
+        ArchiveUploadProgress second = service.createSession(7, "two.zip", zip.length, zip.length, 1, "hy1c-czi-l2a-v1");
         service.uploadChunk(7, second.uploadId(), 0, new ByteArrayInputStream(zip), zip.length);
         assertThatThrownBy(() -> service.complete(7, second.uploadId()))
             .isInstanceOf(IllegalStateException.class)
