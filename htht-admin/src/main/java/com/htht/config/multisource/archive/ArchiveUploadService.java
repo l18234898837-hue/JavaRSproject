@@ -291,20 +291,24 @@ public class ArchiveUploadService {
     private String productConflict(String template, java.util.List<String> names) {
         if (template == null) return null;
         String all = String.join("\n", names).toLowerCase(java.util.Locale.ROOT);
-        if (template.contains("hy1c-czi") && (all.contains("gf6") || all.contains("gf-6") || all.contains("wfv"))) {
-            return "当前选择的是 HY-1C，但上传压缩包疑似为 GF-6 产品，请切换数据类型或重新选择产品包";
-        }
-        if (template.contains("gf6-wfv") && (all.contains("hy1c") || all.contains("h1c") || all.contains("czi"))) {
-            return "当前选择的是 GF-6 WFV，但上传压缩包疑似为 HY-1C 产品，请切换数据类型或重新选择产品包";
-        }
-        if (template.contains("fy4b-agri") && (all.contains("gf6") || all.contains("hy1c") || all.contains("h1c"))) {
-            return "当前选择的是 FY-4B AGRI，但上传压缩包疑似不是 FY-4B 产品，请重新选择产品包";
-        }
-        if (template.contains("fy3h-mersi") && (all.contains("gf6") || all.contains("hy1c") || all.contains("h1c"))) {
-            return "当前选择的是 FY-3H MERSI，但上传压缩包疑似不是 FY-3H 产品，请重新选择产品包";
-        }
-        return null;
+        var markers = java.util.List.of(
+            new ProductMarker("gf6-wfv", "GF-6 WFV", java.util.regex.Pattern.compile("(?:gf[-_ ]?6|wfv)")),
+            new ProductMarker("fy4b-agri", "FY-4B AGRI", java.util.regex.Pattern.compile("(?:fy[-_ ]?4b|fy4|agri|fdi)")),
+            new ProductMarker("hy1c-czi", "HY-1C", java.util.regex.Pattern.compile("(?:hy[-_ ]?1c|h1c|czi)")),
+            new ProductMarker("fy3h-mersi", "FY-3H MERSI", java.util.regex.Pattern.compile("(?:fy[-_ ]?3h?|fy3|mersi|geo1k)")),
+            new ProductMarker("hy2d-altimeter", "HY-2D 高度计", java.util.regex.Pattern.compile("(?:hy[-_ ]?2d|hy2d|idr|altimeter)"))
+        );
+        ProductMarker selected = markers.stream().filter(marker -> template.contains(marker.id())).findFirst().orElse(null);
+        if (selected == null) return null;
+        ProductMarker detected = markers.stream()
+            .filter(marker -> !marker.id().equals(selected.id()) && marker.pattern().matcher(all).find())
+            .findFirst().orElse(null);
+        if (detected == null) return null;
+        return "当前选择的是 " + selected.label() + "，但上传压缩包疑似为 " + detected.label()
+            + " 产品，请切换数据类型或重新选择产品包";
     }
+
+    private record ProductMarker(String id, String label, java.util.regex.Pattern pattern) {}
 
     private java.util.List<String> requiredSlots(String template) {
         if (template == null) return java.util.List.of();

@@ -111,6 +111,25 @@ class ArchiveUploadServiceTest {
     }
 
     @Test
+    void rejectsFy3ArchiveWhenGf6IsSelectedBeforeRegisteringFiles() throws Exception {
+        byte[] zip = zipEntries(
+            new String[]{"FY3H_MERSI_1000M.HDF", "FY3H_MERSI_GEO1K.HDF"},
+            new byte[]{1, 2});
+        ISysFileService files = mock(ISysFileService.class);
+        ArchiveUploadService service = service(files);
+        ArchiveUploadProgress created = service.createSession(
+            7, "fy3h.zip", zip.length, zip.length, 1, "gf6-wfv-l1a-v1");
+        service.uploadChunk(7, created.uploadId(), 0, new ByteArrayInputStream(zip), zip.length);
+        service.complete(7, created.uploadId());
+
+        ArchiveUploadProgress progress = awaitFinished(service, created.uploadId());
+        assertThat(progress.status()).isEqualTo(ArchiveUploadStatus.FAILED);
+        assertThat(progress.error()).contains("GF-6 WFV").contains("FY-3H MERSI");
+        assertThat(progress.matchedFiles()).isEmpty();
+        org.mockito.Mockito.verifyNoInteractions(files);
+    }
+
+    @Test
     void cleansSessionDirectoryAfterFailedParse() throws Exception {
         byte[] zip = zip("../escape.tif", new byte[]{1});
         ArchiveUploadService service = service();
