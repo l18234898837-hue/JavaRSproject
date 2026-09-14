@@ -92,6 +92,34 @@ class ArchiveUploadServiceTest {
     }
 
     @Test
+    void ignoresPerTileRpbSidecarsWhenParsingGf6Archive() throws Exception {
+        byte[] zip = zipEntries(
+            new String[]{"scene_tile1.tif", "scene_tile2.tif", "scene_tile3.tif",
+                "scene_tile1.rpb", "scene_tile2.rpb", "scene_tile3.rpb",
+                "scene.rpb", "scene.xml", "scene.nav", "scene.til"},
+            new byte[]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10});
+        ISysFileService files = mock(ISysFileService.class);
+        when(files.upload(any())).thenAnswer(invocation -> {
+            org.springframework.web.multipart.MultipartFile file = invocation.getArgument(0);
+            SysFile result = new SysFile();
+            result.setId((long) file.getOriginalFilename().hashCode() * -1L + 100);
+            result.setFileName(file.getOriginalFilename());
+            return result;
+        });
+        ArchiveUploadService service = service(files);
+        ArchiveUploadProgress created = service.createSession(7, "sample.zip", zip.length, zip.length, 1, "gf6-wfv-l1a-v1");
+        service.uploadChunk(7, created.uploadId(), 0, new ByteArrayInputStream(zip), zip.length);
+        service.complete(7, created.uploadId());
+
+        ArchiveUploadProgress progress = awaitFinished(service, created.uploadId());
+        assertThat(progress.status()).isEqualTo(ArchiveUploadStatus.COMPLETED);
+        assertThat(progress.matchedSlots()).contains("rpcRpb");
+        assertThat(progress.matchedFiles().stream().filter(file -> file.slotId().equals("rpcRpb")))
+            .extracting(ArchiveUploadProgress.MatchedFile::fileName)
+            .containsExactly("scene.rpb");
+    }
+
+    @Test
     void rejectsHy1cArchiveWithoutMainFileBeforeRegisteringPartialMatches() throws Exception {
         byte[] zip = zipEntries(
             new String[]{"GF6_scene.xml", "GF6_scene.jpg"},

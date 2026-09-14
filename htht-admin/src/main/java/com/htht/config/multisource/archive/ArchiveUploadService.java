@@ -337,7 +337,7 @@ public class ArchiveUploadService {
                 return count < 3 ? "mainTiffTile" + count : null;
             }
             if (lower.endsWith(".xml")) return "metadataXml";
-            if (lower.endsWith(".rpb")) return "rpcRpb";
+            if (lower.endsWith(".rpb") && !isTileRpb(lower)) return "rpcRpb";
             if (lower.endsWith(".nav")) return "nav";
             if (lower.endsWith(".til")) return "tileIndexTil";
             return null;
@@ -359,6 +359,13 @@ public class ArchiveUploadService {
         }
         if (template.contains("hy2d-altimeter") && lower.endsWith(".tar.gz")) return "main";
         return null;
+    }
+
+    private boolean isTileRpb(String lower) {
+        return java.util.regex.Pattern
+            .compile("(?:[-_ ](?:tile|t|part|block)?[-_ ]*0?[1-3])\\.rpb$")
+            .matcher(lower)
+            .find();
     }
 
     private String register(Path path, String name) {
