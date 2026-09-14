@@ -8,8 +8,22 @@ public record ExecutionProgressResponse(
     String lifecycleStatus,
     String qualityStatus,
     List<StageProgressResponse> stages,
-    List<ArtifactProgressResponse> artifacts
+    List<ArtifactProgressResponse> artifacts,
+    QualityReportSummary qualityReportSummary
 ) {
+    public ExecutionProgressResponse(long taskId, String lifecycleStatus, String qualityStatus,
+                                     List<StageProgressResponse> stages, List<ArtifactProgressResponse> artifacts) {
+        this(taskId, lifecycleStatus, qualityStatus, stages, artifacts, null);
+    }
+
+    public record QualityReportSummary(
+        String overallStatus,
+        int totalChecks,
+        int passedChecks,
+        int warningChecks,
+        int failedChecks
+    ) {}
+
     public record StageProgressResponse(
         long stageId, String stageKey, String status, int attempt, String errorCode, String errorMessage,
         String executionId, Instant startedAt, Instant finishedAt, Long durationMs, String description,
@@ -31,7 +45,7 @@ public record ExecutionProgressResponse(
     }
 
     public record ArtifactVisualizationResponse(
-        String kind, String tileUrl, List<Double> bounds, String crs,
+        String kind, String tileUrl, String imageUrl, List<Double> bounds, String crs,
         Integer minZoom, Integer maxZoom, Object legend
     ) {}
 

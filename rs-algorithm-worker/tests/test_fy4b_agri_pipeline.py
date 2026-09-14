@@ -738,6 +738,39 @@ def test_execute_fy4b_product_runs_internal_phases_in_order_and_returns_only_fin
     assert not any((output / name).exists() for name in ("validation", "navigation", "native", "calibration", "grid"))
 
 
+def test_execute_fy4b_stage_validation_uses_the_complete_raw_role_order(tmp_path, monkeypatch):
+    """The staged validation entrypoint must reach package validation with all five raw roles."""
+    output = tmp_path / "run"
+    validation_path = output / "validation" / "package.json"
+
+    def validate(manifest, directory):
+        assert set(item["role"] for item in manifest["inputs"]) == set(ROLE_ORDER)
+        assert directory == output.resolve()
+        validation_path.parent.mkdir(parents=True, exist_ok=True)
+        validation_path.write_text("{}", encoding="utf-8")
+        return [("FY4B_INPUT_VALIDATION_JSON", validation_path)]
+
+    monkeypatch.setattr(pipeline, "_validate_fy4b_package", validate)
+    response = pipeline.execute_fy4b_stage(
+        {
+            "stageKey": "VALIDATE_FY4B_PACKAGE",
+            "outputUri": "rs://output/task",
+            "parameterSnapshot": "{}",
+        },
+        {
+            "output": {"path": str(output)},
+            "inputs": [
+                {"role": role, "path": str(tmp_path / f"{role}.hdf")}
+                for role in ROLE_ORDER
+            ],
+        },
+    )
+
+    assert response["status"] == "SUCCEEDED"
+    assert response["artifacts"][0]["type"] == "FY4B_INPUT_VALIDATION_JSON"
+    assert response["artifacts"][0]["uri"] == "rs://output/task/validation/package.json"
+
+
 @pytest.mark.parametrize("parameters", [
     {},
     {"features": {"enabled": True, "metrics": ["statistics"]}},

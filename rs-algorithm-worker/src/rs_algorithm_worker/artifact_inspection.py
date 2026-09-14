@@ -12,6 +12,7 @@ from typing import Any
 import netCDF4
 import numpy as np
 import pyarrow.parquet as pq
+from PIL import Image
 
 
 MAX_SAMPLE_ROWS = 100
@@ -34,6 +35,8 @@ def inspect_artifact(path: Path, artifact_format: str) -> dict[str, Any]:
         return _inspect_netcdf(source)
     if format_name == "NPZ":
         return _inspect_npz(source)
+    if format_name in {"PNG", "JPEG", "JPG"}:
+        return _inspect_image(source, format_name)
     raise ValueError("unsupported artifact inspection format")
 
 
@@ -67,7 +70,58 @@ def _inspect_geojson(source: Path) -> dict[str, Any]:
         for geometry in [feature.get("geometry")]
         if isinstance(geometry, dict) and isinstance(geometry.get("type"), str)
     })
+    invalid = 0
+    coordinate_range_valid = True
+    for feature in features:
+        geometry = feature.get("geometry") if isinstance(feature, dict) else None
+        valid, in_range = _validate_geometry(geometry)
+        if not valid or not in_range:
+            invalid += 1
+        coordinate_range_valid = coordinate_range_valid and in_range
+    result["quality"].update({
+        "geometryCount": len(features),
+        "invalidGeometryCount": invalid,
+        "coordinateRangeValid": coordinate_range_valid,
+    })
     return result
+
+
+def _validate_geometry(geometry: Any) -> tuple[bool, bool]:
+    if not isinstance(geometry, dict) or not isinstance(geometry.get("type"), str):
+        return False, False
+    if geometry["type"] == "GeometryCollection":
+        geometries = geometry.get("geometries")
+        if not isinstance(geometries, list):
+            return False, False
+        statuses = [_validate_geometry(item) for item in geometries]
+        return (
+            bool(statuses) and all(item[0] for item in statuses),
+            all(item[1] for item in statuses),
+        )
+    coordinates = geometry.get("coordinates")
+    pairs: list[tuple[Any, Any]] = []
+
+    def collect(value: Any) -> bool:
+        if (
+            isinstance(value, (list, tuple))
+            and len(value) >= 2
+            and all(
+                isinstance(item, (int, float)) and not isinstance(item, bool)
+                for item in value[:2]
+            )
+        ):
+            pairs.append((value[0], value[1]))
+            return True
+        if isinstance(value, (list, tuple)) and value:
+            return all(collect(item) for item in value)
+        return False
+
+    structural = collect(coordinates)
+    in_range = structural and all(
+        np.isfinite(x) and np.isfinite(y) and -180 <= x <= 180 and -90 <= y <= 90
+        for x, y in pairs
+    )
+    return structural, bool(in_range)
 
 
 def _inspect_csv(source: Path) -> dict[str, Any]:
@@ -80,7 +134,14 @@ def _inspect_csv(source: Path) -> dict[str, Any]:
             row_count += 1
             if len(rows) < MAX_SAMPLE_ROWS:
                 rows.append({key: value for key, value in row.items()})
-    return {"format": "CSV", "kind": "table", "columns": columns, "rowCount": row_count, "rows": rows}
+    return {
+        "format": "CSV",
+        "kind": "table",
+        "columns": columns,
+        "rowCount": row_count,
+        "rows": rows,
+        "quality": _table_quality(rows, columns, row_count),
+    }
 
 
 def _inspect_parquet(source: Path) -> dict[str, Any]:
@@ -90,7 +151,7 @@ def _inspect_parquet(source: Path) -> dict[str, Any]:
     for batch in parquet.iter_batches(batch_size=MAX_SAMPLE_ROWS):
         rows.extend(batch.to_pylist())
         break
-    return {
+    result = {
         "format": "PARQUET",
         "kind": "dataset",
         "columns": columns,
@@ -98,6 +159,8 @@ def _inspect_parquet(source: Path) -> dict[str, Any]:
         "rows": _json_safe(rows),
         "statistics": _parquet_statistics(parquet),
     }
+    result["quality"] = _table_quality(rows, columns, parquet.metadata.num_rows)
+    return result
 
 
 def _inspect_netcdf(source: Path) -> dict[str, Any]:
@@ -118,6 +181,23 @@ def _inspect_netcdf(source: Path) -> dict[str, Any]:
         time_range = _netcdf_time_range(dataset)
         if time_range is not None:
             result["timeRange"] = time_range
+        observation_count = next(
+            (
+                len(dataset.dimensions[name])
+                for name in ("observation", "observations", "time")
+                if name in dataset.dimensions
+            ),
+            0,
+        )
+        result["quality"] = {
+            "dimensionCount": len(dimensions),
+            "variableCount": len(variables),
+            "observationCount": observation_count,
+            "timeRangeValid": (
+                time_range is not None and time_range["start"] <= time_range["end"]
+            ),
+            "statistics": result["statistics"],
+        }
         return result
 
 
@@ -130,6 +210,38 @@ def _inspect_npz(source: Path) -> dict[str, Any]:
     return {"format": "NPZ", "kind": "dataset", "arrays": arrays}
 
 
+def _inspect_image(source: Path, artifact_format: str) -> dict[str, Any]:
+    with Image.open(source) as image:
+        image.load()
+        array = np.asarray(image)
+        channels = 1 if array.ndim == 2 else array.shape[-1]
+        if array.ndim == 2:
+            valid = np.ones(array.shape, dtype=bool)
+            values = array
+        elif channels == 4:
+            valid = array[..., 3] > 0
+            values = array[..., :3]
+        else:
+            valid = np.ones(array.shape[:2], dtype=bool)
+            values = array[..., :3]
+        numeric = values.astype(np.float64, copy=False)
+        finite = np.isfinite(numeric)
+        valid_values = numeric[valid[..., None] & finite] if numeric.ndim == 3 else numeric[valid & finite]
+        statistics = {}
+        if valid_values.size:
+            statistics = {"min": _number(valid_values.min()), "max": _number(valid_values.max())}
+        quality = {
+            "width": image.width,
+            "height": image.height,
+            "bandCount": channels,
+            "validPixelRatio": float(valid.mean()) if valid.size else 0.0,
+            "hasNanOrInf": bool(np.any(~finite)),
+            "statistics": statistics,
+        }
+        return {"format": artifact_format, "kind": "image", "mode": image.mode,
+                "quality": quality}
+
+
 def _table_result(artifact_format: str, records: Iterable[dict[str, Any]], row_count: int) -> dict[str, Any]:
     sample = list(records)[:MAX_SAMPLE_ROWS]
     columns = list(dict.fromkeys(key for row in sample for key in row))
@@ -139,6 +251,17 @@ def _table_result(artifact_format: str, records: Iterable[dict[str, Any]], row_c
         "columns": columns,
         "rowCount": row_count,
         "rows": _json_safe(sample),
+        "quality": _table_quality(sample, columns, row_count),
+    }
+
+
+def _table_quality(sample: list[dict[str, Any]], columns: list[str], row_count: int) -> dict[str, Any]:
+    total = len(sample) * len(columns)
+    empty = sum(1 for row in sample for column in columns if row.get(column) in (None, ""))
+    return {
+        "rowCount": row_count,
+        "columnCount": len(columns),
+        "emptyValueRatio": empty / total if total else 0.0,
     }
 
 

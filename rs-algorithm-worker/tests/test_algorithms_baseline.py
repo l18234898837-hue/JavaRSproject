@@ -7,6 +7,7 @@ from rs_algorithm_worker.algorithms.features import FeatureParameters, extract_f
 from rs_algorithm_worker.algorithms.fusion import FusionParameters, fuse_bands
 from rs_algorithm_worker.algorithms.saliency import SaliencyParameters, detect_saliency
 from rs_algorithm_worker.models import BandMetadata, BandSet, RasterData
+from rs_algorithm_worker.l2a_pipeline import _saliency_preview_rgb
 
 
 def _bands() -> BandSet:
@@ -49,6 +50,14 @@ def test_saliency_baseline_returns_score_and_threshold_mask():
     result = detect_saliency(_bands().raster, SaliencyParameters(threshold=0.5, window_size=3))
     assert result.score.values.shape == (2, 2)
     assert result.mask.dtype == np.bool_
+
+
+def test_saliency_preview_preserves_continuous_score_values():
+    preview = _saliency_preview_rgb(np.array([[0.0, 0.2], [0.8, 1.0]], dtype=np.float32))
+    assert preview.dtype == np.uint8
+    assert preview.shape == (2, 2, 3)
+    assert tuple(preview[0, 0]) == (0, 0, 0)
+    assert tuple(preview[0, 1]) != tuple(preview[1, 0]) != tuple(preview[1, 1])
 
 
 def test_feature_baseline_reports_gradient_and_local_variance_when_requested():

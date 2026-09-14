@@ -20,6 +20,7 @@ import com.htht.web.controller.multisource.dto.ExecutionProgressResponse;
 import com.htht.web.controller.multisource.dto.ArtifactTilePreviewResponse;
 import com.htht.web.controller.multisource.dto.ResultDownloadTicketRequest;
 import com.htht.web.controller.multisource.dto.ResultDownloadTicketResponse;
+import com.htht.web.controller.multisource.dto.QualityReportResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
@@ -35,6 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.List;
 import java.util.function.Supplier;
@@ -53,6 +55,7 @@ public class ProcessingExecutionController {
     private final ArtifactInspectionService artifactInspectionService;
     private final ArtifactPreviewTicketService artifactPreviewTicketService;
     private final ArtifactRasterPreviewService artifactRasterPreviewService;
+    private final QualityReportBuilder qualityReportBuilder;
 
     public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
                                          DispatchNextStageUseCase dispatchUseCase,
@@ -74,6 +77,21 @@ public class ProcessingExecutionController {
                                          ArtifactInspectionService artifactInspectionService,
                                          ArtifactPreviewTicketService artifactPreviewTicketService,
                                          ArtifactRasterPreviewService artifactRasterPreviewService) {
+        this(currentSubject, detailUseCase, dispatchUseCase, cancelUseCase, retryUseCase,
+            resultArchiveService, downloadTicketService, artifactInspectionService,
+            artifactPreviewTicketService, artifactRasterPreviewService, new QualityReportBuilder());
+    }
+
+    public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
+                                         DispatchNextStageUseCase dispatchUseCase,
+                                         CancelProcessingTaskUseCase cancelUseCase,
+                                         RetryFailedStageUseCase retryUseCase,
+                                         LocalWorkerResultArchiveService resultArchiveService,
+                                         ResultDownloadTicketService downloadTicketService,
+                                         ArtifactInspectionService artifactInspectionService,
+                                         ArtifactPreviewTicketService artifactPreviewTicketService,
+                                         ArtifactRasterPreviewService artifactRasterPreviewService,
+                                         QualityReportBuilder qualityReportBuilder) {
         this.currentSubject = Objects.requireNonNull(currentSubject, "currentSubject");
         this.detailUseCase = Objects.requireNonNull(detailUseCase, "detailUseCase");
         this.dispatchUseCase = Objects.requireNonNull(dispatchUseCase, "dispatchUseCase");
@@ -84,6 +102,7 @@ public class ProcessingExecutionController {
         this.artifactInspectionService = artifactInspectionService;
         this.artifactPreviewTicketService = artifactPreviewTicketService;
         this.artifactRasterPreviewService = artifactRasterPreviewService;
+        this.qualityReportBuilder = Objects.requireNonNull(qualityReportBuilder, "qualityReportBuilder");
     }
 
     public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
@@ -100,6 +119,7 @@ public class ProcessingExecutionController {
         this.artifactInspectionService = null;
         this.artifactPreviewTicketService = null;
         this.artifactRasterPreviewService = null;
+        this.qualityReportBuilder = new QualityReportBuilder();
     }
 
     @PostMapping("/processing-tasks/{taskId}/dispatch")
@@ -128,6 +148,7 @@ public class ProcessingExecutionController {
     @GetMapping("/processing-tasks/{taskId}/progress")
     public ResponseEntity<R<ExecutionProgressResponse>> progress(@PathVariable long taskId) {
         var detail = detailUseCase.get(TaskId.of(taskId), currentSubject.get());
+        QualityReportResponse report = qualityReportBuilder.build(detail);
         return ResponseEntity.ok(R.ok(new ExecutionProgressResponse(
             detail.id().value(), detail.lifecycleStatus().name(), detail.qualityStatus().name(),
             detail.stages().stream().map(stage -> {
@@ -146,11 +167,94 @@ public class ProcessingExecutionController {
                 String format = artifactFormat(artifact);
                 return new ExecutionProgressResponse.ArtifactProgressResponse(
                     artifact.stageId().value(), artifact.type(), artifact.uri().value(), artifact.checksum(), artifact.sizeBytes(),
-                    artifact.retention(), true, mediaType(format), previewable(format), displayName(artifact), null,
+                    artifact.retention(), true, mediaType(format), previewable(format), displayName(artifact),
+                    artifactVisualization(taskId, detail, artifact, format),
                     format, artifactView(taskId, artifact, format)
                 );
-            }).toList()
+            }).toList(),
+            new ExecutionProgressResponse.QualityReportSummary(
+                report.overallStatus(), report.summary().totalChecks(), report.summary().passedChecks(),
+                report.summary().warningChecks(), report.summary().failedChecks())
         )));
+    }
+
+    @GetMapping("/processing-tasks/{taskId}/quality-report")
+    public ResponseEntity<R<QualityReportResponse>> qualityReport(@PathVariable long taskId) {
+        AccessSubject subject = currentSubject.get();
+        var detail = detailUseCase.get(TaskId.of(taskId), subject);
+        requireTerminalForQualityReport(detail);
+        return ResponseEntity.ok(R.ok(buildQualityReport(detail, subject)));
+    }
+
+    @GetMapping(value = "/processing-tasks/{taskId}/quality-report.html", produces = MediaType.TEXT_HTML_VALUE)
+    public ResponseEntity<String> qualityReportHtml(@PathVariable long taskId) {
+        AccessSubject subject = currentSubject.get();
+        var detail = detailUseCase.get(TaskId.of(taskId), subject);
+        requireTerminalForQualityReport(detail);
+        QualityReportResponse report = buildQualityReport(detail, subject);
+        String fileName = "task-" + taskId + "-quality-report.html";
+        return ResponseEntity.ok()
+            .contentType(new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8))
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+            .body(renderQualityReportHtml(report));
+    }
+
+    private static void requireTerminalForQualityReport(
+        com.htht.multisource.application.usecase.model.TaskDetailView detail) {
+        String lifecycle = detail.lifecycleStatus().name();
+        if (!"SUCCEEDED".equals(lifecycle) && !"FAILED".equals(lifecycle) && !"CANCELED".equals(lifecycle)) {
+            throw new IllegalStateException("Processing task has not reached a terminal state.");
+        }
+    }
+
+    private static String renderQualityReportHtml(QualityReportResponse report) {
+        StringBuilder html = new StringBuilder("""
+            <!doctype html><html lang="zh-CN"><head><meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <title>质量检测报告</title>
+            <style>body{font-family:system-ui,sans-serif;max-width:1000px;margin:32px auto;padding:0 20px;color:#243746}
+            .status{padding:8px 12px;border-radius:6px;background:#eef5f7;display:inline-block}
+            table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:9px;border-bottom:1px solid #dce8ed;text-align:left;vertical-align:top}
+            th{background:#f6fafb}.PASS{color:#216b4c}.WARN{color:#9a6b20}.FAIL{color:#a13f3f}</style></head><body>
+            """);
+        html.append("<h1>质量检测报告</h1><p>任务 ").append(escapeHtml(Long.toString(report.taskId())))
+            .append(" · 生成时间 ").append(escapeHtml(report.generatedAt().toString())).append("</p>");
+        html.append("<div class=\"status ").append(escapeHtml(report.overallStatus())).append("\">总体结论：")
+            .append(escapeHtml(report.overallStatus())).append(" · 检查 ")
+            .append(report.summary().totalChecks()).append(" 项，")
+            .append("通过 ").append(report.summary().passedChecks()).append("，")
+            .append("警告 ").append(report.summary().warningChecks()).append("，")
+            .append("失败 ").append(report.summary().failedChecks()).append("</div>");
+        html.append("<table><thead><tr><th>检查项</th><th>状态</th><th>说明</th><th>实际值</th><th>规则/阈值</th><th>建议</th></tr></thead><tbody>");
+        for (QualityReportResponse.Check check : report.checks()) {
+            html.append("<tr><td>").append(escapeHtml(check.name())).append("</td><td class=\"")
+                .append(escapeHtml(check.status())).append("\">").append(escapeHtml(check.status()))
+                .append("</td><td>").append(escapeHtml(check.userMessage())).append("</td><td>")
+                .append(escapeHtml(check.actualValue())).append("</td><td>")
+                .append(escapeHtml(check.threshold())).append("</td><td>")
+                .append(escapeHtml(check.recommendation())).append("</td></tr>");
+        }
+        return html.append("</tbody></table></body></html>").toString();
+    }
+
+    private QualityReportResponse buildQualityReport(
+        com.htht.multisource.application.usecase.model.TaskDetailView detail, AccessSubject subject) {
+        if (artifactInspectionService == null) {
+            return qualityReportBuilder.build(detail);
+        }
+        QualityArtifactInspector inspector = (task, owner, artifact, format) -> {
+            if ("COG".equals(format) || "GEOTIFF".equals(format)) {
+                return artifactInspectionService.inspectRaster(task, owner, artifact, format);
+            }
+            return artifactInspectionService.inspect(task, owner, artifact, format);
+        };
+        return qualityReportBuilder.build(detail, inspector, subject);
+    }
+
+    private static String escapeHtml(String value) {
+        if (value == null) return "";
+        return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace("\"", "&quot;").replace("'", "&#39;");
     }
 
     private static Long durationMs(java.time.Instant startedAt, java.time.Instant finishedAt) {
@@ -214,6 +318,82 @@ public class ProcessingExecutionController {
             || "application/xml".equals(media) || "text/plain".equals(media);
     }
 
+    private ExecutionProgressResponse.ArtifactVisualizationResponse artifactVisualization(
+        long taskId, com.htht.multisource.application.usecase.model.TaskDetailView detail,
+        com.htht.multisource.application.usecase.model.TaskArtifactView artifact, String format
+    ) {
+        if (!isImageFormat(format) || artifactRasterPreviewService == null || artifactPreviewTicketService == null) {
+            return null;
+        }
+        var companion = companionRaster(detail, artifact);
+        if (companion == null) return null;
+        try {
+            String rasterFormat = artifactFormat(companion);
+            AccessSubject subject = currentSubject.get();
+            var preview = artifactRasterPreviewService.describe(detail, subject, companion, rasterFormat);
+            if (!preview.renderable() || preview.bounds() == null) return null;
+            // Large PNG/JPEG previews can exceed the browser/GPU maximum texture
+            // size. Reuse the companion raster's protected XYZ tile service so
+            // Cesium never uploads the full-resolution image as one texture.
+            String ticket = artifactPreviewTicketService.issue(taskId, subject, companion.type(), companion.checksum()).token();
+            String encodedType = java.net.URLEncoder.encode(companion.type(), java.nio.charset.StandardCharsets.UTF_8);
+            String encodedTicket = java.net.URLEncoder.encode(ticket, java.nio.charset.StandardCharsets.UTF_8);
+            String tileUrl = "/api/multisource/processing-tasks/" + taskId + "/artifacts/"
+                + encodedType + "/tiles/{z}/{x}/{y}.png?ticket=" + encodedTicket;
+            return new ExecutionProgressResponse.ArtifactVisualizationResponse(
+                // Bounds are already WGS84 and the client always uses the
+                // server's Web Mercator XYZ grid; do not expose the source CRS
+                // here because it must not alter Cesium's tile scheme.
+                "tiles", tileUrl, null, preview.bounds(), null, preview.minZoom(), preview.maxZoom(), preview.legend());
+        } catch (RuntimeException exception) {
+            log.debug("Unable to describe georeferenced image artifact {}", artifact.type(), exception);
+            return null;
+        }
+    }
+
+    private static boolean isImageFormat(String format) {
+        return "PNG".equals(format) || "JPEG".equals(format);
+    }
+
+    private static com.htht.multisource.application.usecase.model.TaskArtifactView companionRaster(
+        com.htht.multisource.application.usecase.model.TaskDetailView detail,
+        com.htht.multisource.application.usecase.model.TaskArtifactView image
+    ) {
+        String imageStem = stem(displayName(image));
+        String expectedType = companionType(image.type());
+        String expectedPrefix = expectedType.endsWith("_COG")
+            ? expectedType.substring(0, expectedType.length() - "_COG".length()) : expectedType;
+        return detail.artifacts().stream()
+            .filter(candidate -> "COG".equals(artifactFormat(candidate)) || "GEOTIFF".equals(artifactFormat(candidate)))
+            .filter(candidate -> stem(displayName(candidate)).equalsIgnoreCase(imageStem)
+                || (!expectedType.isBlank() && expectedType.equalsIgnoreCase(candidate.type()))
+                || (!expectedPrefix.isBlank() && candidate.type().toUpperCase(java.util.Locale.ROOT)
+                    .startsWith(expectedPrefix + "_")))
+            .findFirst().orElse(null);
+    }
+
+    private static String companionType(String imageType) {
+        String normalized = imageType == null ? "" : imageType.toUpperCase(java.util.Locale.ROOT);
+        if ("SALIENCY_PREVIEW_PNG".equals(normalized)
+            || "SALIENCY_PREVIEW_JPEG".equals(normalized)) {
+            return "SALIENCY_SCORE_COG";
+        }
+        for (String suffix : List.of("_PREVIEW_PNG", "_PREVIEW_JPEG")) {
+            if (normalized.endsWith(suffix)) {
+                return normalized.substring(0, normalized.length() - suffix.length()) + "_COG";
+            }
+        }
+        return "";
+    }
+
+    private static String stem(String name) {
+        String lower = name.toLowerCase(java.util.Locale.ROOT);
+        for (String extension : List.of(".png", ".jpg", ".jpeg", ".tif", ".tiff")) {
+            if (lower.endsWith(extension)) return name.substring(0, name.length() - extension.length());
+        }
+        return name;
+    }
+
     private static ExecutionProgressResponse.ArtifactViewResponse artifactView(
         long taskId, com.htht.multisource.application.usecase.model.TaskArtifactView artifact, String format
     ) {
@@ -252,6 +432,31 @@ public class ProcessingExecutionController {
         AccessSubject subject = currentSubject.get();
         var detail = detailUseCase.get(TaskId.of(taskId), subject);
         resultArchiveService.writeArtifact(detail, subject, type, response);
+    }
+
+    @SaIgnore
+    @GetMapping("/processing-tasks/{taskId}/artifacts/{type}/image")
+    public void image(@PathVariable long taskId, @PathVariable String type,
+                      @RequestParam("ticket") String ticket,
+                      javax.servlet.http.HttpServletResponse response) throws java.io.IOException {
+        requireImagePreviewService();
+        var grant = artifactPreviewTicketService.resolve(taskId, type, ticket);
+        var detail = detailUseCase.get(TaskId.of(taskId), grant.subject());
+        var artifact = artifactByType(detail, type);
+        if (!grant.checksum().equals(artifact.checksum())) {
+            throw new SecurityException("Artifact preview ticket is invalid or expired.");
+        }
+        String format = artifactFormat(artifact);
+        if (!isImageFormat(format)) {
+            throw new IllegalArgumentException("Artifact is not a supported image preview.");
+        }
+        resultArchiveService.writeArtifactPreview(detail, grant.subject(), type, response);
+    }
+
+    private void requireImagePreviewService() {
+        if (resultArchiveService == null || artifactPreviewTicketService == null) {
+            throw new IllegalStateException("Image preview service is not configured.");
+        }
     }
 
     @GetMapping("/processing-tasks/{taskId}/artifacts/{type}/inspection")

@@ -8,6 +8,16 @@ spring.boot.admin.client:
   username: htht
   password: 123456
 
+--- # 多源产品 ZIP 分片上传（开发环境）
+# 开发机磁盘通常小于生产服务器，沿用生产环境 40 GB 解压上限和 20 GB
+# 安全预留会导致 500 MB 级别的 ZIP 在创建会话时就被 409 拒绝。
+# 生产环境仍使用 application.yml 中的更高安全阈值；如需更大 ZIP，
+# 通过环境配置覆盖以下两个参数。
+multisource:
+  archive-upload:
+    max-expanded-size-bytes: ${MULTISOURCE_ARCHIVE_MAX_EXPANDED_SIZE_BYTES:17179869184}
+    safety-reserve-bytes: ${MULTISOURCE_ARCHIVE_SAFETY_RESERVE_BYTES:4294967296}
+
 --- # powerjob 配置
 powerjob:
   worker:

@@ -87,6 +87,16 @@ public final class LocalWorkerResultArchiveService {
 
     public void writeArtifact(TaskDetailView detail, AccessSubject subject, String type,
                               HttpServletResponse response) throws IOException {
+        writeArtifact(detail, subject, type, response, false);
+    }
+
+    public void writeArtifactPreview(TaskDetailView detail, AccessSubject subject, String type,
+                                     HttpServletResponse response) throws IOException {
+        writeArtifact(detail, subject, type, response, true);
+    }
+
+    private void writeArtifact(TaskDetailView detail, AccessSubject subject, String type,
+                               HttpServletResponse response, boolean inline) throws IOException {
         if (type == null || type.isBlank()) {
             throw new IllegalArgumentException("Artifact type is required.");
         }
@@ -101,7 +111,8 @@ public final class LocalWorkerResultArchiveService {
         }
         response.setContentType(mediaType(relative));
         response.setContentLengthLong(Files.size(file));
-        response.setHeader("Content-Disposition", "attachment; filename=\"" + Path.of(relative).getFileName() + "\"");
+        response.setHeader("Content-Disposition", (inline ? "inline" : "attachment")
+            + "; filename=\"" + Path.of(relative).getFileName() + "\"");
         response.setHeader("Cache-Control", "private, no-store");
         response.setHeader("X-Accel-Buffering", "no");
         response.setHeader("Referrer-Policy", "no-referrer");

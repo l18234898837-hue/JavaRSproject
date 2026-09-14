@@ -39,12 +39,14 @@ import rasterio
 from PIL import Image
 from rasterio.transform import from_bounds
 from rasterio.warp import Resampling, reproject, transform_bounds
+from rasterio.windows import Window, from_bounds as window_from_bounds
 
 
 TILE_SIZE = 256
 MAX_ZOOM = 22
 MAX_PNG_BYTES = 512 * 1024
 WEB_MERCATOR_HALF_WORLD = 20037508.342789244
+QUALITY_SAMPLE_SIZE = 256
 
 
 def inspect_raster_artifact(
@@ -53,11 +55,14 @@ def inspect_raster_artifact(
     """Return browser-safe raster metadata without exposing the artifact path."""
     del artifact_format
     with rasterio.open(path) as dataset:
+        quality = _raster_quality(dataset)
         if dataset.crs is None:
-            return _disabled("TIFF 未包含可用坐标系")
+            quality["boundsValid"] = False
+            return _disabled("TIFF 未包含可用坐标系", quality)
         authority = dataset.crs.to_epsg()
         if authority is None:
-            return _disabled("TIFF 坐标系暂不支持地图查看")
+            quality["boundsValid"] = False
+            return _disabled("TIFF 坐标系暂不支持地图查看", quality)
         if (
             dataset.width <= 0
             or dataset.height <= 0
@@ -65,7 +70,8 @@ def inspect_raster_artifact(
             or dataset.bounds.left >= dataset.bounds.right
             or dataset.bounds.bottom >= dataset.bounds.top
         ):
-            return _disabled("TIFF 地理范围无效")
+            quality["boundsValid"] = False
+            return _disabled("TIFF 地理范围无效", quality)
         try:
             bounds = transform_bounds(
                 dataset.crs,
@@ -77,9 +83,11 @@ def inspect_raster_artifact(
                 densify_pts=21,
             )
         except Exception:
-            return _disabled("TIFF 地理范围无效")
+            quality["boundsValid"] = False
+            return _disabled("TIFF 地理范围无效", quality)
         if not _valid_wgs84_bounds(bounds):
-            return _disabled("TIFF 地理范围无效")
+            quality["boundsValid"] = False
+            return _disabled("TIFF 地理范围无效", quality)
         style, legend = _style_for(dataset.count, artifact_type)
         return {
             "kind": "raster",
@@ -91,6 +99,7 @@ def inspect_raster_artifact(
             "maxZoom": 16,
             "style": style,
             "legend": legend,
+            "quality": quality,
         }
 
 
@@ -116,7 +125,7 @@ def render_raster_tile(
     return encoded
 
 
-def _disabled(reason: str) -> dict[str, Any]:
+def _disabled(reason: str, quality: dict[str, Any]) -> dict[str, Any]:
     return {
         "kind": "raster",
         "renderable": False,
@@ -127,7 +136,52 @@ def _disabled(reason: str) -> dict[str, Any]:
         "maxZoom": None,
         "style": None,
         "legend": None,
+        "quality": quality,
     }
+
+
+def _raster_quality(dataset: rasterio.io.DatasetReader) -> dict[str, Any]:
+    """Summarize a fixed-size overview window without scanning the raster."""
+    height = min(dataset.height, QUALITY_SAMPLE_SIZE)
+    width = min(dataset.width, QUALITY_SAMPLE_SIZE)
+    values = dataset.read(
+        indexes=1,
+        out_shape=(height, width),
+        masked=True,
+        resampling=Resampling.nearest,
+    )
+    raw = np.asanyarray(values.data)
+    finite = (
+        np.isfinite(raw)
+        if np.issubdtype(raw.dtype, np.inexact)
+        else np.ones(raw.shape, dtype=bool)
+    )
+    valid = finite & ~np.ma.getmaskarray(values)
+    valid_values = raw[valid]
+    has_nonfinite = bool(
+        np.issubdtype(raw.dtype, np.inexact) and np.any(~np.isfinite(raw))
+    )
+    statistics: dict[str, float | int] = {}
+    if valid_values.size:
+        statistics = {
+            "min": _json_number(valid_values.min()),
+            "max": _json_number(valid_values.max()),
+        }
+    return {
+        "width": dataset.width,
+        "height": dataset.height,
+        "bandCount": dataset.count,
+        "dtype": dataset.dtypes[0] if len(set(dataset.dtypes)) == 1 else list(dataset.dtypes),
+        "boundsValid": True,
+        "validPixelRatio": float(valid.sum() / valid.size) if valid.size else 0.0,
+        "statistics": statistics,
+        "hasNanOrInf": has_nonfinite,
+    }
+
+
+def _json_number(value: Any) -> float | int:
+    numeric = value.item() if isinstance(value, np.generic) else value
+    return int(numeric) if isinstance(numeric, (int, np.integer)) else float(numeric)
 
 
 def _style_for(count: int, artifact_type: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
@@ -186,11 +240,18 @@ def _render_rgba(
     style: dict[str, Any],
 ) -> np.ndarray:
     kind = style.get("kind")
+    # Sparse feature rasters can collapse to almost-transparent overview
+    # tiles with bilinear interpolation. Max pooling keeps any valid source
+    # signal represented at low zoom while detailed tiles retain smooth RGB.
+    overview_resampling = Resampling.max if z <= 8 else Resampling.bilinear
     if kind == "rgb":
         bands = style.get("bands")
         if bands != [1, 2, 3] or dataset.count < 3:
             raise ValueError("raster RGB bands are invalid")
-        rendered = [_render_band(dataset, band, z, x, y, Resampling.bilinear) for band in bands]
+        rendered = [
+            _render_band(dataset, band, z, x, y, overview_resampling)
+            for band in bands
+        ]
         alpha = np.isfinite(rendered[0])
         rgb = np.stack([_stretch(channel) for channel in rendered], axis=-1)
     elif kind == "mask":
@@ -201,11 +262,11 @@ def _render_rgba(
         rgb[..., 1] = 208
         rgb[..., 2] = 63
     elif kind == "continuous":
-        values = _render_band(dataset, 1, z, x, y, Resampling.bilinear)
+        values = _render_band(dataset, 1, z, x, y, overview_resampling)
         alpha = np.isfinite(values)
         rgb = _viridis(_stretch(values))
     elif kind == "grayscale":
-        values = _render_band(dataset, 1, z, x, y, Resampling.bilinear)
+        values = _render_band(dataset, 1, z, x, y, overview_resampling)
         alpha = np.isfinite(values)
         channel = _stretch(values)
         rgb = np.stack((channel, channel, channel), axis=-1)
@@ -224,10 +285,20 @@ def _render_band(
 ) -> np.ndarray:
     destination = np.full((TILE_SIZE, TILE_SIZE), np.nan, dtype=np.float32)
     west, south, east, north = _mercator_tile_bounds(z, x, y)
+
+    # A task TIFF can be tens of thousands of pixels wide. Reading the full
+    # source for every 256px web tile makes low zoom requests unnecessarily
+    # expensive and can leave Cesium with an apparently empty layer. Restrict
+    # the source read to the part that intersects this Web Mercator tile.
+    source_window = _source_window_for_tile(dataset, west, south, east, north)
+    if source_window is None:
+        return destination
+    source = dataset.read(band, window=source_window, out_dtype="float32")
+    source_transform = dataset.window_transform(source_window)
     reproject(
-        source=rasterio.band(dataset, band),
+        source=source,
         destination=destination,
-        src_transform=dataset.transform,
+        src_transform=source_transform,
         src_crs=dataset.crs,
         src_nodata=dataset.nodata,
         dst_transform=from_bounds(west, south, east, north, TILE_SIZE, TILE_SIZE),
@@ -236,6 +307,28 @@ def _render_band(
         resampling=resampling,
     )
     return destination
+
+
+def _source_window_for_tile(
+    dataset: rasterio.io.DatasetReader,
+    west: float,
+    south: float,
+    east: float,
+    north: float,
+) -> Window | None:
+    """Return the clipped source pixel window intersecting a 3857 tile."""
+    try:
+        source_bounds = transform_bounds(
+            "EPSG:3857", dataset.crs, west, south, east, north, densify_pts=21
+        )
+        requested = window_from_bounds(*source_bounds, transform=dataset.transform)
+        full = Window(0, 0, dataset.width, dataset.height)
+        clipped = requested.intersection(full)
+    except (ValueError, TypeError, rasterio.errors.RasterioError):
+        return None
+    if clipped.width <= 0 or clipped.height <= 0:
+        return None
+    return clipped
 
 
 def _mercator_tile_bounds(z: int, x: int, y: int) -> tuple[float, float, float, float]:

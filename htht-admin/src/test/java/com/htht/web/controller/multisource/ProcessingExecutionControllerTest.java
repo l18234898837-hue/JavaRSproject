@@ -109,6 +109,68 @@ class ProcessingExecutionControllerTest {
     }
 
     @Test
+    void progressIncludesQualityReportSummaryWithoutExposingTheFullReport() {
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        when(details.get(TASK_ID, OWNER)).thenReturn(succeededDetailWithDeclaredArtifact());
+        ProcessingExecutionController controller = controller(details, mock(DispatchNextStageUseCase.class),
+            mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class));
+
+        var response = controller.progress(101L);
+
+        assertThat(response.getBody().getData().qualityReportSummary()).satisfies(summary -> {
+            assertThat(summary.overallStatus()).isEqualTo("NOT_CHECKED");
+            assertThat(summary.totalChecks()).isGreaterThanOrEqualTo(2);
+            assertThat(summary.failedChecks()).isZero();
+        });
+        verify(details).get(TASK_ID, OWNER);
+    }
+
+    @Test
+    void qualityReportRequiresTerminalTaskAndReusesOwnerAuthorization() {
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        when(details.get(TASK_ID, OWNER)).thenReturn(succeededDetailWithDeclaredArtifact());
+        ProcessingExecutionController controller = controller(details, mock(DispatchNextStageUseCase.class),
+            mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class));
+
+        var response = controller.qualityReport(101L);
+
+        assertThat(response.getStatusCodeValue()).isEqualTo(200);
+        assertThat(response.getBody().getData().taskId()).isEqualTo(101L);
+        assertThat(response.getBody().getData().overallStatus()).isEqualTo("NOT_CHECKED");
+        assertThat(response.getBody().getData().checks()).isNotEmpty();
+        verify(details).get(TASK_ID, OWNER);
+    }
+
+    @Test
+    void qualityReportRejectsNonTerminalTasks() {
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        when(details.get(TASK_ID, OWNER)).thenReturn(detail());
+        ProcessingExecutionController controller = controller(details, mock(DispatchNextStageUseCase.class),
+            mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class));
+
+        assertThatThrownBy(() -> controller.qualityReport(101L))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("terminal state");
+        verify(details).get(TASK_ID, OWNER);
+    }
+
+    @Test
+    void qualityReportHtmlDownloadsEscapedReport() throws Exception {
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        when(details.get(TASK_ID, OWNER)).thenReturn(succeededDetailWithDeclaredArtifact());
+        ProcessingExecutionController controller = controller(details, mock(DispatchNextStageUseCase.class),
+            mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mvc.perform(get("/api/multisource/processing-tasks/101/quality-report.html"))
+            .andExpect(status().isOk())
+            .andExpect(content().contentTypeCompatibleWith("text/html"))
+            .andExpect(header().string("Content-Disposition", "attachment; filename=\"task-101-quality-report.html\""))
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("质量检测报告")))
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("总体结论：NOT_CHECKED")));
+    }
+
+    @Test
     void tilePreviewIssuesOnlyAnOpaqueRelativeTileTemplate() {
         GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
         var artifact = artifact("STANDARD_COG", "standard.tif");
@@ -131,6 +193,60 @@ class ProcessingExecutionControllerTest {
         assertThat(response.getBody().getData().tileUrl()).doesNotContain("C:\\", "storageKey", "rs://");
         assertThat(response.getBody().getData().bounds()).containsExactly(110d, 30d, 111d, 31d);
         assertThat(response.getBody().getData().crs()).isEqualTo("EPSG:4326");
+    }
+
+    @Test
+    void progressDescribesGeoreferencedPngPreviewUsingItsCompanionCog() {
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        var png = artifact("FUSION_PREVIEW_PNG", "fusion/czi-rgb.png");
+        var cog = artifact("FUSION_COG", "fusion/czi-rgb.tif");
+        var detail = new TaskDetailView(
+            TASK_ID, 33L, TaskLifecycleStatus.SUCCEEDED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-1", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of()))), List.of(),
+            List.of(new TaskStageView(STAGE_ID, "READ", StageExecutionStatus.SUCCEEDED, 1)), List.of(png, cog)
+        );
+        when(details.get(TASK_ID, OWNER)).thenReturn(detail);
+        ArtifactRasterPreviewService rasterPreview = mock(ArtifactRasterPreviewService.class);
+        when(rasterPreview.describe(any(), any(), any(), org.mockito.ArgumentMatchers.eq("COG"))).thenReturn(
+            new ArtifactRasterPreviewService.RasterPreview(true, null, "EPSG:32650", List.of(111d, 12d, 121d, 18d),
+                0, 16, java.util.Map.of("kind", "rgb"), null)
+        );
+        ProcessingExecutionController controller = controllerWithRasterPreview(details, rasterPreview);
+
+        var artifact = controller.progress(101L).getBody().getData().artifacts().stream()
+            .filter(item -> item.type().equals("FUSION_PREVIEW_PNG")).findFirst().orElseThrow();
+
+        assertThat(artifact.visualization()).isNotNull();
+        assertThat(artifact.visualization().kind()).isEqualTo("tiles");
+        assertThat(artifact.visualization().tileUrl())
+            .startsWith("/api/multisource/processing-tasks/101/artifacts/FUSION_COG/tiles/{z}/{x}/{y}.png?ticket=");
+        assertThat(artifact.visualization().imageUrl()).isNull();
+        assertThat(artifact.visualization().bounds()).containsExactly(111d, 12d, 121d, 18d);
+        assertThat(artifact.visualization().crs()).isNull();
+    }
+
+    @Test
+    void progressUsesScoreCogForSaliencyPreviewPng() {
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        var png = artifact("SALIENCY_PREVIEW_PNG", "saliency/preview.png");
+        var score = artifact("SALIENCY_SCORE_COG", "saliency/score.tif");
+        var cog = artifact("SALIENCY_MASK_COG", "saliency/mask.tif");
+        when(details.get(TASK_ID, OWNER)).thenReturn(new TaskDetailView(
+            TASK_ID, 33L, TaskLifecycleStatus.SUCCEEDED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-1", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of()))), List.of(),
+            List.of(new TaskStageView(STAGE_ID, "READ", StageExecutionStatus.SUCCEEDED, 1)), List.of(png, cog, score)
+        ));
+        ArtifactRasterPreviewService rasterPreview = mock(ArtifactRasterPreviewService.class);
+        when(rasterPreview.describe(any(), any(), any(), org.mockito.ArgumentMatchers.eq("COG"))).thenReturn(
+            new ArtifactRasterPreviewService.RasterPreview(true, null, "EPSG:4326", List.of(110d, 20d, 120d, 30d),
+                0, 16, java.util.Map.of("kind", "score"), null)
+        );
+        var artifact = controllerWithRasterPreview(details, rasterPreview).progress(101L).getBody().getData().artifacts()
+            .stream().filter(item -> item.type().equals("SALIENCY_PREVIEW_PNG")).findFirst().orElseThrow();
+        assertThat(artifact.visualization()).isNotNull();
+        assertThat(artifact.visualization().bounds()).containsExactly(110d, 20d, 120d, 30d);
+        assertThat(artifact.visualization().tileUrl())
+            .contains("/artifacts/SALIENCY_SCORE_COG/tiles/{z}/{x}/{y}.png?ticket=");
     }
 
     @Test
@@ -163,6 +279,39 @@ class ProcessingExecutionControllerTest {
             .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> controller.tile(101L, "STANDARD_COG", 4, 13, 7, "other"))
             .isInstanceOf(SecurityException.class);
+    }
+
+    @Test
+    void imagePreviewUsesArtifactTicketAndServesInlinePng() throws Exception {
+        Path workRoot = Files.createDirectories(temporaryDirectory.resolve("image-worker"));
+        Path artifactRoot = Files.createDirectories(temporaryDirectory.resolve("image-artifacts"));
+        Path image = Files.createDirectories(artifactRoot.resolve("101/work/READ/1/fusion"))
+            .resolve("czi-rgb.png");
+        Files.write(image, new byte[] {1, 2, 3});
+        var png = new TaskArtifactView(STAGE_ID, "FUSION_PREVIEW_PNG",
+            new StorageUri("rs://output/7/task-01/fusion/czi-rgb.png"), checksum(image), image.toFile().length(), "INTERMEDIATE",
+            "101/work/READ/1/fusion/czi-rgb.png");
+        var detail = new TaskDetailView(
+            TASK_ID, 33L, TaskLifecycleStatus.SUCCEEDED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-1", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of()))), List.of(),
+            List.of(new TaskStageView(STAGE_ID, "READ", StageExecutionStatus.SUCCEEDED, 1)), List.of(png)
+        );
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        when(details.get(TASK_ID, OWNER)).thenReturn(detail);
+        var tickets = new ArtifactPreviewTicketService();
+        ProcessingExecutionController controller = new ProcessingExecutionController(
+            () -> OWNER, details, mock(DispatchNextStageUseCase.class), mock(CancelProcessingTaskUseCase.class),
+            mock(RetryFailedStageUseCase.class), new LocalWorkerResultArchiveService(properties(workRoot, artifactRoot)),
+            new ResultDownloadTicketService(), null, tickets, mock(ArtifactRasterPreviewService.class));
+        String ticket = tickets.issue(101L, OWNER, png.type(), png.checksum()).token();
+
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+        mvc.perform(get("/api/multisource/processing-tasks/101/artifacts/FUSION_PREVIEW_PNG/image")
+                .param("ticket", ticket))
+            .andExpect(status().isOk())
+            .andExpect(content().contentType("image/png"))
+            .andExpect(header().string("Content-Disposition", "inline; filename=\"czi-rgb.png\""))
+            .andExpect(content().bytes(new byte[] {1, 2, 3}));
     }
 
     @Test
@@ -305,14 +454,19 @@ class ProcessingExecutionControllerTest {
 
     private ProcessingExecutionController controllerWithDownloads(GetTaskDetailUseCase details, Path workRoot,
                                                                   Path artifactRoot) {
+        MultiSourceWorkerProperties properties = properties(workRoot, artifactRoot);
+        return new ProcessingExecutionController(() -> OWNER, details, mock(DispatchNextStageUseCase.class),
+            mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class),
+            new LocalWorkerResultArchiveService(properties), new ResultDownloadTicketService());
+    }
+
+    private MultiSourceWorkerProperties properties(Path workRoot, Path artifactRoot) {
         MultiSourceWorkerProperties properties = new MultiSourceWorkerProperties();
         properties.setCommand(List.of("worker"));
         properties.setWorkRoot(workRoot);
         properties.setArtifactRoot(artifactRoot);
         properties.setTimeout(Duration.ofMinutes(10));
-        return new ProcessingExecutionController(() -> OWNER, details, mock(DispatchNextStageUseCase.class),
-            mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class),
-            new LocalWorkerResultArchiveService(properties), new ResultDownloadTicketService());
+        return properties;
     }
 
     private ProcessingExecutionController controllerWithRasterPreview(GetTaskDetailUseCase details,
@@ -347,6 +501,19 @@ class ProcessingExecutionControllerTest {
     private TaskArtifactView artifact(String type, String fileName) {
         return new TaskArtifactView(STAGE_ID, type,
             new StorageUri("rs://output/7/task-01/" + fileName), "sha256:test", 32L, "INTERMEDIATE");
+    }
+
+    private TaskDetailView succeededDetailWithDeclaredArtifact() {
+        return new TaskDetailView(TASK_ID, 33L, TaskLifecycleStatus.SUCCEEDED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-1", List.of(new ProcessingStage(
+                "READ", "READ_SOURCE", List.of(), List.of(),
+                List.of(new com.htht.multisource.application.port.out.model.StageOutput(
+                    "PROCESSING_SUMMARY_JSON", "summary.json",
+                    com.htht.multisource.application.port.out.model.StageOutput.Retention.INTERMEDIATE
+                )), "{}"
+            ))), List.of(),
+            List.of(new TaskStageView(STAGE_ID, "READ", StageExecutionStatus.SUCCEEDED, 1)),
+            List.of(artifact("PROCESSING_SUMMARY_JSON", "summary.json")));
     }
 
     private static String checksum(Path path) throws Exception {

@@ -26,6 +26,7 @@ from .fy4b_agri_navigation import apparent_reflectance, build_nominal_grid
 from .models import BandMetadata, BandSet, RasterData
 from .operators.align import align_to_reference
 from .operators.cog import write_cog
+from .product_adapters.fy4b_agri import ROLE_ORDER
 
 
 FY4B_QUALITY_FILL = 1

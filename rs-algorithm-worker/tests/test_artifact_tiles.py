@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import math
 
 import numpy as np
 import pytest
@@ -52,7 +53,7 @@ def test_inspect_raster_returns_wgs84_bounds_and_rgb_style(tmp_path):
         write_raster(tmp_path / "rgb.tif"), "COG", "STANDARD_COG"
     )
 
-    assert result == {
+    assert {key: value for key, value in result.items() if key != "quality"} == {
         "kind": "raster",
         "renderable": True,
         "reason": None,
@@ -62,6 +63,16 @@ def test_inspect_raster_returns_wgs84_bounds_and_rgb_style(tmp_path):
         "maxZoom": 16,
         "style": {"kind": "rgb", "bands": [1, 2, 3]},
         "legend": None,
+    }
+    assert result["quality"] == {
+        "width": 256,
+        "height": 256,
+        "bandCount": 3,
+        "dtype": "uint8",
+        "boundsValid": True,
+        "validPixelRatio": 1.0,
+        "statistics": {"min": 80, "max": 80},
+        "hasNanOrInf": False,
     }
 
 
@@ -108,6 +119,23 @@ def test_render_raster_tile_returns_a_256_pixel_rgba_png(tmp_path):
     image = Image.open(io.BytesIO(tile))
     assert image.size == (256, 256)
     assert image.mode == "RGBA"
+    assert image.getchannel("A").getextrema()[1] == 255
+
+
+def test_render_raster_tile_reads_only_intersecting_window_for_utm_raster(tmp_path):
+    path = write_raster(tmp_path / "utm.tif", crs="EPSG:32650")
+    metadata = inspect_raster_artifact(path, "COG", "STANDARD_COG")
+    west, south, east, north = metadata["bounds"]
+    lon = (west + east) / 2
+    lat = (south + north) / 2
+    zoom = 8
+    dimension = 2**zoom
+    x = int((lon + 180) / 360 * dimension)
+    y = int((1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * dimension)
+
+    tile = render_raster_tile(path, z=zoom, x=x, y=y, style=metadata["style"])
+
+    image = Image.open(io.BytesIO(tile))
     assert image.getchannel("A").getextrema()[1] == 255
 
 

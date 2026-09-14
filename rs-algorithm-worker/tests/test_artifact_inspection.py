@@ -4,8 +4,11 @@ import json
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import rasterio
+from rasterio.transform import from_origin
 
 from rs_algorithm_worker.artifact_inspection import inspect_artifact
+from rs_algorithm_worker.artifact_tiles import inspect_raster_artifact
 from rs_algorithm_worker.contracts import validate_invocation
 from rs_algorithm_worker.registry import dispatch
 
@@ -22,6 +25,29 @@ def test_inspection_returns_bounded_json_table_summary(tmp_path):
     assert result["rowCount"] == 120
     assert len(result["rows"]) == 100
     assert result["rows"][0] == {"id": 0, "name": "row-0"}
+
+
+def test_inspection_reports_table_empty_value_ratio(tmp_path):
+    source = tmp_path / "missing.csv"
+    source.write_text("a,b\n1,\n,3\n", encoding="utf-8")
+    result = inspect_artifact(source, "CSV")
+    assert result["quality"] == {"rowCount": 2, "columnCount": 2, "emptyValueRatio": 0.5}
+
+
+def test_inspection_reports_geojson_invalid_geometry_and_coordinate_range(tmp_path):
+    source = tmp_path / "points.geojson"
+    source.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [120, 30]}, "properties": {}},
+            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [200, 95]}, "properties": {}},
+            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [1]}, "properties": {}},
+        ],
+    }), encoding="utf-8")
+    result = inspect_artifact(source, "GEOJSON")
+    assert result["quality"]["geometryCount"] == 3
+    assert result["quality"]["invalidGeometryCount"] == 2
+    assert result["quality"]["coordinateRangeValid"] is False
 
 
 def test_inspection_returns_csv_schema_and_bounded_rows(tmp_path):
@@ -41,11 +67,14 @@ def test_inspection_returns_csv_schema_and_bounded_rows(tmp_path):
     assert result["columns"] == ["longitude", "latitude", "height"]
     assert result["rowCount"] == 103
     assert len(result["rows"]) == 100
+    assert result["quality"]["rowCount"] == 103
+    assert result["quality"]["columnCount"] == 3
+    assert result["quality"]["emptyValueRatio"] == 0.0
 
 
 def test_inspection_returns_parquet_schema_statistics_and_bounded_rows(tmp_path):
     source = tmp_path / "track.parquet"
-    pq.write_table(pa.table({"height": list(range(120)), "quality": [1] * 120}), source)
+    pq.write_table(pa.table({"height": list(range(120)), "quality": [None] + [1] * 119}), source)
 
     result = inspect_artifact(source, "PARQUET")
 
@@ -55,6 +84,28 @@ def test_inspection_returns_parquet_schema_statistics_and_bounded_rows(tmp_path)
     assert result["rowCount"] == 120
     assert len(result["rows"]) == 100
     assert result["statistics"]["height"] == {"min": 0, "max": 119}
+    assert result["quality"]["rowCount"] == 120
+    assert result["quality"]["columnCount"] == 2
+    assert result["quality"]["emptyValueRatio"] == 1 / 200
+
+
+def test_inspection_raster_reports_quality_metrics(tmp_path):
+    source = tmp_path / "sparse.tif"
+    values = np.array([[1.0, np.nan], [np.inf, 4.0]], dtype=np.float32)
+    with rasterio.open(source, "w", driver="GTiff", width=2, height=2, count=1,
+                       dtype="float32", crs="EPSG:4326", transform=from_origin(120, 32, 1, 1),
+                       nodata=np.nan) as dataset:
+        dataset.write(values, 1)
+    result = inspect_raster_artifact(source, "TIFF", "SCIENCE")
+    assert result["quality"]["width"] == 2
+    assert result["quality"]["height"] == 2
+    assert result["quality"]["bandCount"] == 1
+    assert result["quality"]["dtype"] == "float32"
+    assert result["quality"]["boundsValid"] is True
+    assert result["quality"]["validPixelRatio"] == 0.5
+    assert result["quality"]["hasNanOrInf"] is True
+    assert result["quality"]["statistics"]["min"] == 1.0
+    assert result["quality"]["statistics"]["max"] == 4.0
 
 
 def test_inspection_returns_netcdf_dimensions_variables_and_time_range(tmp_path):
@@ -76,6 +127,13 @@ def test_inspection_returns_netcdf_dimensions_variables_and_time_range(tmp_path)
     assert result["variables"] == ["time", "height"]
     assert result["timeRange"] == {"start": "2026-01-01T00:00:00Z", "end": "2026-01-01T00:02:00Z"}
     assert result["statistics"]["height"] == {"min": 1.5, "max": 3.5}
+    assert result["quality"] == {
+        "dimensionCount": 1,
+        "variableCount": 2,
+        "observationCount": 3,
+        "timeRangeValid": True,
+        "statistics": {"height": {"min": 1.5, "max": 3.5}},
+    }
 
 
 def test_inspection_reports_npz_metadata_without_exposing_values(tmp_path):
@@ -125,4 +183,5 @@ def test_inspect_artifact_operation_uses_only_the_authorized_manifest_input(tmp_
         "columns": ["id"],
         "rowCount": 1,
         "rows": [{"id": 1}],
+        "quality": {"rowCount": 1, "columnCount": 1, "emptyValueRatio": 0.0},
     }

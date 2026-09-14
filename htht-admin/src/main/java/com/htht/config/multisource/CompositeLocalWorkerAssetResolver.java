@@ -111,6 +111,30 @@ public final class CompositeLocalWorkerAssetResolver implements AssetStorage, Lo
         }
     }
 
+    @Override
+    public String originalFileName(String grantReference, StorageUri storageUri, Path resolvedPath) {
+        if (storageUri == null || storageUri.value() == null) {
+            throw new IllegalArgumentException("Asset storage URI is required.");
+        }
+        if (storageUri.value().startsWith("rs://sys-file/")) {
+            resolve(grantReference, storageUri);
+            return sysFiles.originalFileName(grantReference, storageUri, resolvedPath);
+        }
+        if (storageUri.value().startsWith("rs://worker-output/")
+            || storageUri.value().startsWith("rs://task-artifact/")) {
+            Path authorizedPath = resolve(grantReference, storageUri);
+            try {
+                if (resolvedPath == null || !authorizedPath.equals(resolvedPath.toRealPath())) {
+                    throw new IllegalArgumentException("Resolved asset does not match the authorized asset.");
+                }
+            } catch (IOException exception) {
+                throw new IllegalArgumentException("Resolved asset cannot be read.", exception);
+            }
+            return LocalWorkerAssetResolver.super.originalFileName(grantReference, storageUri, authorizedPath);
+        }
+        throw new IllegalArgumentException("Unsupported asset storage URI.");
+    }
+
     private static boolean safeRelativePath(String value) {
         return value != null && !value.isBlank() && value.indexOf('\\') < 0 && !Path.of(value).isAbsolute()
             && !Path.of(value).normalize().startsWith("..");

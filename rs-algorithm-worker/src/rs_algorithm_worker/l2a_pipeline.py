@@ -596,12 +596,35 @@ def _saliency_artifacts(output_uri: str, output_dir: Path, raster: RasterData, c
         saliency.mask.astype(np.uint8), raster.crs, raster.transform, 0,
         (BandMetadata("saliency_mask"),),
     )
-    Image.fromarray((saliency.mask.astype(np.uint8) * 255), mode="L").save(preview_path, format="PNG")
+    Image.fromarray(_saliency_preview_rgb(saliency.score.values), mode="RGB").save(preview_path, format="PNG")
     return [
         _cog_artifact(output_uri, output_dir, "SALIENCY_SCORE_COG", write_cog(saliency.score, score_path)),
         _cog_artifact(output_uri, output_dir, "SALIENCY_MASK_COG", write_cog(mask_raster, mask_path)),
         _file_artifact(output_uri, output_dir, "SALIENCY_PREVIEW_PNG", preview_path),
     ]
+
+
+def _saliency_preview_rgb(score_values: np.ndarray) -> np.ndarray:
+    """Render normalized saliency scores as a compact, human-readable heatmap."""
+    values = np.asarray(score_values, dtype=np.float32)
+    if values.ndim != 2:
+        raise ValueError("saliency preview expects a two-dimensional score raster")
+    values = np.nan_to_num(values, nan=0.0, posinf=1.0, neginf=0.0)
+    values = np.clip(values, 0.0, 1.0)
+    anchors = np.array(
+        [
+            [0, 0, 0],
+            [49, 54, 149],
+            [0, 174, 239],
+            [255, 221, 0],
+            [215, 25, 28],
+        ],
+        dtype=np.float32,
+    )
+    positions = np.linspace(0.0, 1.0, len(anchors), dtype=np.float32)
+    flattened = values.reshape(-1)
+    channels = [np.interp(flattened, positions, anchors[:, channel]) for channel in range(3)]
+    return np.rint(np.stack(channels, axis=1).reshape(*values.shape, 3)).astype(np.uint8)
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
