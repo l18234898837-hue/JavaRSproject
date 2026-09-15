@@ -1,5 +1,7 @@
 package com.htht.config.multisource.archive;
 
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipFile;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -20,9 +22,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
-import java.util.zip.ZipInputStream;
 import java.util.function.LongSupplier;
 
 @Service
@@ -165,9 +164,11 @@ public class ArchiveUploadService {
     private void parse(ArchiveUploadSession s, Path archive) {
         try {
             preflightArchiveCompatibility(s, archive);
-            try (ZipInputStream zin = new ZipInputStream(Files.newInputStream(archive))) {
-            int count = 0; long expanded = 0; byte[] buffer = new byte[8192]; ZipEntry entry;
-            while ((entry = zin.getNextEntry()) != null) {
+            try (ZipFile zip = openCompatibleZip(archive)) {
+            int count = 0; long expanded = 0; byte[] buffer = new byte[8192];
+            var entries = zip.getEntries();
+            while (entries.hasMoreElements()) {
+                ZipArchiveEntry entry = entries.nextElement();
                 if (s.cancelRequested.get()) { s.status = ArchiveUploadStatus.CANCELED; return; }
                 if (++count > properties.getMaxEntryCount()) throw new IllegalArgumentException("ZIP 文件条目过多");
                 String name = entry.getName(); Path safe = Path.of(name).normalize();
@@ -176,8 +177,9 @@ public class ArchiveUploadService {
                 s.currentFile = name; Path target = s.directory.resolve("extracted").resolve(safe).normalize();
                 if (!target.startsWith(s.directory.resolve("extracted").normalize())) throw new IllegalArgumentException("ZIP 包含非法路径");
                 Files.createDirectories(target.getParent());
-                try (var out = Files.newOutputStream(target, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-                    int n; while ((n = zin.read(buffer)) >= 0) { expanded += n; if (expanded > properties.getMaxExpandedSizeBytes()) throw new IllegalArgumentException("ZIP 解压内容超过限制"); out.write(buffer, 0, n); }
+                try (InputStream in = zip.getInputStream(entry);
+                     var out = Files.newOutputStream(target, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                    int n; while ((n = in.read(buffer)) != -1) { expanded += n; if (expanded > properties.getMaxExpandedSizeBytes()) throw new IllegalArgumentException("ZIP 解压内容超过限制"); out.write(buffer, 0, n); }
                 }
                 s.processedFiles++;
             }
@@ -277,15 +279,25 @@ public class ArchiveUploadService {
 
     private void preflightArchiveCompatibility(ArchiveUploadSession s, Path archive) throws IOException {
         var names = new java.util.ArrayList<String>();
-        try (ZipFile zip = new ZipFile(archive.toFile())) {
-            var entries = zip.entries();
+        try (ZipFile zip = openCompatibleZip(archive)) {
+            var entries = zip.getEntries();
             while (entries.hasMoreElements()) {
-                ZipEntry entry = entries.nextElement();
+                ZipArchiveEntry entry = entries.nextElement();
                 if (!entry.isDirectory()) names.add(entry.getName());
             }
         }
         String productConflict = productConflict(s.templateId, names);
         if (productConflict != null) throw new IllegalArgumentException(productConflict);
+    }
+
+    /**
+     * Reads ZIP entry names without forcing malformed bytes through JDK's strict
+     * UTF-8 decoder. UTF-8 names carrying the language flag (or Unicode extra
+     * field) are still decoded as Unicode; ISO-8859-1 is the lossless fallback
+     * for legacy archives whose name bytes are not valid UTF-8.
+     */
+    private ZipFile openCompatibleZip(Path archive) throws IOException {
+        return new ZipFile(archive.toFile(), "ISO-8859-1", true);
     }
 
     private String productConflict(String template, java.util.List<String> names) {
@@ -332,10 +344,18 @@ public class ArchiveUploadService {
         if (template.contains("gf6-wfv-l1a")) {
             if (lower.endsWith(".tif") || lower.endsWith(".tiff")) {
                 var m = java.util.regex.Pattern.compile("(?:tile|t|part|block)[-_ ]*0?([1-3])(?:\\D|$)").matcher(lower);
-                if (m.find()) return "mainTiffTile" + (Integer.parseInt(m.group(1)) - 1);
+                boolean matched = m.find();
+                if (!matched) {
+                    // GF-6 production names commonly end in -1/-2/-3
+                    // without the literal tile/part marker.
+                    m = java.util.regex.Pattern.compile("[-_ ]0?([1-3])\\.tiff?$", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(lower);
+                    matched = m.find();
+                }
+                if (matched) return "mainTiffTile" + (Integer.parseInt(m.group(1)) - 1);
                 long count = s.matchedSlots.stream().filter(x -> x.startsWith("mainTiffTile")).count();
                 return count < 3 ? "mainTiffTile" + count : null;
             }
+            if (lower.endsWith(".rpb.aux.xml")) return null;
             if (lower.endsWith(".xml")) return "metadataXml";
             if (lower.endsWith(".rpb") && !isTileRpb(lower)) return "rpcRpb";
             if (lower.endsWith(".nav")) return "nav";

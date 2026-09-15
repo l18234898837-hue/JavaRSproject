@@ -175,8 +175,20 @@ def build_staged_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any
     stages: list[dict[str, Any]] = [
         {"stageKey": "VALIDATE_GF6_WFV_L1A", "stageCode": "VALIDATE_GF6_WFV_L1A", "dependsOnStageKeys": [],
          "inputs": raw_inputs, "outputs": [{"artifactType": "GF6_INPUT_VALIDATION_JSON", "relativePath": "validation/package.json", "retention": "INTERMEDIATE"}], "parameterSnapshot": snapshot},
-        {"stageKey": "WRITE_GF6_STANDARD_COG", "stageCode": "WRITE_GF6_STANDARD_COG", "dependsOnStageKeys": ["VALIDATE_GF6_WFV_L1A"],
+        {"stageKey": "MOSAIC_GF6_TILES", "stageCode": "MOSAIC_GF6_TILES", "dependsOnStageKeys": ["VALIDATE_GF6_WFV_L1A"],
          "inputs": raw_inputs,
+         "outputs": [{"artifactType": "GF6_TILE_MOSAIC_VRT", "relativePath": "preprocess/mosaic.vrt", "retention": "INTERMEDIATE"}], "parameterSnapshot": snapshot},
+        {"stageKey": "GEOLOCATE_GF6_RPC", "stageCode": "GEOLOCATE_GF6_RPC", "dependsOnStageKeys": ["MOSAIC_GF6_TILES"],
+         "inputs": raw_inputs + [{"key": "mosaic", "source": "UPSTREAM_ARTIFACT", "artifactType": "GF6_TILE_MOSAIC_VRT", "required": True}],
+         "outputs": [{"artifactType": "GF6_RPC_GRID_JSON", "relativePath": "preprocess/rpc-grid.json", "retention": "INTERMEDIATE"}], "parameterSnapshot": snapshot},
+        {"stageKey": "STANDARDIZE_GF6_PROJECTION", "stageCode": "STANDARDIZE_GF6_PROJECTION", "dependsOnStageKeys": ["MOSAIC_GF6_TILES", "GEOLOCATE_GF6_RPC"],
+         "inputs": raw_inputs + [
+             {"key": "mosaic", "source": "UPSTREAM_ARTIFACT", "artifactType": "GF6_TILE_MOSAIC_VRT", "required": True},
+             {"key": "grid", "source": "UPSTREAM_ARTIFACT", "artifactType": "GF6_RPC_GRID_JSON", "required": True},
+         ],
+         "outputs": [{"artifactType": "GF6_PROJECTED_RASTER", "relativePath": "preprocess/projected.tif", "retention": "INTERMEDIATE"}], "parameterSnapshot": snapshot},
+        {"stageKey": "WRITE_GF6_STANDARD_COG", "stageCode": "WRITE_GF6_STANDARD_COG", "dependsOnStageKeys": ["STANDARDIZE_GF6_PROJECTION"],
+         "inputs": raw_inputs + [{"key": "projected", "source": "UPSTREAM_ARTIFACT", "artifactType": "GF6_PROJECTED_RASTER", "required": True}],
          "outputs": [item for item in base["outputs"] if item["artifactType"] in {"GF6_STANDARD_COG", "GF6_PROCESSING_SUMMARY_JSON"}], "parameterSnapshot": snapshot},
     ]
     previous = "WRITE_GF6_STANDARD_COG"

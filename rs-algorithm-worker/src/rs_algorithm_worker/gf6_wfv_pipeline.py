@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import shutil
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
@@ -69,10 +70,40 @@ def execute_gf6_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dict
         path.write_text(json.dumps({"profileKey": PROFILE_KEY, "packageId": evidence.package_id, "valid": True}, sort_keys=True) + "\n", encoding="utf-8")
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, "GF6_INPUT_VALIDATION_JSON", path, directory)]}
     parameters = parse_parameters(_payload_parameters(payload))
+    if stage == "MOSAIC_GF6_TILES":
+        evidence = inspect_evidence(manifest)
+        path = directory / "preprocess" / "mosaic.vrt"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_mosaic_vrt(evidence, path)
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, "GF6_TILE_MOSAIC_VRT", path, directory)]}
+    if stage == "GEOLOCATE_GF6_RPC":
+        evidence = inspect_evidence(manifest)
+        grid = build_nominal_rpc_grid(evidence, parameters["targetCrs"], parameters["resolution"], 0.0)
+        if parameters["roi"]:
+            grid = crop_nominal_rpc_grid(grid, tuple(parameters["roi"]))
+        path = directory / "preprocess" / "rpc-grid.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_grid_metadata(path, grid)
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, "GF6_RPC_GRID_JSON", path, directory)]}
+    if stage == "STANDARDIZE_GF6_PROJECTION":
+        evidence = inspect_evidence(manifest)
+        mosaic = _manifest_role_path(manifest, "mosaic")
+        grid_path = _manifest_role_path(manifest, "grid")
+        grid = _read_grid_metadata(grid_path)
+        path = directory / "preprocess" / "projected.tif"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _resample_vrt_to_standard(evidence, mosaic, path, grid, parameters["bands"])
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, "GF6_PROJECTED_RASTER", path, directory)]}
     if stage == "WRITE_GF6_STANDARD_COG":
         evidence = inspect_evidence(manifest)
         standard = directory / "standard" / "gf6-standard.tif"; standard.parent.mkdir(parents=True, exist_ok=True)
-        _write_standard_cog(evidence, standard, parameters)
+        # plan-v3 supplies the projected intermediate. Keep the legacy direct
+        # invocation usable for callers that dispatch this stage in isolation.
+        projected = _find_manifest_role_path(manifest, "projected")
+        if projected is None:
+            _write_standard_cog(evidence, standard, parameters)
+        else:
+            shutil.copyfile(projected, standard)
         summary = _write_processing_summary(standard, evidence, parameters)
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, "GF6_STANDARD_COG", standard, directory), _artifact(output_uri, "GF6_PROCESSING_SUMMARY_JSON", summary, directory)], "metadata": {"navigationStatus": "NOMINAL_RPC_NO_DEM", "accuracyStatus": "UNVALIDATED"}}
     standard = _manifest_role_path(manifest, "standard")
@@ -90,13 +121,20 @@ def _stage_artifacts(output_uri: str, directory: Path, artifacts: list[tuple[str
 
 
 def _manifest_role_path(manifest: dict[str, Any], role: str) -> Path:
+    path = _find_manifest_role_path(manifest, role)
+    if path is None:
+        raise ValueError(f"GF6 stage requires one authorized {role} input")
+    return path
+
+
+def _find_manifest_role_path(manifest: dict[str, Any], role: str) -> Path | None:
     matches = [
         Path(item["path"])
         for item in manifest.get("inputs", [])
         if isinstance(item, dict) and item.get("role") == role and isinstance(item.get("path"), str)
     ]
     if len(matches) != 1 or not matches[0].is_file():
-        raise ValueError(f"GF6 stage requires one authorized {role} input")
+        return None
     return matches[0]
 
 
@@ -175,6 +213,36 @@ def _write_mosaic_vrt(evidence: Gf6ProductEvidence, path: Path) -> None:
         )
         bands.append(f'<VRTRasterBand dataType="UInt16" band="{index}"><NoDataValue>0</NoDataValue>{sources}</VRTRasterBand>')
     path.write_text(f'<VRTDataset rasterXSize="{evidence.width}" rasterYSize="{evidence.height}"><Metadata domain="RPC">{rpc}</Metadata>{"".join(bands)}</VRTDataset>', encoding="utf-8")
+
+
+def _write_grid_metadata(path: Path, grid) -> None:
+    path.write_text(json.dumps({
+        "crs": grid.crs,
+        "transform": [grid.transform.a, grid.transform.b, grid.transform.c, grid.transform.d, grid.transform.e, grid.transform.f],
+        "width": grid.width,
+        "height": grid.height,
+        "bounds": list(grid.bounds),
+        "heightM": grid.height_m,
+    }, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _read_grid_metadata(path: Path):
+    from affine import Affine
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("GF6_RPC_GRID_INVALID: metadata")
+    transform = value.get("transform")
+    if (not isinstance(value.get("crs"), str)
+            or not isinstance(transform, list) or len(transform) != 6
+            or not all(isinstance(item, (int, float)) and math.isfinite(item) for item in transform)
+            or not isinstance(value.get("width"), int) or not isinstance(value.get("height"), int)
+            or value["width"] <= 0 or value["height"] <= 0):
+        raise ValueError("GF6_RPC_GRID_INVALID: metadata")
+    return type("Grid", (), {
+        "crs": value["crs"], "transform": Affine(*transform),
+        "width": value["width"], "height": value["height"],
+        "bounds": tuple(value.get("bounds", ())), "height_m": float(value.get("heightM", 0.0)),
+    })()
 
 
 def _resample_vrt_to_standard(evidence: Gf6ProductEvidence, vrt: Path, path: Path, grid, selected_bands: list[int]) -> None:

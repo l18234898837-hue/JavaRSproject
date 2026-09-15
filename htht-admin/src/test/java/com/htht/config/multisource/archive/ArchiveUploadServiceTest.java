@@ -12,6 +12,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CountDownLatch;
 import java.util.zip.ZipEntry;
@@ -64,6 +65,21 @@ class ArchiveUploadServiceTest {
     }
 
     @Test
+    void acceptsInvalidUtf8BytesInCentralDirectoryEntryName() throws Exception {
+        byte[] zip = zip("12345678", new byte[]{42});
+        byte[] malformedNameZip = replaceCentralDirectoryName(zip,
+            new byte[]{(byte) 0xff, (byte) 0xfe, 't', 'r', 'y', '.', 't', 'x'});
+        ArchiveUploadService service = service();
+        ArchiveUploadProgress created = service.createSession(7, "legacy.zip", malformedNameZip.length,
+            malformedNameZip.length, 1, null);
+        service.uploadChunk(7, created.uploadId(), 0, new ByteArrayInputStream(malformedNameZip), malformedNameZip.length);
+        service.complete(7, created.uploadId());
+
+        ArchiveUploadProgress progress = awaitFinished(service, created.uploadId());
+        assertThat(progress.status()).as(progress.error()).isEqualTo(ArchiveUploadStatus.COMPLETED);
+    }
+
+    @Test
     void parsesGf6FilesAndRegistersSysFiles() throws Exception {
         byte[] zip = zipEntries(
             new String[]{"scene_tile1.tif", "scene_tile2.tif", "scene_tile3.tif", "scene.xml", "scene.rpb", "scene.nav", "scene.til"},
@@ -89,6 +105,41 @@ class ArchiveUploadServiceTest {
         assertThat(progress.matchedSlots()).containsExactlyInAnyOrder("mainTiffTile0", "mainTiffTile1", "mainTiffTile2", "metadataXml", "rpcRpb", "nav", "tileIndexTil");
         assertThat(progress.matchedFiles()).allSatisfy(file -> assertThat(file.sysFileId()).isNotBlank());
         assertThat(Files.exists(temp.resolve("sessions").resolve(created.uploadId()))).isFalse();
+    }
+
+    @Test
+    void parsesRealGf6SuffixTilesAndIgnoresRpbAuxXml() throws Exception {
+        byte[] zip = zipEntries(
+            new String[]{
+                "GF6_WFV_E107.6_N9.0_20260716_L1A1420724603-1.tiff",
+                "GF6_WFV_E107.6_N9.0_20260716_L1A1420724603-2.tiff",
+                "GF6_WFV_E107.6_N9.0_20260716_L1A1420724603-3.tiff",
+                "GF6_WFV_E107.6_N9.0_20260716_L1A1420724603.xml",
+                "GF6_WFV_E107.6_N9.0_20260716_L1A1420724603-1.rpb.aux.xml",
+                "GF6_WFV_E107.6_N9.0_20260716_L1A1420724603.rpb",
+                "GF6_WFV_E107.6_N9.0_20260716_L1A1420724603.nav",
+                "GF6_WFV_E107.6_N9.0_20260716_L1A1420724603.til"},
+            new byte[]{1, 2, 3, 4, 5, 6, 7, 8});
+        ISysFileService files = mock(ISysFileService.class);
+        when(files.upload(any())).thenAnswer(invocation -> {
+            org.springframework.web.multipart.MultipartFile file = invocation.getArgument(0);
+            SysFile result = new SysFile();
+            result.setId((long) file.getOriginalFilename().hashCode() * -1L + 100);
+            result.setFileName(file.getOriginalFilename());
+            return result;
+        });
+        ArchiveUploadService service = service(files);
+        ArchiveUploadProgress created = service.createSession(7, "sample.zip", zip.length, zip.length, 1, "gf6-wfv-l1a-v1");
+        service.uploadChunk(7, created.uploadId(), 0, new ByteArrayInputStream(zip), zip.length);
+        service.complete(7, created.uploadId());
+
+        ArchiveUploadProgress progress = awaitFinished(service, created.uploadId());
+        assertThat(progress.status()).isEqualTo(ArchiveUploadStatus.COMPLETED);
+        assertThat(progress.matchedSlots()).containsExactlyInAnyOrder(
+            "mainTiffTile0", "mainTiffTile1", "mainTiffTile2", "metadataXml", "rpcRpb", "nav", "tileIndexTil");
+        assertThat(progress.matchedFiles().stream().filter(file -> file.slotId().equals("metadataXml")))
+            .extracting(ArchiveUploadProgress.MatchedFile::fileName)
+            .containsExactly("GF6_WFV_E107.6_N9.0_20260716_L1A1420724603.xml");
     }
 
     @Test
@@ -304,5 +355,32 @@ class ArchiveUploadServiceTest {
             }
         }
         return bytes.toByteArray();
+    }
+
+    private static byte[] replaceCentralDirectoryName(byte[] zip, byte[] replacement) {
+        byte[] result = Arrays.copyOf(zip, zip.length);
+        int central = -1;
+        for (int i = 0; i + 3 < result.length; i++) {
+            if ((result[i] & 0xff) == 0x50 && (result[i + 1] & 0xff) == 0x4b
+                && (result[i + 2] & 0xff) == 0x01 && (result[i + 3] & 0xff) == 0x02) {
+                central = i;
+                break;
+            }
+        }
+        if (central < 0) throw new AssertionError("central directory not found");
+        // Mark the legacy entry as non-UTF-8, matching archives that trigger
+        // JDK 17's strict invalid-CEN-name check.
+        result[central + 9] = (byte) (result[central + 9] & 0xF7);
+        for (int i = 0; i + 3 < central; i++) {
+            if ((result[i] & 0xff) == 0x50 && (result[i + 1] & 0xff) == 0x4b
+                && (result[i + 2] & 0xff) == 0x03 && (result[i + 3] & 0xff) == 0x04) {
+                result[i + 7] = (byte) (result[i + 7] & 0xF7);
+                break;
+            }
+        }
+        int nameLength = (result[central + 28] & 0xff) | ((result[central + 29] & 0xff) << 8);
+        if (nameLength != replacement.length) throw new AssertionError("unexpected entry name length");
+        System.arraycopy(replacement, 0, result, central + 46, replacement.length);
+        return result;
     }
 }

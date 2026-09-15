@@ -79,7 +79,7 @@ def build_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | Non
             _output("TRACK_ANOMALIES_GEOJSON", "anomalies/points.geojson", "FINAL"),
             _output("TRACK_ANOMALY_SUMMARY_JSON", "anomalies/summary.json", "FINAL"),
         ], snapshot),
-        _stage("WRITE_STANDARD_TRACK_OUTPUT", ["CALCULATE_BASELINE_SSH", "EXTRACT_TRACK_FEATURES", "DETECT_TRACK_ANOMALIES"], [
+        _stage("WRITE_STANDARD_TRACK_OUTPUT", ["APPLY_TRACK_QUALITY", "CALCULATE_BASELINE_SSH", "EXTRACT_TRACK_FEATURES", "DETECT_TRACK_ANOMALIES"], [
             _input("ssh", "UPSTREAM_ARTIFACT", "BASELINE_SSH_TRACK"),
             _input("quality", "UPSTREAM_ARTIFACT", "QUALITY_FILTERED_ALTIMETER_TRACK"),
             _input("features", "UPSTREAM_ARTIFACT", "TRACK_FEATURES_JSON"),

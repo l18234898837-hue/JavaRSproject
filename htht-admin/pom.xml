@@ -38,6 +38,12 @@
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
         </dependency>
+        <!-- Tolerant ZIP entry-name decoding for legacy archives. -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>1.21</version>
+        </dependency>
         <!-- Flyway database migrations -->
         <dependency>
             <groupId>org.flywaydb</groupId>

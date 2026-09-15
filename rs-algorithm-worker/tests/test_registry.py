@@ -232,7 +232,13 @@ def test_registry_builds_requested_plan_v3_for_gf6_l1a_with_staged_dag(tmp_path)
 
     assert plan["version"] == "plan-v3"
     keys = [stage["stageKey"] for stage in plan["stages"]]
-    assert keys[:2] == ["VALIDATE_GF6_WFV_L1A", "WRITE_GF6_STANDARD_COG"]
+    assert keys[:5] == [
+        "VALIDATE_GF6_WFV_L1A",
+        "MOSAIC_GF6_TILES",
+        "GEOLOCATE_GF6_RPC",
+        "STANDARDIZE_GF6_PROJECTION",
+        "WRITE_GF6_STANDARD_COG",
+    ]
     assert "STANDARDIZE_GF6_WFV_L1A" not in keys
     assert plan["stages"][0]["outputs"][0]["retention"] == "INTERMEDIATE"
     allowed_sources = {"RAW_INPUT", "UPSTREAM_ARTIFACT"}

@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-from rs_algorithm_worker.product_adapters.hy2d_altimeter import build_integrated_plan, build_plan, inspect_manifest
+from rs_algorithm_worker.product_adapters.hy2d_altimeter import build_integrated_plan, build_plan, build_staged_plan, inspect_manifest
 from rs_algorithm_worker.hy2d_pipeline import execute_hy2d_stage
 
 
@@ -54,6 +54,13 @@ def test_hy2d_plan_declares_track_artifacts_and_optional_grid() -> None:
     assert plan["version"] == "plan-v2"
     assert "GRID_TRACK_OPTIONAL" in stages
     assert stages["APPLY_TRACK_QUALITY"]["outputs"][0]["artifactType"] == "QUALITY_FILTERED_ALTIMETER_TRACK"
+
+
+def test_hy2d_staged_plan_declares_quality_stage_for_standard_output() -> None:
+    plan = build_staged_plan(_candidate(), {"grid": {"enabled": False, "spacingDegrees": 0.25}})
+    stages = {stage["stageKey"]: stage for stage in plan["stages"]}
+    assert plan["version"] == "plan-v3"
+    assert "APPLY_TRACK_QUALITY" in stages["WRITE_STANDARD_TRACK_OUTPUT"]["dependsOnStageKeys"]
 
 
 def test_hy2d_integrated_plan_matches_the_single_dispatch_contract() -> None:
