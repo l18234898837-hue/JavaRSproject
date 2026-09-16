@@ -515,6 +515,68 @@ def test_statistics_only_features_still_write_the_declared_feature_cog(tmp_path)
     assert (tmp_path / "features" / "fy4b-features.tif").is_file()
 
 
+def test_staged_statistics_only_features_do_not_require_optional_red_upstream_artifact(tmp_path):
+    standard = tmp_path / "standard.tif"
+    with rasterio.open(
+        standard, "w", driver="GTiff", width=2, height=2, count=1, dtype="float32",
+        crs="EPSG:4326", transform=from_origin(0, 2, 1, 1), nodata=np.nan,
+    ) as dataset:
+        dataset.write(np.ones((1, 2, 2), dtype=np.float32))
+        dataset.set_band_description(1, "C01_REFLECTANCE")
+
+    output = tmp_path / "stage-output"
+    response = pipeline.execute_fy4b_stage(
+        {
+            "stageKey": "EXTRACT_FY4B_FEATURES",
+            "outputUri": "rs://output/fy4b",
+            "parameterSnapshot": json.dumps({
+                "schemaVersion": "1",
+                "features": {"enabled": True, "metrics": ["statistics"]},
+            }),
+        },
+        {"inputs": [{"path": str(standard), "role": "FY4B_VIS_NIR_1000M_COG"}], "output": {"path": str(output)}},
+    )
+
+    assert response["status"] == "SUCCEEDED"
+    assert (output / "features" / "fy4b-features.tif").is_file()
+
+
+def test_staged_c02_saliency_reads_declared_red_upstream_artifact(tmp_path, monkeypatch):
+    source = tmp_path / "red.tif"
+    with rasterio.open(
+        source, "w", driver="GTiff", width=2, height=2, count=1, dtype="float32",
+        crs="EPSG:4326", transform=from_origin(0, 2, 1, 1), nodata=np.nan,
+    ) as dataset:
+        dataset.write(np.ones((1, 2, 2), dtype=np.float32))
+        dataset.set_band_description(1, "C02_REFLECTANCE_500M")
+    output = tmp_path / "stage-output"
+    seen = []
+
+    def write_saliency(standard, directory, _parameters):
+        seen.append(standard)
+        result = directory / "saliency" / "score.tif"
+        result.parent.mkdir(parents=True, exist_ok=True)
+        result.write_bytes(b"score")
+        return [("FY4B_SALIENCY_SCORE_COG", result)]
+
+    monkeypatch.setattr(pipeline, "_write_fy4b_saliency", write_saliency)
+    response = pipeline.execute_fy4b_stage(
+        {
+            "stageKey": "DETECT_FY4B_SALIENCY",
+            "outputUri": "rs://output/fy4b",
+            "parameterSnapshot": json.dumps({
+                "schemaVersion": "1",
+                "features": {"enabled": True, "metrics": ["statistics"]},
+                "saliency": {"enabled": True, "source": "C02_REFLECTANCE_500M", "threshold": 0.5, "windowSize": 3},
+            }),
+        },
+        {"inputs": [{"path": str(source), "role": "FY4B_RED_500M_COG"}], "output": {"path": str(output)}},
+    )
+
+    assert response["status"] == "SUCCEEDED"
+    assert set(seen[0]) == {"FY4B_RED_500M_COG"}
+
+
 def test_btd_feature_writes_c13_minus_c14_band(tmp_path):
     """Would fail if the declared thermal BTD feature silently fell back to source pixels."""
     standard, thermal = tmp_path / "standard.tif", tmp_path / "thermal.tif"

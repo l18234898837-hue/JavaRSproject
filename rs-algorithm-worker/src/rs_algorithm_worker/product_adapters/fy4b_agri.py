@@ -183,8 +183,15 @@ def build_staged_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any
         dependencies = ["WRITE_FY4B_STANDARD_COG"]
         source = parameters["saliency"]["source"]
         saliency_input = "FY4B_VIS_NIR_1000M_COG"
-        if source.startswith(("gradient:", "local_variance:")) and parameters["features"]["enabled"]:
+        if (source.startswith(("gradient:", "local_variance:"))
+                or source in {"toa_nir_red_nd", "btd_c13_c14"}) and parameters["features"]["enabled"]:
             dependencies.append("EXTRACT_FY4B_FEATURES"); saliency_input = "FY4B_FEATURE_COG"
+        elif source.startswith("C02_"):
+            saliency_input = "FY4B_RED_500M_COG"
+        elif source.startswith("C03_"):
+            saliency_input = "FY4B_VIS_NIR_1000M_COG"
+        elif source not in {"toa_nir_red_nd", "btd_c13_c14"}:
+            saliency_input = "FY4B_MULTISPECTRAL_4000M_COG"
         stages.append({"stageKey": "DETECT_FY4B_SALIENCY", "stageCode": "DETECT_FY4B_SALIENCY", "dependsOnStageKeys": dependencies,
                        "inputs": [_upstream("source", saliency_input)],
                        "outputs": [_output("FY4B_SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"), _output("FY4B_SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"), _output("FY4B_SALIENCY_SUMMARY_JSON", "saliency/summary.json", "FINAL")],

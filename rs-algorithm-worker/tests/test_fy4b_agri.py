@@ -193,6 +193,20 @@ def test_staged_plan_v3_splits_fy4b_pipeline_into_real_dag(tmp_path):
         "WRITE_FY4B_STANDARD_COG",
     ]
     assert plan["stages"][0]["outputs"][0]["artifactType"] == "FY4B_INPUT_VALIDATION_JSON"
+
+
+def test_staged_saliency_plan_declares_source_matching_c02_parameter(tmp_path):
+    candidate = inspect_manifest(make_fy4b_package(tmp_path))[0]
+    plan = build_staged_plan(candidate, {
+        "schemaVersion": "1",
+        "features": {"enabled": True, "metrics": ["statistics"]},
+        "saliency": {"enabled": True, "source": "C02_REFLECTANCE_500M", "threshold": 0.5, "windowSize": 3},
+    })
+
+    saliency = next(stage for stage in plan["stages"] if stage["stageKey"] == "DETECT_FY4B_SALIENCY")
+    assert saliency["inputs"] == [{
+        "key": "FY4B_RED_500M_COG", "source": "UPSTREAM_ARTIFACT", "artifactType": "FY4B_RED_500M_COG", "required": True,
+    }]
     assert plan["stages"][1]["dependsOnStageKeys"] == ["VALIDATE_FY4B_PACKAGE"]
     assert plan["stages"][2]["dependsOnStageKeys"] == ["BUILD_FY4B_NOMINAL_GRID"]
     assert plan["stages"][4]["outputs"][0]["retention"] == "FINAL"

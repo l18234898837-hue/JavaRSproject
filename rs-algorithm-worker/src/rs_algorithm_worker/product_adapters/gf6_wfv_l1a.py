@@ -19,6 +19,10 @@ from .base import input_path_names, logical_file_name
 PRODUCT_CODE = "GF-6-WFV-L1A"
 PROFILE_VERSION = "v1"
 PROFILE_KEY = {"productCode": PRODUCT_CODE, "profileVersion": PROFILE_VERSION}
+_RAW_INPUT_ROLES = {
+    "MAIN_TIFF_TILE", "METADATA_XML", "RPC_RPB", "NAV", "TILE_INDEX_TIL",
+    "FOOTPRINT_SHP", "FOOTPRINT_DBF", "FOOTPRINT_SHX",
+}
 _WAVELENGTHS = ("450-520nm", "520-590nm", "630-690nm", "770-890nm", "690-730nm", "730-770nm", "400-450nm", "590-630nm")
 _RPC_FIELDS = {"lineOffset": "line_offset", "sampOffset": "sample_offset", "latOffset": "latitude_offset", "longOffset": "longitude_offset", "heightOffset": "height_offset", "lineScale": "line_scale", "sampScale": "sample_scale", "latScale": "latitude_scale", "longScale": "longitude_scale", "heightScale": "height_scale", "lineNumCoef": "line_num", "lineDenCoef": "line_den", "sampNumCoef": "sample_num", "sampDenCoef": "sample_den"}
 
@@ -40,6 +44,13 @@ def inspect_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def inspect_evidence(manifest: dict[str, Any]) -> Gf6ProductEvidence:
+    # Staged plan manifests also carry upstream artifacts (for example the
+    # projected raster). Evidence validation must inspect only the original
+    # GF-6 package; otherwise an intermediate TIFF is mistaken for a tile.
+    inputs = manifest.get("inputs")
+    if isinstance(inputs, list) and any(isinstance(item, dict) and item.get("role") for item in inputs):
+        inputs = [item for item in inputs if not isinstance(item, dict) or not item.get("role") or item.get("role") in _RAW_INPUT_ROLES]
+        manifest = {**manifest, "inputs": inputs}
     path_names = input_path_names(manifest)
     return inspect_paths([path for path, _ in path_names], {str(path): name for path, name in path_names})
 

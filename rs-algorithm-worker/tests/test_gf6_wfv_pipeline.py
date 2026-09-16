@@ -54,6 +54,31 @@ def test_staged_executor_validates_then_writes_standard_artifacts(tmp_path, monk
     assert {item["type"] for item in standard["artifacts"]} == {"GF6_STANDARD_COG", "GF6_PROCESSING_SUMMARY_JSON"}
 
 
+def test_standard_cog_stage_ignores_projected_upstream_tiff_during_raw_evidence_validation(tmp_path, monkeypatch):
+    manifest = make_gf6_package(tmp_path / "input-with-upstream")
+    projected = tmp_path / "upstream" / "projected.tif"
+    projected.parent.mkdir(parents=True)
+    projected.write_bytes(b"projected")
+    manifest["inputs"].append({"path": str(projected), "role": "projected"})
+    root = tmp_path / "output-with-upstream"
+    manifest["output"] = {"path": str(root)}
+    summary = root / "standard" / "summary.json"
+    def write_summary(*_):
+        summary.parent.mkdir(parents=True, exist_ok=True)
+        summary.write_text("{}", encoding="utf-8")
+        return summary
+    monkeypatch.setattr("rs_algorithm_worker.gf6_wfv_pipeline._write_processing_summary", write_summary)
+
+    response = execute_gf6_stage({
+        "stageKey": "WRITE_GF6_STANDARD_COG",
+        "outputUri": "rs://output/gf6",
+        "parameterSnapshot": "{}",
+    }, manifest)
+
+    assert response["status"] == "SUCCEEDED"
+    assert (root / "standard" / "gf6-standard.tif").read_bytes() == b"projected"
+
+
 def test_optional_stages_read_standard_cog_from_upstream_manifest(tmp_path, monkeypatch):
     standard = tmp_path / "persisted" / "gf6-standard.tif"
     standard.parent.mkdir(parents=True)

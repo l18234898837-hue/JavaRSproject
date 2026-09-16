@@ -352,20 +352,31 @@ def execute_fy4b_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
                 gridded.append((key, Path(path)))
         return _stage_response(output_uri, directory, _write_fy4b_standard_cog(gridded, directory))
     if stage == "EXTRACT_FY4B_FEATURES":
-        standard = {"FY4B_VIS_NIR_1000M_COG": raw_paths.get("FY4B_VIS_NIR_1000M_COG"),
-                    "FY4B_RED_500M_COG": raw_paths.get("FY4B_RED_500M_COG")}
-        _require_paths(standard, tuple(standard), "FY-4B feature extraction requires standard artifacts")
-        return _stage_response(output_uri, directory, _write_fy4b_features({k: Path(v) for k, v in standard.items()}, directory, parameters))
+        standard = {"FY4B_VIS_NIR_1000M_COG": raw_paths.get("FY4B_VIS_NIR_1000M_COG")}
+        # The red 500 m source is needed only by metrics that explicitly use
+        # the red band. Statistics-only extraction must work with its declared
+        # VIS/NIR upstream artifact alone.
+        metrics = parameters["features"]["metrics"]
+        if any(metric in {"gradient", "local_variance", "toa_nir_red_nd"} for metric in metrics):
+            standard["FY4B_RED_500M_COG"] = raw_paths.get("FY4B_RED_500M_COG")
+        _require_paths(standard, ("FY4B_VIS_NIR_1000M_COG",), "FY-4B feature extraction requires standard artifacts")
+        return _stage_response(output_uri, directory, _write_fy4b_features(
+            {key: Path(value) for key, value in standard.items() if value is not None}, directory, parameters,
+        ))
     if stage == "FUSE_FY4B_BANDS":
         standard = {k: raw_paths.get(k) for k in ("FY4B_VIS_NIR_1000M_COG", "FY4B_RED_500M_COG", "FY4B_MULTISPECTRAL_4000M_COG")}
         _require_paths(standard, tuple(standard), "FY-4B fusion requires standard artifacts")
         return _stage_response(output_uri, directory, _write_fy4b_fusion(standard, directory, parameters))
     if stage == "DETECT_FY4B_SALIENCY":
-        source = raw_paths.get("FY4B_FEATURE_COG") if parameters["saliency"]["source"].startswith(("gradient:", "local_variance:")) else raw_paths.get("FY4B_VIS_NIR_1000M_COG")
-        if source is None:
-            raise ValueError("FY-4B saliency requires an authorized source artifact")
-        source = Path(source)
-        return _stage_response(output_uri, directory, _write_fy4b_saliency({"FY4B_FEATURE_COG": source, "FY4B_VIS_NIR_1000M_COG": source}, directory, parameters))
+        standard = {
+            key: Path(value) for key, value in (
+                ("FY4B_FEATURE_COG", raw_paths.get("FY4B_FEATURE_COG")),
+                ("FY4B_RED_500M_COG", raw_paths.get("FY4B_RED_500M_COG")),
+                ("FY4B_VIS_NIR_1000M_COG", raw_paths.get("FY4B_VIS_NIR_1000M_COG")),
+                ("FY4B_MULTISPECTRAL_4000M_COG", raw_paths.get("FY4B_MULTISPECTRAL_4000M_COG")),
+            ) if value is not None
+        }
+        return _stage_response(output_uri, directory, _write_fy4b_saliency(standard, directory, parameters))
     raise ValueError("unsupported FY-4B AGRI stage")
 
 
