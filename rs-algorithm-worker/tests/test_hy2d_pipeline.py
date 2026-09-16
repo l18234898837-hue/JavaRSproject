@@ -175,6 +175,18 @@ def test_registry_builds_hy2d_plan_v3_for_recognized_package(tmp_path):
     assert candidate["packageId"] == package_id
 
 
+def test_hy2d_stage_parameter_parsing_does_not_use_legacy_builder(monkeypatch):
+    import rs_algorithm_worker.product_adapters.hy2d_altimeter as adapter
+
+    def fail(*args, **kwargs):
+        raise AssertionError("legacy HY-2D builder must not be used by execution")
+
+    monkeypatch.setattr(adapter, "build_plan", fail)
+    from rs_algorithm_worker.hy2d_pipeline import _parameters
+
+    assert _parameters({"parameterSnapshot": {}})["featureWindowSize"] == 21
+
+
 def test_registry_executes_integrated_hy2d_product(tmp_path):
     nc = tmp_path / "sample.nc"
     _write_nc(nc)

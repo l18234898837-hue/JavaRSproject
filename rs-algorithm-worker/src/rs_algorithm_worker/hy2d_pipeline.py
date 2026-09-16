@@ -15,7 +15,7 @@ from .operators.ssh import SshResult, calculate_baseline_ssh
 from .operators.track_grid import TrackGridSpec, bin_track_ssh, write_track_grid_outputs
 from .operators.track_output import write_standard_track_output
 from .operators.track_quality import QualityPolicy, TrackQualityResult, apply_quality_policy
-from .product_adapters.hy2d_altimeter import build_plan, inspect_manifest as inspect_hy2d_manifest
+from .product_adapters.hy2d_altimeter import inspect_manifest as inspect_hy2d_manifest, parse_hy2d_parameters
 
 
 MAX_TRACK_GRID_CELLS = 10_000_000
@@ -182,8 +182,7 @@ def _parameters(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("HY-2D parameter snapshot is invalid")
     candidate = {"profileKey": {"productCode": "HY-2D-ALTIMETER", "profileVersion": "v1"},
                  "dataShape": "ALONG_TRACK_OBSERVATION", "supportStatus": "SUPPORTED", "files": [True]}
-    plan = build_plan(candidate, raw)
-    return json.loads(plan["stages"][0]["parameterSnapshot"])
+    return parse_hy2d_parameters(raw)
 
 
 def _output_directory(manifest: dict[str, Any]) -> Path:

@@ -58,7 +58,7 @@ def _build_validated_plan(product: dict[str, Any], parameter_snapshot: dict[str,
         raise ValueError("HY-2D altimeter candidate is required")
     if product.get("supportStatus") != "SUPPORTED" or not product.get("files"):
         raise ValueError("supported HY-2D candidate with files is required")
-    parameters = _parameters(parameter_snapshot or {})
+    parameters = parse_hy2d_parameters(parameter_snapshot or {})
     snapshot = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
     main = _input("main", "RAW_INPUT", "MAIN")
     stages = [
@@ -141,7 +141,12 @@ def build_staged_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any
     return {**plan, "version": "plan-v3"}
 
 
-def _parameters(value: dict[str, Any]) -> dict[str, Any]:
+def parse_hy2d_parameters(value: dict[str, Any]) -> dict[str, Any]:
+    """Normalize and validate HY-2D parameters without constructing a plan.
+
+    Execution and planning both use this neutral helper so the v3 path does
+    not depend on the historical integrated builder.
+    """
     if not isinstance(value, dict) or set(value).difference({"qualityPolicyVersion", "featureWindowSize", "anomaly", "grid"}):
         raise ValueError("unsupported HY-2D parameter")
     quality = value.get("qualityPolicyVersion", "hy2d-idr-2mc-baseline-v1")

@@ -177,6 +177,36 @@ def _build_validated_integrated_plan(product: dict[str, Any], parameter_snapshot
     return {"version": "plan-v2", "stages": [{"stageKey": "STANDARDIZE_GF6_WFV_L1A", "stageCode": "STANDARDIZE_GF6_WFV_L1A", "dependsOnStageKeys": [], "inputs": inputs, "outputs": outputs, "parameterSnapshot": json.dumps(parameters, sort_keys=True, separators=(",", ":"))}]}
 
 
+def _validated_gf6_l1a_inputs(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Validate the raw GF-6 package and normalize parameters for v3 builders."""
+    if product.get("profileKey") != PROFILE_KEY or product.get("dataShape") != "RASTER_GRID":
+        raise ValueError("GF6 L1A candidate is required")
+    parameters = parse_parameters(parameter_snapshot)
+    files = product.get("files")
+    if not isinstance(files, list) or any(not isinstance(item, dict) or not isinstance(item.get("path"), str) or not item["path"] or type(item.get("ordinal")) is not int for item in files) or len({item["path"] for item in files}) != len(files):
+        raise ValueError("GF6 L1A candidate has invalid input entries")
+    roles = [item.get("role") for item in files]
+    expected = ["MAIN_TIFF_TILE"] * 3 + ["METADATA_XML", "RPC_RPB", "NAV", "TILE_INDEX_TIL"]
+    optional_roles = ["FOOTPRINT_SHP", "FOOTPRINT_DBF", "FOOTPRINT_SHX"]
+    if roles not in (expected, expected + optional_roles) or [item["ordinal"] for item in files[:3]] != [0, 1, 2] or any(item["ordinal"] != 0 for item in files[3:]):
+        raise ValueError("GF6 L1A candidate requires all raw inputs")
+    file_names = [logical_file_name(Path(item["path"]), item) for item in files]
+    tile_base = _tile_base(file_names[0])
+    if (any(Path(file_names[index]).suffix.lower() not in {".tif", ".tiff"}
+            or _tile_ordinal(file_names[index]) != index + 1 or _tile_base(file_names[index]) != tile_base
+            for index in range(3))
+            or any(_plain_base(file_names[index]) != tile_base for index in range(3, 7))):
+        raise ValueError("GF6 L1A candidate input paths do not match the shared basename")
+    if len(files) == 10 and any(_plain_base(file_names[index]) != tile_base
+                                or Path(file_names[index]).suffix.lower() != suffix
+                                for index, suffix in zip(range(7, 10), (".shp", ".dbf", ".shx"))):
+        raise ValueError("GF6 L1A candidate footprint paths are invalid")
+    inputs = [{"key": f"raw-{index}", "source": "RAW_INPUT", "artifactType": role, "required": True} for index, role in enumerate(expected)]
+    if len(files) == 10:
+        inputs.extend({"key": f"footprint-{index}", "source": "RAW_INPUT", "artifactType": role, "required": False} for index, role in enumerate(optional_roles))
+    return inputs, parameters
+
+
 def build_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """Compatibility entry point for the historical integrated plan."""
     return _build_validated_integrated_plan(product, parameter_snapshot)
@@ -184,10 +214,20 @@ def build_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str,
 
 def build_staged_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build the reviewed multi-stage DAG for GF-6 WFV L1A (plan-v3)."""
-    integrated = _build_validated_integrated_plan(product, parameter_snapshot)
-    base = integrated["stages"][0]
-    snapshot = base["parameterSnapshot"]
-    raw_inputs = base["inputs"]
+    raw_inputs, parameters = _validated_gf6_l1a_inputs(product, parameter_snapshot)
+    snapshot = json.dumps(parameters, sort_keys=True, separators=(",", ":"))
+    standard_outputs = [_output("GF6_STANDARD_COG", "standard/gf6-standard.tif"),
+                       _output("GF6_PROCESSING_SUMMARY_JSON", "standard/summary.json")]
+    if parameters["features"]["enabled"]:
+        standard_outputs.extend([_output("GF6_FEATURES_COG", "features/gf6-features.tif"),
+                                 _output("GF6_FEATURES_SUMMARY_JSON", "features/summary.json")])
+    if parameters["fusion"]["enabled"]:
+        standard_outputs.extend([_output("GF6_RGB_FUSION_COG", "fusion/gf6-rgb.tif"),
+                                 _output("GF6_FUSION_SUMMARY_JSON", "fusion/summary.json")])
+    if parameters["saliency"]["enabled"]:
+        standard_outputs.extend([_output("GF6_SALIENCY_SCORE_COG", "saliency/score.tif"),
+                                 _output("GF6_SALIENCY_MASK_COG", "saliency/mask.tif"),
+                                 _output("GF6_SALIENCY_SUMMARY_JSON", "saliency/summary.json")])
     stages: list[dict[str, Any]] = [
         {"stageKey": "VALIDATE_GF6_WFV_L1A", "stageCode": "VALIDATE_GF6_WFV_L1A", "dependsOnStageKeys": [],
          "inputs": raw_inputs, "outputs": [{"artifactType": "GF6_INPUT_VALIDATION_JSON", "relativePath": "validation/package.json", "retention": "INTERMEDIATE"}], "parameterSnapshot": snapshot},
@@ -205,22 +245,22 @@ def build_staged_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any
          "outputs": [{"artifactType": "GF6_PROJECTED_RASTER", "relativePath": "preprocess/projected.tif", "retention": "INTERMEDIATE"}], "parameterSnapshot": snapshot},
         {"stageKey": "WRITE_GF6_STANDARD_COG", "stageCode": "WRITE_GF6_STANDARD_COG", "dependsOnStageKeys": ["STANDARDIZE_GF6_PROJECTION"],
          "inputs": raw_inputs + [{"key": "projected", "source": "UPSTREAM_ARTIFACT", "artifactType": "GF6_PROJECTED_RASTER", "required": True}],
-         "outputs": [item for item in base["outputs"] if item["artifactType"] in {"GF6_STANDARD_COG", "GF6_PROCESSING_SUMMARY_JSON"}], "parameterSnapshot": snapshot},
+            "outputs": [item for item in standard_outputs if item["artifactType"] in {"GF6_STANDARD_COG", "GF6_PROCESSING_SUMMARY_JSON"}], "parameterSnapshot": snapshot},
     ]
     previous = "WRITE_GF6_STANDARD_COG"
-    p = json.loads(snapshot)
+    p = parameters
     if p["features"]["enabled"]:
         stages.append({"stageKey": "EXTRACT_GF6_FEATURES", "stageCode": "EXTRACT_GF6_FEATURES", "dependsOnStageKeys": [previous],
                        "inputs": [{"key": "standard", "source": "UPSTREAM_ARTIFACT", "artifactType": "GF6_STANDARD_COG", "required": True}],
-                       "outputs": [item for item in base["outputs"] if item["artifactType"].startswith("GF6_FEATURES_")], "parameterSnapshot": snapshot}); previous = "EXTRACT_GF6_FEATURES"
+                       "outputs": [item for item in standard_outputs if item["artifactType"].startswith("GF6_FEATURES_")], "parameterSnapshot": snapshot}); previous = "EXTRACT_GF6_FEATURES"
     if p["fusion"]["enabled"]:
         stages.append({"stageKey": "FUSE_GF6_RGB", "stageCode": "FUSE_GF6_RGB", "dependsOnStageKeys": ["WRITE_GF6_STANDARD_COG"],
                        "inputs": [{"key": "standard", "source": "UPSTREAM_ARTIFACT", "artifactType": "GF6_STANDARD_COG", "required": True}],
-                       "outputs": [item for item in base["outputs"] if item["artifactType"].startswith("GF6_RGB_") or item["artifactType"].startswith("GF6_FUSION_")], "parameterSnapshot": snapshot})
+                       "outputs": [item for item in standard_outputs if item["artifactType"].startswith("GF6_RGB_") or item["artifactType"].startswith("GF6_FUSION_")], "parameterSnapshot": snapshot})
     if p["saliency"]["enabled"]:
         stages.append({"stageKey": "DETECT_GF6_SALIENCY", "stageCode": "DETECT_GF6_SALIENCY", "dependsOnStageKeys": ["WRITE_GF6_STANDARD_COG"],
                        "inputs": [{"key": "standard", "source": "UPSTREAM_ARTIFACT", "artifactType": "GF6_STANDARD_COG", "required": True}],
-                       "outputs": [item for item in base["outputs"] if item["artifactType"].startswith("GF6_SALIENCY_")], "parameterSnapshot": snapshot})
+                       "outputs": [item for item in standard_outputs if item["artifactType"].startswith("GF6_SALIENCY_")], "parameterSnapshot": snapshot})
     return {"version": "plan-v3", "stages": stages}
 
 
