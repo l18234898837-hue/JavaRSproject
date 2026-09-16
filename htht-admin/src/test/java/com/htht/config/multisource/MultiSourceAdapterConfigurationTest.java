@@ -14,7 +14,9 @@ import com.htht.multisource.infrastructure.persistence.mapper.TaskInputAssetMyBa
 import com.htht.multisource.infrastructure.persistence.mapper.TaskEventMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskProductMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskStageMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.LegacyPlanArchiveMyBatisMapper;
 import com.htht.system.service.ISysFileService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -54,8 +56,10 @@ class MultiSourceAdapterConfigurationTest {
     void failsStartupWithClearMessageWhenWorkerEnvironmentSettingsAreMissing() {
         new ApplicationContextRunner()
             .withUserConfiguration(MultiSourceAdapterConfiguration.class)
-            .withPropertyValues("file.upload-path=" + uploadRoot)
+            .withPropertyValues("file.upload-path=" + uploadRoot,
+                "multisource.worker.artifact-root=" + uploadRoot.resolve("artifacts"))
             .withBean(ISysFileService.class, () -> mock(ISysFileService.class))
+            .withBean(ObjectMapper.class, ObjectMapper::new)
             .withBean(ProcessingTaskMyBatisMapper.class, () -> mock(ProcessingTaskMyBatisMapper.class))
             .withBean(TaskProductMyBatisMapper.class, () -> mock(TaskProductMyBatisMapper.class))
             .withBean(TaskInputAssetMyBatisMapper.class, () -> mock(TaskInputAssetMyBatisMapper.class))
@@ -64,6 +68,7 @@ class MultiSourceAdapterConfigurationTest {
             .withBean(BatchProductMyBatisMapper.class, () -> mock(BatchProductMyBatisMapper.class))
             .withBean(TaskStageMyBatisMapper.class, () -> mock(TaskStageMyBatisMapper.class))
             .withBean(ArtifactMyBatisMapper.class, () -> mock(ArtifactMyBatisMapper.class))
+            .withBean(LegacyPlanArchiveMyBatisMapper.class, () -> mock(LegacyPlanArchiveMyBatisMapper.class))
             .run(context -> {
                 assertThat(context).hasFailed();
                 assertThat(context.getStartupFailure()).hasMessageContaining("multisource.worker.command");
@@ -83,6 +88,7 @@ class MultiSourceAdapterConfigurationTest {
                 "multisource.worker.processor-version=worker-test-1.0.0"
             )
             .withBean(ISysFileService.class, () -> mock(ISysFileService.class))
+            .withBean(ObjectMapper.class, ObjectMapper::new)
             .withBean(ProcessingTaskMyBatisMapper.class, () -> mock(ProcessingTaskMyBatisMapper.class))
             .withBean(TaskProductMyBatisMapper.class, () -> mock(TaskProductMyBatisMapper.class))
             .withBean(TaskInputAssetMyBatisMapper.class, () -> mock(TaskInputAssetMyBatisMapper.class))
@@ -90,6 +96,7 @@ class MultiSourceAdapterConfigurationTest {
             .withBean(ProcessingBatchMyBatisMapper.class, () -> mock(ProcessingBatchMyBatisMapper.class))
             .withBean(BatchProductMyBatisMapper.class, () -> mock(BatchProductMyBatisMapper.class))
             .withBean(TaskStageMyBatisMapper.class, () -> mock(TaskStageMyBatisMapper.class))
-            .withBean(ArtifactMyBatisMapper.class, () -> mock(ArtifactMyBatisMapper.class));
+            .withBean(ArtifactMyBatisMapper.class, () -> mock(ArtifactMyBatisMapper.class))
+            .withBean(LegacyPlanArchiveMyBatisMapper.class, () -> mock(LegacyPlanArchiveMyBatisMapper.class));
     }
 }
