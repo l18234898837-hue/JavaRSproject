@@ -52,7 +52,7 @@ def inspect_manifest(manifest):
 _PROFILE = {"productCode": "HY-2D-ALTIMETER", "profileVersion": "v1"}
 
 
-def build_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+def _build_validated_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build the declared HY-2D along-track DAG and freeze validated parameters."""
     if product.get("profileKey") != _PROFILE or product.get("dataShape") != "ALONG_TRACK_OBSERVATION":
         raise ValueError("HY-2D altimeter candidate is required")
@@ -102,9 +102,14 @@ def build_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | Non
     return {"version": "plan-v2", "stages": stages}
 
 
+def build_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Compatibility entry point for historical plan-v2 callers."""
+    return _build_validated_plan(product, parameter_snapshot)
+
+
 def build_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """Declare one self-contained along-track stage for the current dispatcher."""
-    source_plan = build_plan(product, parameter_snapshot)
+    source_plan = _build_validated_plan(product, parameter_snapshot)
     parameters = json.loads(source_plan["stages"][0]["parameterSnapshot"])
     outputs = [
         _output("TRACK_FEATURES_JSON", "features/summary.json", "FINAL"),
@@ -132,7 +137,7 @@ def build_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str,
 
 def build_staged_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return the existing validated along-track DAG as plan-v3."""
-    plan = build_plan(product, parameter_snapshot)
+    plan = _build_validated_plan(product, parameter_snapshot)
     return {**plan, "version": "plan-v3"}
 
 

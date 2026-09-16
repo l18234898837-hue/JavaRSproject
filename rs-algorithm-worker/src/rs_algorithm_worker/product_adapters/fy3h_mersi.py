@@ -107,7 +107,7 @@ def inspect_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     }]
 
 
-def build_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+def _build_validated_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     if candidate.get("profileKey") != PROFILE_KEY or candidate.get("dataShape") != "SWATH_RASTER":
         raise ValueError("FY-3H MERSI candidate is required")
     files = candidate.get("files")
@@ -177,9 +177,14 @@ def build_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any] | N
     return {"version": "plan-v2", "stages": stages}
 
 
+def build_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Compatibility entry point for historical plan-v2 callers."""
+    return _build_validated_plan(candidate, parameter_snapshot)
+
+
 def build_integrated_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """Declare the self-contained stage supported by the current Java dispatcher."""
-    source_plan = build_plan(candidate, parameter_snapshot)
+    source_plan = _build_validated_plan(candidate, parameter_snapshot)
     parameters = json.loads(source_plan["stages"][0]["parameterSnapshot"])
     outputs = [
         _output("STANDARD_MERSI_COG", "standard/mersi.tif", "FINAL"),
@@ -209,7 +214,7 @@ def build_integrated_plan(candidate: dict[str, Any], parameter_snapshot: dict[st
 
 def build_staged_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return the reviewed multi-stage DAG for new plan-v3 tasks."""
-    plan = build_plan(candidate, parameter_snapshot)
+    plan = _build_validated_plan(candidate, parameter_snapshot)
     return {**plan, "version": "plan-v3"}
 
 

@@ -144,7 +144,7 @@ def parse_parameters(raw: dict[str, Any] | None) -> dict[str, Any]:
     return {"schemaVersion": "gf6-wfv-l1a-v1", "targetCrs": target_crs, "resolution": resolution, "rpcHeightMode": "CONSTANT", "rpcHeight": 0.0, "roi": roi, "bands": bands, "features": features, "fusion": fusion, "saliency": saliency}
 
 
-def build_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+def _build_validated_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     if product.get("profileKey") != PROFILE_KEY or product.get("dataShape") != "RASTER_GRID":
         raise ValueError("GF6 L1A candidate is required")
     parameters = parse_parameters(parameter_snapshot)
@@ -177,9 +177,14 @@ def build_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str,
     return {"version": "plan-v2", "stages": [{"stageKey": "STANDARDIZE_GF6_WFV_L1A", "stageCode": "STANDARDIZE_GF6_WFV_L1A", "dependsOnStageKeys": [], "inputs": inputs, "outputs": outputs, "parameterSnapshot": json.dumps(parameters, sort_keys=True, separators=(",", ":"))}]}
 
 
+def build_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Compatibility entry point for the historical integrated plan."""
+    return _build_validated_integrated_plan(product, parameter_snapshot)
+
+
 def build_staged_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build the reviewed multi-stage DAG for GF-6 WFV L1A (plan-v3)."""
-    integrated = build_integrated_plan(product, parameter_snapshot)
+    integrated = _build_validated_integrated_plan(product, parameter_snapshot)
     base = integrated["stages"][0]
     snapshot = base["parameterSnapshot"]
     raw_inputs = base["inputs"]

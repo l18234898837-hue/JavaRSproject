@@ -91,4 +91,12 @@ class MigrationScriptTest {
             "ON CONFLICT (product_code, profile_version) DO UPDATE"
         );
     }
+
+    @Test
+    void legacyArchiveMigrationPreservesTaskHistoryWithAnIdempotentMarker() throws IOException {
+        String sql = Files.readString(MIGRATIONS.resolve("V20260916_03__create_legacy_plan_archive.sql"));
+        assertThat(sql).contains("CREATE TABLE rs_legacy_plan_archive", "REFERENCES rs_processing_task(task_id)",
+            "CHECK (plan_version IN ('plan-v1', 'plan-v2'))");
+        assertThat(sql).doesNotContain("DROP TABLE", "DELETE FROM", "TRUNCATE");
+    }
 }
