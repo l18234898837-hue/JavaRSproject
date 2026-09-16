@@ -4,6 +4,14 @@
 
 This runbook retires legacy `plan-v1` and `plan-v2` execution for new code while preserving historical task snapshots and artifacts. It is separate from the implementation plan and is used during the maintenance window.
 
+## Current implementation status (2026-09-16)
+
+- A local branch `plan-v3-legacy-retirement` contains the v3-only new-task gate, durable legacy archive marker/service, dispatch/retry protection, extracted worker helpers, and the supported-product v3 matrix.
+- Focused worker verification passed: 35 passed, 13 skipped. Multisource Java verification passed: 154 tests, 0 failures, 3 skipped. The admin configuration slice passed: 2 tests, 0 failures. Admin compilation passed.
+- The worker full suite passed 327 tests and skipped 25; its single failure is the existing wheel-build test because the isolated pip build cannot install/import `setuptools.build_meta` in this environment. This does not affect runtime plan selection tests.
+- The database archive gate is intentionally still closed. The read-only inventory currently reports 11 `plan-v1`, 23 `plan-v2`, and 68 `plan-v3` tasks. Legacy non-terminal work remains (including a `plan-v1` task with a stale running stage), so no cancellation, archive apply, data deletion, or legacy branch removal has been performed.
+- Before the maintenance window, stop the running scheduler/worker, take the required PostgreSQL backup or snapshot, run the protected archive endpoint in `dryRun=true`, and obtain explicit approval before `apply=true`.
+
 ## Preflight
 
 1. Stop the Java scheduler/worker dispatch loop and record the application build identifier.
