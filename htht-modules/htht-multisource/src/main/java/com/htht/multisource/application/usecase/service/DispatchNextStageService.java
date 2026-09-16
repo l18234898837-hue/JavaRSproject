@@ -136,6 +136,7 @@ public final class DispatchNextStageService implements DispatchNextStageUseCase 
     public Optional<DispatchResult> dispatch(TaskId taskId) {
         var task = taskRepository.findById(taskId)
             .orElseThrow(() -> new NoSuchElementException("Processing task not found."));
+        PlanExecutionPolicy.requireDispatchable(task);
         if (task.lifecycleStatus() == TaskLifecycleStatus.CANCELING || task.lifecycleStatus() == TaskLifecycleStatus.CANCELED) {
             return Optional.empty();
         }

@@ -14,6 +14,7 @@ import com.htht.multisource.application.port.out.ProcessingBatchIdGenerator;
 import com.htht.multisource.application.port.out.ProcessingBatchRepository;
 import com.htht.multisource.application.port.out.ProcessingPlanner;
 import com.htht.multisource.application.port.out.ProcessingTaskRepository;
+import com.htht.multisource.application.port.out.LegacyPlanArchiveRepository;
 import com.htht.multisource.application.port.out.ProductInspector;
 import com.htht.multisource.application.port.out.StageIdGenerator;
 import com.htht.multisource.application.port.out.TaskIdGenerator;
@@ -38,12 +39,14 @@ import com.htht.multisource.application.usecase.service.RetryFailedStageService;
 import com.htht.multisource.application.usecase.service.TaskCreationCoordinator;
 import com.htht.multisource.application.usecase.service.ArtifactRegistration;
 import com.htht.multisource.application.usecase.service.ArtifactRegistrationService;
+import com.htht.multisource.application.usecase.service.LegacyPlanArchiveService;
 import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.infrastructure.persistence.MyBatisArtifactRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisExecutionEventRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisProcessingBatchRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisProcessingTaskRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskStageRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisLegacyPlanArchiveRepository;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierProcessingBatchIdGenerator;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierStageIdGenerator;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierTaskIdGenerator;
@@ -55,6 +58,7 @@ import com.htht.multisource.infrastructure.persistence.mapper.TaskInputAssetMyBa
 import com.htht.multisource.infrastructure.persistence.mapper.TaskEventMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskProductMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskStageMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.LegacyPlanArchiveMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMapper;
 import com.htht.multisource.infrastructure.session.InMemoryPreflightSessionStore;
 import com.htht.multisource.infrastructure.worker.LocalProcessWorkerGateway;
@@ -148,6 +152,21 @@ public class MultiSourceAdapterConfiguration {
     public ExecutionEventRepository multisourceExecutionEventRepository(TaskEventMyBatisMapper eventMapper,
                                                                          TaskPersistenceMapper persistenceMapper) {
         return new MyBatisExecutionEventRepository(eventMapper, persistenceMapper);
+    }
+
+    @Bean
+    public LegacyPlanArchiveRepository multisourceLegacyPlanArchiveRepository(LegacyPlanArchiveMyBatisMapper mapper) {
+        return new MyBatisLegacyPlanArchiveRepository(mapper);
+    }
+
+    @Bean
+    public LegacyPlanArchiveService multisourceLegacyPlanArchiveService(
+        ProcessingTaskRepository taskRepository,
+        TaskStageRepository stageRepository,
+        LegacyPlanArchiveRepository archiveRepository,
+        ExecutionClock executionClock
+    ) {
+        return new LegacyPlanArchiveService(taskRepository, stageRepository, archiveRepository, executionClock::now);
     }
 
     @Bean

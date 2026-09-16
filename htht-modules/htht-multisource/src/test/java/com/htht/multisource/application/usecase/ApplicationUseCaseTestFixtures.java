@@ -41,7 +41,7 @@ final class ApplicationUseCaseTestFixtures {
     }
 
     static ProcessingPlan samplePlan() {
-        return new ProcessingPlan("plan-v1", List.of(
+        return new ProcessingPlan("plan-v3", List.of(
             new ProcessingStage("READ", "READ_SOURCE", List.of()),
             new ProcessingStage("CAL", "CALIBRATE", List.of("READ"))
         ));

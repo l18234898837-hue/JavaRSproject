@@ -34,6 +34,7 @@ public class RetryFailedStageService implements RetryFailedStageUseCase {
         var task = taskRepository.findById(stage.taskId())
             .filter(value -> value.creator().equals(subject))
             .orElseThrow(() -> new NoSuchElementException("Processing stage not found."));
+        PlanExecutionPolicy.requireDispatchable(task);
         if (task.lifecycleStatus() == TaskLifecycleStatus.CANCELING
             || task.lifecycleStatus() == TaskLifecycleStatus.CANCELED
             || task.lifecycleStatus() == TaskLifecycleStatus.SUCCEEDED) {

@@ -34,6 +34,13 @@ public class RecoverTimedOutStageService implements RecoverTimedOutStageUseCase 
         int recovered = 0;
         Set<com.htht.multisource.domain.model.TaskId> recoveredTaskIds = new HashSet<>();
         for (var stage : stageRepository.findExpiredRunning(now)) {
+            var task = taskRepository.findById(stage.taskId())
+                .orElseThrow(() -> new IllegalStateException("Processing task not found for expired stage."));
+            if (!"plan-v3".equals(task.plan().version())) {
+                // Legacy tasks are retired and handled by the archive maintenance
+                // flow; the scheduler must not revive them automatically.
+                continue;
+            }
             var event = new ExecutionEvent(stage.taskId(), stage.id(), stage.execution().executionId(), stage.attempt(),
                 1, ExecutionEvent.Type.TIMED_OUT, "{\"code\":\"LEASE_EXPIRED\"}", now,
                 ExecutionEvent.Acceptance.APPLIED);

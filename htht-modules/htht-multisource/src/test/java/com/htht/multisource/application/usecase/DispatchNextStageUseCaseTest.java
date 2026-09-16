@@ -517,7 +517,7 @@ class DispatchNextStageUseCaseTest {
             ProductDataShape.SWATH_RASTER, ProductSupportStatus.SUPPORTED, List.of(input, undeclared), "{}", 0.91);
         return new ProcessingTask(TASK_ID, "task-01", new AccessSubject(7L), lifecycleStatus, QualityStatus.NOT_CHECKED,
             "{\"mode\":\"standard\"}", new StorageUri("rs://output/7/task-01"),
-            new ProcessingPlan("plan-v1", "worker-1.2.3", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of(),
+            new ProcessingPlan("plan-v3", "worker-1.2.3", List.of(new ProcessingStage("READ", "READ_SOURCE", List.of(),
                 List.of(new com.htht.multisource.application.port.out.model.StageInput("main", com.htht.multisource.application.port.out.model.StageInput.Source.RAW_INPUT, "MAIN", true)),
                 List.of(), "{}"))),
             new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate)), List.of(candidate));
@@ -534,7 +534,7 @@ class DispatchNextStageUseCaseTest {
         );
         return new ProcessingTask(TASK_ID, "task-01", new AccessSubject(7L), TaskLifecycleStatus.CREATED,
             QualityStatus.NOT_CHECKED, "{\"mode\":\"standard\"}", new StorageUri("rs://output/7/task-01"),
-            new ProcessingPlan("plan-v2", "worker-1.2.3", List.of(stage)),
+            new ProcessingPlan("plan-v3", "worker-1.2.3", List.of(stage)),
             new ProcessingBatch(11L, "batch-01", ProcessingBatchStatus.CREATED, List.of(candidate)), List.of(candidate));
     }
 
