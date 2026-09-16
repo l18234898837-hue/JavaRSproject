@@ -3,6 +3,7 @@ package com.htht.multisource.application.usecase.service;
 import com.htht.multisource.application.port.out.LegacyPlanArchiveRepository;
 import com.htht.multisource.application.port.out.ProcessingTaskRepository;
 import com.htht.multisource.application.port.out.TaskStageRepository;
+import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
 import com.htht.multisource.domain.model.StageExecutionStatus;
 import com.htht.multisource.domain.model.TaskId;
 import com.htht.multisource.domain.model.TaskLifecycleStatus;
@@ -19,15 +20,25 @@ public final class LegacyPlanArchiveService {
     private final TaskStageRepository stageRepository;
     private final LegacyPlanArchiveRepository archiveRepository;
     private final InstantSupplier clock;
+    private final CancelProcessingTaskUseCase cancelUseCase;
 
     public LegacyPlanArchiveService(ProcessingTaskRepository taskRepository,
                                     TaskStageRepository stageRepository,
                                     LegacyPlanArchiveRepository archiveRepository,
                                     InstantSupplier clock) {
+        this(taskRepository, stageRepository, archiveRepository, clock, null);
+    }
+
+    public LegacyPlanArchiveService(ProcessingTaskRepository taskRepository,
+                                    TaskStageRepository stageRepository,
+                                    LegacyPlanArchiveRepository archiveRepository,
+                                    InstantSupplier clock,
+                                    CancelProcessingTaskUseCase cancelUseCase) {
         this.taskRepository = Objects.requireNonNull(taskRepository, "taskRepository");
         this.stageRepository = Objects.requireNonNull(stageRepository, "stageRepository");
         this.archiveRepository = Objects.requireNonNull(archiveRepository, "archiveRepository");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.cancelUseCase = cancelUseCase;
     }
 
     public boolean archive(TaskId taskId, String reason) {
@@ -38,7 +49,15 @@ public final class LegacyPlanArchiveService {
         if ("plan-v3".equals(version)) throw new IllegalStateException("plan-v3 tasks cannot be archived as legacy tasks.");
         if (archiveRepository.findByTaskId(taskId).isPresent()) return false;
         if (!isTerminal(task.lifecycleStatus())) {
-            throw new IllegalStateException("Task must be terminal before archival: " + task.lifecycleStatus());
+            if (cancelUseCase == null) {
+                throw new IllegalStateException("Task must be terminal before archival: " + task.lifecycleStatus());
+            }
+            cancelUseCase.cancel(taskId, task.creator());
+            task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new IllegalStateException("Processing task disappeared during cancellation."));
+            if (!isTerminal(task.lifecycleStatus())) {
+                throw new IllegalStateException("Task cancellation did not reach a terminal state: " + task.lifecycleStatus());
+            }
         }
         if (stageRepository.findByTaskId(taskId).stream()
             .anyMatch(stage -> stage.status() == StageExecutionStatus.RUNNING

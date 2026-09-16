@@ -164,9 +164,10 @@ public class MultiSourceAdapterConfiguration {
         ProcessingTaskRepository taskRepository,
         TaskStageRepository stageRepository,
         LegacyPlanArchiveRepository archiveRepository,
-        ExecutionClock executionClock
+        ExecutionClock executionClock,
+        CancelProcessingTaskUseCase cancelUseCase
     ) {
-        return new LegacyPlanArchiveService(taskRepository, stageRepository, archiveRepository, executionClock::now);
+        return new LegacyPlanArchiveService(taskRepository, stageRepository, archiveRepository, executionClock::now, cancelUseCase);
     }
 
     @Bean
