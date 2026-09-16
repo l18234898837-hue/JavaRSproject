@@ -10,6 +10,10 @@
 
 **Spec:** Existing plan-v3 staged backend design in `docs/superpowers/plans/2026-09-09-multisource-staged-backend.md`, plus the current database inventory recorded during the 2026-09-16 analysis.
 
+## Execution status
+
+Tasks 1–6 are implemented on branch `plan-v3-legacy-retirement`, including the new-task gate, archive service and protected maintenance endpoint, dispatch/retry protection, worker helper extraction, and the v3 product matrix. Task 7 is prepared but not applied: the live database still contains dispatchable legacy tasks, so the maintenance window, backup, cancellation, and archive apply remain intentionally pending. Tasks 8–9 stay gated on the zero-row archive check and post-archive acceptance.
+
 ## Global Constraints
 
 - New task creation must send `requestedPlanVersion="plan-v3"`; no missing/legacy request may silently downgrade.
