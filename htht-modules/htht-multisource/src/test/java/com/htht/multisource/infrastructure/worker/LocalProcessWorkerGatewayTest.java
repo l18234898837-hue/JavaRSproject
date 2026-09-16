@@ -157,7 +157,7 @@ class LocalProcessWorkerGatewayTest {
     }
 
     private static PlanRequest planRequest() {
-        return new PlanRequest(TaskId.of(101L), candidate(), "{\"mode\":\"standard\"}", grant());
+        return new PlanRequest(TaskId.of(101L), candidate(), "{\"mode\":\"standard\"}", "plan-v3", grant());
     }
 
     private static StageExecutionRequest stageRequest() {

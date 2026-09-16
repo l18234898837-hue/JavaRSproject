@@ -153,7 +153,7 @@ def test_execute_hy2d_quality_stage_uses_only_declared_upstream_track(tmp_path):
     }
 
 
-def test_registry_builds_hy2d_plan_v2_for_recognized_package(tmp_path):
+def test_registry_builds_hy2d_plan_v3_for_recognized_package(tmp_path):
     nc = tmp_path / "sample.nc"
     _write_nc(nc)
     package_id = "H2D_OPER_IDR_2MC_0188_0236_20260701T145956_20260701T155159"
@@ -166,12 +166,12 @@ def test_registry_builds_hy2d_plan_v2_for_recognized_package(tmp_path):
     manifest = {"inputs": [{"role": "MAIN", "path": str(package), "storageUri": "rs://input/sample"}]}
     inspected = dispatch({"operation": "inspect"}, manifest)
     candidate = inspected["candidates"][0]
-    request = {"operation": "build-plan", "payload": {"candidate": candidate, "parameterSnapshot": {}}}
+    request = {"operation": "build-plan", "payload": {"candidate": candidate, "requestedPlanVersion": "plan-v3", "parameterSnapshot": {}}}
 
     plan = dispatch(request, manifest)
 
-    assert plan["version"] == "plan-v2"
-    assert [stage["stageKey"] for stage in plan["stages"]] == ["STANDARDIZE_ALTIMETER_TRACK"]
+    assert plan["version"] == "plan-v3"
+    assert plan["stages"][0]["stageKey"] == "VALIDATE_SOURCE"
     assert candidate["packageId"] == package_id
 
 

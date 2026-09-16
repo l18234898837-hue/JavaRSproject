@@ -128,6 +128,7 @@ def test_registry_routes_selected_l2a_candidate_to_the_l2a_plan(hy1c_l2a_manifes
         "operation": "build-plan",
         "payload": {
             "candidate": candidate,
+            "requestedPlanVersion": "plan-v3",
             "parameterSnapshot": {
                 "schemaVersion": "1", "operation": "STANDARDIZE_L2A",
                 "bands": ["B460", "B560", "B650", "B825"],
@@ -137,7 +138,7 @@ def test_registry_routes_selected_l2a_candidate_to_the_l2a_plan(hy1c_l2a_manifes
         },
     }, hy1c_l2a_manifest)
 
-    assert response["version"] == "plan-v2"
+    assert response["version"] == "plan-v3"
     assert response["stages"][0]["stageKey"] == "VALIDATE_SOURCE"
 
 

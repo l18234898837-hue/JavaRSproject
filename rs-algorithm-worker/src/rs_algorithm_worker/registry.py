@@ -64,6 +64,10 @@ def dispatch(request: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any
         payload = _payload(request)
         selected = payload.get("candidate")
         requested_version = payload.get("requestedPlanVersion")
+        if requested_version is None:
+            raise ValueError("PLAN_VERSION_REQUIRED: new tasks must request plan-v3")
+        if requested_version != "plan-v3":
+            raise ValueError("PLAN_VERSION_RETIRED: only plan-v3 may create a task")
         if _is_l2a_candidate(selected):
             candidate = hy1c_czi_l2a.inspect_l2a_manifest(manifest)
             if candidate["packageId"] != selected.get("packageId"):

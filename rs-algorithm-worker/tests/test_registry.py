@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from fy4b_fixture import make_fy4b_package
+from fy4b_fixture import ROLE_ORDER, make_fy4b_package
 from gf6_fixture import make_gf6_package
 from rs_algorithm_worker import registry
 from rs_algorithm_worker.product_adapters import fy4b_agri, gf6_wfv_l1a
@@ -21,18 +21,16 @@ def _fy3h_manifest(*paths):
     ]}
 
 
-def test_registry_builds_fy3h_plan_v2_for_recognized_pair(tmp_path):
+def test_registry_rejects_missing_plan_version_for_recognized_pair(tmp_path):
     observation, geo = make_fy3h_pair(tmp_path)
     manifest = _fy3h_manifest(observation, geo)
     candidate = dispatch({"operation": "inspect"}, manifest)["candidates"][0]
 
-    response = dispatch({"operation": "build-plan", "payload": {
-        "candidate": candidate,
-        "parameterSnapshot": {"targetCrs": "EPSG:4326", "resolutionDegrees": 0.01},
-    }}, manifest)
-
-    assert response["version"] == "plan-v2"
-    assert response["stages"][0]["stageKey"] == "VALIDATE_FY3H_PAIR"
+    with pytest.raises(ValueError, match="PLAN_VERSION_REQUIRED"):
+        dispatch({"operation": "build-plan", "payload": {
+            "candidate": candidate,
+            "parameterSnapshot": {"targetCrs": "EPSG:4326", "resolutionDegrees": 0.01},
+        }}, manifest)
 
 
 def test_registry_builds_plan_v3_for_generic_supported_manifest(tmp_path):
@@ -64,16 +62,19 @@ def test_registry_builds_requested_plan_v3_for_fy3h_pair(tmp_path):
 
 def test_registry_routes_only_recognized_fy4b_package_and_returns_logical_artifact(tmp_path):
     manifest = make_fy4b_package(tmp_path)
+    for item, role in zip(manifest["inputs"], ROLE_ORDER):
+        item["role"] = role
     manifest["output"] = {"path": str(tmp_path / "output")}
     candidate = dispatch({"operation": "inspect"}, manifest)["candidates"][0]
 
     plan = dispatch({"operation": "build-plan", "payload": {
-        "candidate": candidate,
+        "candidate": candidate, "requestedPlanVersion": "plan-v3",
         "parameterSnapshot": {"schemaVersion": "1", "targetCrs": "EPSG:4326"},
     }}, manifest)
     response = dispatch({"operation": "execute-stage", "payload": {
-        "profileCode": "FY-4B-AGRI", "stageKey": "VALIDATE_FY4B_PACKAGE",
-        "outputUri": "rs://output/fy4b-validation", "parameterSnapshot": {"schemaVersion": "1", "targetCrs": "EPSG:4326"},
+        "profileCode": "FY-4B-AGRI", "planVersion": "plan-v3", "stageKey": "VALIDATE_FY4B_PACKAGE",
+        "outputUri": "rs://output/fy4b-validation",
+        "parameterSnapshot": json.dumps({"schemaVersion": "1", "targetCrs": "EPSG:4326"}),
     }}, manifest)
 
     assert plan["stages"][0]["stageKey"] == "VALIDATE_FY4B_PACKAGE"
@@ -131,7 +132,7 @@ def test_registry_selects_fy4b_from_complete_declared_roles_without_storage_path
     assert registry._adapter_for_manifest(manifest) is fy4b_agri
 
 
-def test_registry_inspects_and_builds_the_fy4b_integrated_plan(tmp_path):
+def test_registry_inspects_and_builds_the_fy4b_plan_v3(tmp_path):
     root = tmp_path / "fy4b"
     root.mkdir()
     manifest = _manifest_with_storage_uris(make_fy4b_package(root))
@@ -140,11 +141,12 @@ def test_registry_inspects_and_builds_the_fy4b_integrated_plan(tmp_path):
     candidate = inspected["candidates"][0]
     plan = dispatch({
         "operation": "build-plan",
-        "payload": {"candidate": candidate, "parameterSnapshot": {"schemaVersion": "1"}},
+        "payload": {"candidate": candidate, "requestedPlanVersion": "plan-v3", "parameterSnapshot": {"schemaVersion": "1"}},
     }, manifest)
 
     assert candidate["profileKey"] == {"productCode": "FY-4B-AGRI", "profileVersion": "v1"}
-    assert [stage["stageKey"] for stage in plan["stages"]] == ["STANDARDIZE_FY4B_AGRI"]
+    assert plan["version"] == "plan-v3"
+    assert plan["stages"][0]["stageKey"] == "VALIDATE_FY4B_PACKAGE"
 
 
 def test_registry_builds_requested_plan_v3_for_fy4b_package(tmp_path):
@@ -167,10 +169,11 @@ def test_registry_inspect_and_build_plan_accept_fy4b_uuid_physical_names(tmp_pat
     manifest = _manifest_with_storage_uris(_rename_inputs_to_uuid_files(make_fy4b_package(root)))
 
     candidate = dispatch({"operation": "inspect", "payload": {}}, manifest)["candidates"][0]
-    plan = dispatch({"operation": "build-plan", "payload": {"candidate": candidate, "parameterSnapshot": {}}}, manifest)
+    plan = dispatch({"operation": "build-plan", "payload": {"candidate": candidate, "requestedPlanVersion": "plan-v3", "parameterSnapshot": {}}}, manifest)
 
     assert candidate["profileKey"]["productCode"] == "FY-4B-AGRI"
-    assert plan["stages"][0]["stageKey"] == "STANDARDIZE_FY4B_AGRI"
+    assert plan["version"] == "plan-v3"
+    assert plan["stages"][0]["stageKey"] == "VALIDATE_FY4B_PACKAGE"
 
 
 def test_registry_executes_only_the_fy4b_integrated_stage(tmp_path, monkeypatch):
@@ -206,18 +209,19 @@ def test_registry_routes_fy4b_plan_v3_stage_to_staged_executor(tmp_path, monkeyp
     assert response == expected
 
 
-def test_registry_inspects_and_builds_the_gf6_l1a_integrated_plan(tmp_path):
+def test_registry_inspects_and_builds_the_gf6_l1a_plan_v3(tmp_path):
     manifest = _manifest_with_storage_uris(make_gf6_package(tmp_path / "gf6"))
 
     inspected = dispatch({"operation": "inspect", "payload": {}}, manifest)
     candidate = inspected["candidates"][0]
     plan = dispatch({
         "operation": "build-plan",
-        "payload": {"candidate": candidate, "parameterSnapshot": {"schemaVersion": "gf6-wfv-l1a-v1"}},
+        "payload": {"candidate": candidate, "requestedPlanVersion": "plan-v3", "parameterSnapshot": {"schemaVersion": "gf6-wfv-l1a-v1"}},
     }, manifest)
 
     assert candidate["profileKey"] == {"productCode": "GF-6-WFV-L1A", "profileVersion": "v1"}
-    assert [stage["stageKey"] for stage in plan["stages"]] == ["STANDARDIZE_GF6_WFV_L1A"]
+    assert plan["version"] == "plan-v3"
+    assert plan["stages"][0]["stageKey"] == "VALIDATE_GF6_WFV_L1A"
 
 
 def test_registry_builds_requested_plan_v3_for_gf6_l1a_with_staged_dag(tmp_path):
@@ -256,10 +260,11 @@ def test_registry_inspect_and_build_plan_accept_gf6_uuid_physical_names(tmp_path
     )
 
     candidate = dispatch({"operation": "inspect", "payload": {}}, manifest)["candidates"][0]
-    plan = dispatch({"operation": "build-plan", "payload": {"candidate": candidate, "parameterSnapshot": {}}}, manifest)
+    plan = dispatch({"operation": "build-plan", "payload": {"candidate": candidate, "requestedPlanVersion": "plan-v3", "parameterSnapshot": {}}}, manifest)
 
     assert candidate["profileKey"]["productCode"] == "GF-6-WFV-L1A"
-    assert plan["stages"][0]["stageKey"] == "STANDARDIZE_GF6_WFV_L1A"
+    assert plan["version"] == "plan-v3"
+    assert plan["stages"][0]["stageKey"] == "VALIDATE_GF6_WFV_L1A"
 
 
 def test_registry_preserves_optional_gf6_footprint_required_flags(tmp_path):
@@ -317,19 +322,15 @@ def test_registry_builds_the_gf_browse_dag_for_exact_public_parameters(gf_manife
         "operation": "build-plan",
         "payload": {
             "candidate": candidate,
+            "requestedPlanVersion": "plan-v3",
             "parameterSnapshot": json.dumps({"schemaVersion": "1", "operation": "DEFAULT_PROCESS"}),
         },
     }, gf_manifest)
 
-    assert response == {"version": "plan-v1", "stages": [
-        {"stageKey": "VALIDATE_BROWSE", "stageCode": "VALIDATE_BROWSE", "dependsOnStageKeys": []},
-        {"stageKey": "GEOREFERENCE_BROWSE", "stageCode": "GEOREFERENCE_BROWSE",
-         "dependsOnStageKeys": ["VALIDATE_BROWSE"]},
-        {"stageKey": "EXTRACT_VISUAL_FEATURES", "stageCode": "EXTRACT_VISUAL_FEATURES",
-         "dependsOnStageKeys": ["GEOREFERENCE_BROWSE"]},
-        {"stageKey": "WRITE_BROWSE_REPORT", "stageCode": "WRITE_BROWSE_REPORT",
-         "dependsOnStageKeys": ["EXTRACT_VISUAL_FEATURES"]},
-    ]}
+    assert response["version"] == "plan-v3"
+    assert [stage["stageKey"] for stage in response["stages"]] == [
+        "VALIDATE_BROWSE", "GEOREFERENCE_BROWSE", "EXTRACT_VISUAL_FEATURES", "WRITE_BROWSE_REPORT",
+    ]
 
 
 @pytest.mark.real_sample
@@ -341,6 +342,7 @@ def test_registry_rejects_any_non_default_gf_browse_operation(gf_manifest):
             "operation": "build-plan",
             "payload": {
                 "candidate": candidate,
+                "requestedPlanVersion": "plan-v3",
                 "parameterSnapshot": json.dumps({"schemaVersion": "1", "operation": "BROWSE_VISUAL_FEATURES"}),
             },
         }, gf_manifest)
