@@ -29,6 +29,7 @@ public class QualityReportBuilder {
             .toList();
 
         Map<String, List<TaskArtifactView>> artifactsByType = new LinkedHashMap<>();
+        Map<String, String> observedEvaluationMetrics = new LinkedHashMap<>();
         for (TaskArtifactView artifact : detail.artifacts()) {
             artifactsByType.computeIfAbsent(artifact.type(), ignored -> new ArrayList<>()).add(artifact);
         }
@@ -68,7 +69,9 @@ public class QualityReportBuilder {
                 continue;
             }
             try {
-                appendQualityChecks(checks, artifact, format, inspector.inspect(detail, subject, artifact, format));
+                JsonNode inspection = inspector.inspect(detail, subject, artifact, format);
+                collectEvaluationMetrics(observedEvaluationMetrics, format, inspection);
+                appendQualityChecks(checks, artifact, format, inspection);
             } catch (RuntimeException exception) {
                 checks.add(notChecked(artifact, format, "无法读取产物内容，质量指标未检查",
                     "Worker 检查失败，请确认文件可读后重试"));
@@ -86,9 +89,52 @@ public class QualityReportBuilder {
                 artifact.stageId().value(), artifact.type(), displayName(artifact), format(artifact),
                 artifact.sizeBytes(), artifact.checksum(), artifact.retention()))
             .toList();
+        String profileCode = detail.candidates().stream()
+            .findFirst()
+            .map(candidate -> candidate.profileKey().productCode())
+            .orElse("UNKNOWN");
         return new QualityReportResponse("task-" + detail.id().value() + "-quality", detail.id().value(),
             Instant.now(), overall, new QualityReportResponse.Summary(checks.size(), passed, warnings, failed),
-            functions, checks, references, RULE_VERSION);
+            functions, checks, AlgorithmEvaluationCatalog.forProfile(profileCode, observedEvaluationMetrics),
+            references, RULE_VERSION);
+    }
+
+    private static void collectEvaluationMetrics(Map<String, String> observed, String format, JsonNode inspection) {
+        if (inspection == null || !inspection.isObject()) {
+            return;
+        }
+        JsonNode quality = inspection.path("quality");
+        if (!quality.isObject()) {
+            quality = inspection;
+        }
+        observe(observed, quality, "bounds_valid", "boundsValid");
+        observe(observed, quality, "valid_pixel_ratio", "validPixelRatio");
+        observe(observed, quality, "finite_values", "hasNanOrInf", true);
+        observe(observed, quality, "row_count", "rowCount");
+        observe(observed, quality, "empty_value_ratio", "emptyValueRatio");
+        if ("HY-2D".equals(format)) {
+            observe(observed, quality, "track_valid_ratio", "validRatio");
+        }
+        if ("NETCDF".equals(format)) {
+            observe(observed, quality, "track_valid_ratio", "validRatio");
+        }
+    }
+
+    private static void observe(Map<String, String> observed, JsonNode quality, String key, String field) {
+        observe(observed, quality, key, field, false);
+    }
+
+    private static void observe(Map<String, String> observed, JsonNode quality, String key,
+                                String field, boolean invertBoolean) {
+        JsonNode value = quality.get(field);
+        if (value == null || value.isNull()) {
+            return;
+        }
+        if (invertBoolean && value.isBoolean()) {
+            observed.put(key, Boolean.toString(!value.asBoolean()));
+        } else if (value.isValueNode()) {
+            observed.put(key, value.asText());
+        }
     }
 
     private static void appendQualityChecks(List<QualityReportResponse.Check> checks, TaskArtifactView artifact,

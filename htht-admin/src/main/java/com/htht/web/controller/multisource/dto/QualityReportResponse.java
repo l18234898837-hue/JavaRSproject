@@ -12,10 +12,30 @@ public record QualityReportResponse(
     Summary summary,
     List<String> selectedFunctions,
     List<Check> checks,
+    AlgorithmEvaluation algorithmEvaluation,
     List<ArtifactReference> artifactReferences,
     String ruleVersion
 ) {
     public record Summary(int totalChecks, int passedChecks, int warningChecks, int failedChecks) {}
+
+    public record AlgorithmEvaluation(
+        String catalogVersion,
+        String profileCode,
+        List<EvaluationMetric> metrics
+    ) {}
+
+    public record EvaluationMetric(
+        String key,
+        String name,
+        String category,
+        String direction,
+        String unit,
+        String status,
+        String observedValue,
+        boolean referenceRequired,
+        String source,
+        String message
+    ) {}
 
     public record Check(
         String checkId,

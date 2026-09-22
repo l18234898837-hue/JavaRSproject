@@ -42,6 +42,7 @@ class QualityReportBuilderTest {
         assertThat(report.summary().failedChecks()).isGreaterThanOrEqualTo(1);
         assertThat(report.checks()).extracting("status").contains("FAIL");
         assertThat(report.ruleVersion()).isEqualTo(QualityReportBuilder.RULE_VERSION);
+        assertThat(report.algorithmEvaluation().catalogVersion()).isEqualTo(AlgorithmEvaluationCatalog.VERSION);
     }
 
     @Test
