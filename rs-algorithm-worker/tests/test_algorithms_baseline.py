@@ -95,3 +95,18 @@ def test_saliency_uses_local_contrast_and_returns_zero_for_constant_image():
 
     assert not result.mask.any()
     np.testing.assert_array_equal(result.score.values, np.zeros((2, 2), dtype=np.float32))
+
+
+def test_saliency_keeps_zero_scores_valid_and_masks_source_nodata():
+    raster = RasterData(
+        values=np.array([[1.0, np.nan], [1.0, 1.0]], dtype=np.float32),
+        crs="EPSG:4326", transform=Affine(1, 0, 0, 0, -1, 2), nodata=np.nan,
+        band_metadata=(BandMetadata("B1"),),
+    )
+
+    result = detect_saliency(raster, SaliencyParameters(threshold=0.1, window_size=3))
+
+    assert result.score.nodata != 0.0
+    assert result.score.values[0, 0] == 0.0
+    assert np.isnan(result.score.values[0, 1])
+    assert not result.mask[0, 0]

@@ -111,4 +111,47 @@ class QualityReportBuilderTest {
         assertThat(metric.observedValue()).isEqualTo("2.31");
         assertThat(metric.message()).isEqualTo("已根据参考数据计算");
     }
+
+    @Test
+    void treatsSparseHy1cRasterCoverageAsDescriptiveQualityNotHardFailure() throws Exception {
+        StageId stageId = new StageId(301L);
+        TaskArtifactView standard = new TaskArtifactView(stageId, "STANDARD_COG",
+            new StorageUri("rs://output/101/standard/czi-l2a.tif"), "sha256:standard", 1024L, "FINAL");
+        TaskArtifactView saliencyMask = new TaskArtifactView(stageId, "SALIENCY_MASK_COG",
+            new StorageUri("rs://output/101/saliency/mask.tif"), "sha256:mask", 1024L, "FINAL");
+        TaskDetailView detail = new TaskDetailView(
+            TaskId.of(101L), 33L, TaskLifecycleStatus.SUCCEEDED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-v3", List.of(new ProcessingStage("WRITE", "WRITE_STANDARD_COG", List.of()))),
+            List.of(new ProductCandidate("pkg", new ProductProfileKey("HY-1C-CZI", "L2A-v1"),
+                ProductDataShape.RASTER_GRID, ProductSupportStatus.SUPPORTED,
+                List.of(new InputAsset("MAIN", 0, new AssetReference("SYS_FILE", "42"),
+                    new StorageUri("rs://sys-file/42"), "sha256:input", true)), 1.0)),
+            List.of(new TaskStageView(stageId, "WRITE", StageExecutionStatus.SUCCEEDED, 1)),
+            List.of(standard, saliencyMask));
+
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var maskInspection = mapper.readTree("""
+            {"quality":{"boundsValid":true,"validPixelRatio":0.0,"hasNanOrInf":false,
+            "width":10,"height":10,"bandCount":1,"statistics":{}}}
+            """);
+        var standardInspection = mapper.readTree("""
+            {"quality":{"boundsValid":true,"validPixelRatio":0.01,"hasNanOrInf":false,
+            "width":10,"height":10,"bandCount":1,"statistics":{"min":1,"max":2}}}
+            """);
+        var report = new QualityReportBuilder().build(detail, (ignoredDetail, ignoredSubject, artifact, format) -> {
+            if ("SALIENCY_MASK_COG".equals(artifact.type())) {
+                return maskInspection;
+            }
+            return standardInspection;
+        }, new AccessSubject(7L));
+
+        assertThat(report.checks())
+            .filteredOn(check -> "有效覆盖率".equals(check.name()))
+            .extracting("status")
+            .containsExactly("PASS");
+        assertThat(report.checks())
+            .filteredOn(check -> "候选区域比例".equals(check.name()))
+            .extracting("status")
+            .containsExactly("PASS");
+    }
 }

@@ -29,16 +29,19 @@ def detect_saliency(raster: RasterData, parameters: SaliencyParameters) -> Salie
     values = raster.values if raster.values.ndim == 2 else np.nanmean(raster.values, axis=0)
     valid = np.isfinite(values)
     finite = values[valid]
-    if finite.size == 0 or finite.max() == finite.min():
-        score_values = np.zeros(values.shape, dtype=np.float32)
+    if finite.size == 0:
+        score_values = np.full(values.shape, np.nan, dtype=np.float32)
+    elif finite.max() == finite.min():
+        score_values = np.full(values.shape, np.nan, dtype=np.float32)
+        score_values[valid] = 0.0
     else:
         counts = uniform_filter(valid.astype(np.float32), size=parameters.window_size, mode="nearest")
         local_mean = uniform_filter(np.where(valid, values, 0.0), size=parameters.window_size, mode="nearest")
         local_mean /= np.where(counts == 0, 1.0, counts)
         score_values = np.abs(values - local_mean).astype(np.float32)
-        score_values[~valid] = 0.0
-        maximum = score_values.max()
+        score_values[~valid] = np.nan
+        maximum = np.nanmax(score_values)
         if maximum > 0:
             score_values /= maximum
-    score = RasterData(score_values, raster.crs, raster.transform, 0.0, (BandMetadata("saliency_score"),))
-    return SaliencyResult(score=score, mask=score_values >= parameters.threshold)
+    score = RasterData(score_values, raster.crs, raster.transform, np.nan, (BandMetadata("saliency_score"),))
+    return SaliencyResult(score=score, mask=np.isfinite(score_values) & (score_values >= parameters.threshold))

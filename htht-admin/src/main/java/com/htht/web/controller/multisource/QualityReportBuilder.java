@@ -205,8 +205,11 @@ public class QualityReportBuilder {
                                      TaskArtifactView artifact, JsonNode quality) {
         addBoolean(checks, prefix + "bounds", artifact, "空间范围有效", quality, "boundsValid", "true",
             "地理范围有效，可用于地图展示", "地理范围无效，无法可靠定位到地图");
-        addNumeric(checks, prefix + "valid-pixels", artifact, "有效像元比例", quality, "validPixelRatio",
-            0.5, "比例 ≥ 0.5", "有效像元比例达到工程阈值", "有效像元较少，结果可能包含大量空数据");
+        if (isCandidateMaskArtifact(artifact)) {
+            addCandidateRatio(checks, prefix + "candidate-ratio", artifact, quality);
+        } else {
+            addCoverageRatio(checks, prefix + "valid-pixels", artifact, quality);
+        }
         addBoolean(checks, prefix + "finite", artifact, "像元数值有限", quality, "hasNanOrInf", "false",
             "未发现 NaN/Inf", "发现 NaN/Inf，部分像元可能不可用");
         addPositive(checks, prefix + "width", artifact, "栅格宽度", quality, "width", "width > 0",
@@ -306,6 +309,37 @@ public class QualityReportBuilder {
             "PASS".equals(status) ? passMessage : warnMessage, null,
             "PASS".equals(status) ? "INFO" : "WARN".equals(status) ? "WARNING" : "ERROR",
             Map.of(field, actual), "CHECKED", "PASS".equals(status) ? null : "请检查无效值、空数据或质量掩膜"));
+    }
+
+    private static void addCoverageRatio(List<QualityReportResponse.Check> checks, String id,
+                                         TaskArtifactView artifact, JsonNode quality) {
+        if (!quality.has("validPixelRatio") || !quality.path("validPixelRatio").isNumber()) {
+            checks.add(missing(id, artifact, "有效覆盖率", "validPixelRatio"));
+            return;
+        }
+        double actual = quality.path("validPixelRatio").asDouble();
+        String status = actual > 0 ? "PASS" : "WARN";
+        checks.add(check(id, null, artifact, "有效覆盖率", status, Double.toString(actual), "> 0", "比例",
+            actual > 0 ? "产物包含可用于查看和统计的有效观测像元" : "当前抽样范围内未发现有效观测像元",
+            null, actual > 0 ? "INFO" : "WARNING", Map.of("validPixelRatio", actual),
+            "CHECKED", actual > 0 ? null : "请确认 ROI、质量掩膜或源数据覆盖范围"));
+    }
+
+    private static void addCandidateRatio(List<QualityReportResponse.Check> checks, String id,
+                                          TaskArtifactView artifact, JsonNode quality) {
+        if (!quality.has("validPixelRatio") || !quality.path("validPixelRatio").isNumber()) {
+            checks.add(missing(id, artifact, "候选区域比例", "validPixelRatio"));
+            return;
+        }
+        double actual = quality.path("validPixelRatio").asDouble();
+        checks.add(check(id, null, artifact, "候选区域比例", "PASS", Double.toString(actual), "描述性指标", "比例",
+            actual > 0 ? "检测到显著性候选区域" : "未检测到超过阈值的显著性候选区域，不代表文件损坏",
+            null, "INFO", Map.of("candidatePixelRatio", actual), "CHECKED", null));
+    }
+
+    private static boolean isCandidateMaskArtifact(TaskArtifactView artifact) {
+        String type = artifact.type().toUpperCase(Locale.ROOT);
+        return type.contains("SALIENCY") && type.contains("MASK");
     }
 
     private static void addNumericMax(List<QualityReportResponse.Check> checks, String id, TaskArtifactView artifact,
