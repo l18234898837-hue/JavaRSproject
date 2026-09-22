@@ -27,7 +27,7 @@ public class QualityReportBuilder {
     }
 
     public QualityReportResponse build(TaskDetailView detail, QualityArtifactInspector inspector,
-                                       AccessSubject subject, JsonNode evaluationReport) {
+                                       AccessSubject subject, JsonNode suppliedEvaluationReport) {
         List<QualityReportResponse.Check> checks = new ArrayList<>();
         List<String> functions = detail.plan().stages().stream()
             .map(stage -> stage.stageKey() + " · " + stage.stageCode())
@@ -35,6 +35,7 @@ public class QualityReportBuilder {
 
         Map<String, List<TaskArtifactView>> artifactsByType = new LinkedHashMap<>();
         Map<String, String> observedEvaluationMetrics = new LinkedHashMap<>();
+        JsonNode evaluationReport = suppliedEvaluationReport;
         for (TaskArtifactView artifact : detail.artifacts()) {
             artifactsByType.computeIfAbsent(artifact.type(), ignored -> new ArrayList<>()).add(artifact);
         }
@@ -76,6 +77,9 @@ public class QualityReportBuilder {
             try {
                 JsonNode inspection = inspector.inspect(detail, subject, artifact, format);
                 collectEvaluationMetrics(observedEvaluationMetrics, format, inspection);
+                if (isEvaluationReportArtifact(artifact) && inspection != null && inspection.isObject()) {
+                    evaluationReport = inspection;
+                }
                 appendQualityChecks(checks, artifact, format, inspection);
             } catch (RuntimeException exception) {
                 checks.add(notChecked(artifact, format, "无法读取产物内容，质量指标未检查",
@@ -175,6 +179,14 @@ public class QualityReportBuilder {
 
     private static String prefixFor(TaskArtifactView artifact) {
         return "quality-" + artifact.stageId().value() + "-" + artifact.type() + "-";
+    }
+
+    private static boolean isEvaluationReportArtifact(TaskArtifactView artifact) {
+        String type = artifact.type().toUpperCase(Locale.ROOT);
+        String name = displayName(artifact).toLowerCase(Locale.ROOT);
+        return (type.contains("EVALUATION") && type.contains("REPORT"))
+            || name.equals("algorithm-evaluation-report.json")
+            || name.equals("algorithm-evaluation.json");
     }
 
     private static void appendImage(List<QualityReportResponse.Check> checks, String prefix,

@@ -167,6 +167,7 @@ class ProcessingExecutionControllerTest {
             .andExpect(content().contentTypeCompatibleWith("text/html"))
             .andExpect(header().string("Content-Disposition", "attachment; filename=\"task-101-quality-report.html\""))
             .andExpect(content().string(org.hamcrest.Matchers.containsString("质量检测报告")))
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("算法质量分析")))
             .andExpect(content().string(org.hamcrest.Matchers.containsString("总体结论：NOT_CHECKED")));
     }
 

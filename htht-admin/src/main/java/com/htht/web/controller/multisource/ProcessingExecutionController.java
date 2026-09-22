@@ -234,6 +234,20 @@ public class ProcessingExecutionController {
                 .append(escapeHtml(check.threshold())).append("</td><td>")
                 .append(escapeHtml(check.recommendation())).append("</td></tr>");
         }
+        html.append("</tbody></table>");
+        html.append("<h2>算法质量分析</h2>");
+        html.append("<p>指标目录版本：").append(escapeHtml(report.algorithmEvaluation().catalogVersion()))
+            .append(" · 算法类型：").append(escapeHtml(report.algorithmEvaluation().profileCode()))
+            .append("</p>");
+        html.append("<table><thead><tr><th>指标</th><th>类别</th><th>状态</th><th>结果</th><th>说明</th></tr></thead><tbody>");
+        for (QualityReportResponse.EvaluationMetric metric : report.algorithmEvaluation().metrics()) {
+            html.append("<tr><td>").append(escapeHtml(metric.name())).append("</td><td>")
+                .append(escapeHtml(metric.category())).append("</td><td class=\"")
+                .append(escapeHtml(metric.status())).append("\">").append(escapeHtml(metric.status()))
+                .append("</td><td>").append(escapeHtml(metric.observedValue()))
+                .append(metric.unit() == null ? "" : " " + escapeHtml(metric.unit()))
+                .append("</td><td>").append(escapeHtml(metric.message())).append("</td></tr>");
+        }
         return html.append("</tbody></table></body></html>").toString();
     }
 
