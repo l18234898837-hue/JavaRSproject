@@ -1,12 +1,15 @@
 package com.htht.web.controller.multisource;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.htht.web.controller.multisource.dto.QualityReportResponse;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 final class AlgorithmEvaluationCatalog {
     static final String VERSION = "algorithm-evaluation-v1";
+    private static final String REPORT_VERSION = "algorithm-evaluation-report-v1";
 
     private AlgorithmEvaluationCatalog() {}
 
@@ -31,6 +34,60 @@ final class AlgorithmEvaluationCatalog {
             )).toList()
         );
     }
+
+    static QualityReportResponse.AlgorithmEvaluation fromReport(
+        String profileCode, JsonNode report, Map<String, String> observed) {
+        QualityReportResponse.AlgorithmEvaluation baseline = forProfile(profileCode, observed);
+        if (report == null || !report.isObject()) {
+            throw new IllegalArgumentException("algorithm evaluation report must be an object");
+        }
+        String reportProfile = report.path("profileCode").asText("");
+        if (!profileCode.equals(reportProfile)) {
+            throw new IllegalArgumentException("algorithm evaluation report profile does not match task profile");
+        }
+        String reportVersion = report.path("reportVersion").asText("");
+        if (!REPORT_VERSION.equals(reportVersion)) {
+            throw new IllegalArgumentException("unsupported algorithm evaluation report version: " + reportVersion);
+        }
+        JsonNode metricsNode = report.path("metrics");
+        if (!metricsNode.isArray()) {
+            throw new IllegalArgumentException("algorithm evaluation report metrics must be an array");
+        }
+        Map<String, JsonNode> reportMetrics = new LinkedHashMap<>();
+        for (JsonNode metric : metricsNode) {
+            String key = metric.path("key").asText("");
+            if (!key.isBlank()) {
+                reportMetrics.put(key, metric);
+            }
+        }
+        List<QualityReportResponse.EvaluationMetric> merged = baseline.metrics().stream()
+            .map(metric -> mergeMetric(metric, reportMetrics.get(metric.key())))
+            .toList();
+        return new QualityReportResponse.AlgorithmEvaluation(
+            baseline.catalogVersion(), baseline.profileCode(), merged);
+    }
+
+    private static QualityReportResponse.EvaluationMetric mergeMetric(
+        QualityReportResponse.EvaluationMetric baseline, JsonNode reportMetric) {
+        if (reportMetric == null) {
+            return baseline;
+        }
+        String status = reportMetric.path("status").asText("");
+        if (!METRIC_STATUSES.contains(status)) {
+            throw new IllegalArgumentException("unsupported algorithm evaluation metric status: " + status);
+        }
+        JsonNode value = reportMetric.get("value");
+        String observedValue = value == null || value.isNull() ? null : value.isValueNode()
+            ? value.asText() : value.toString();
+        String reason = reportMetric.path("reason").asText("");
+        return new QualityReportResponse.EvaluationMetric(
+            baseline.key(), baseline.name(), baseline.category(), baseline.direction(), baseline.unit(),
+            status, observedValue, baseline.referenceRequired(), baseline.source(),
+            reason.isBlank() ? baseline.message() : reason);
+    }
+
+    private static final java.util.Set<String> METRIC_STATUSES =
+        java.util.Set.of("OBSERVED", "REQUIRES_REFERENCE", "UNAVAILABLE");
 
     private record Metric(String key, String name, String category, String direction,
                           String unit, boolean referenceRequired, String source) {}

@@ -23,6 +23,11 @@ public class QualityReportBuilder {
 
     public QualityReportResponse build(TaskDetailView detail, QualityArtifactInspector inspector,
                                        AccessSubject subject) {
+        return build(detail, inspector, subject, null);
+    }
+
+    public QualityReportResponse build(TaskDetailView detail, QualityArtifactInspector inspector,
+                                       AccessSubject subject, JsonNode evaluationReport) {
         List<QualityReportResponse.Check> checks = new ArrayList<>();
         List<String> functions = detail.plan().stages().stream()
             .map(stage -> stage.stageKey() + " · " + stage.stageCode())
@@ -93,9 +98,13 @@ public class QualityReportBuilder {
             .findFirst()
             .map(candidate -> candidate.profileKey().productCode())
             .orElse("UNKNOWN");
+        QualityReportResponse.AlgorithmEvaluation algorithmEvaluation =
+            evaluationReport == null
+                ? AlgorithmEvaluationCatalog.forProfile(profileCode, observedEvaluationMetrics)
+                : AlgorithmEvaluationCatalog.fromReport(profileCode, evaluationReport, observedEvaluationMetrics);
         return new QualityReportResponse("task-" + detail.id().value() + "-quality", detail.id().value(),
             Instant.now(), overall, new QualityReportResponse.Summary(checks.size(), passed, warnings, failed),
-            functions, checks, AlgorithmEvaluationCatalog.forProfile(profileCode, observedEvaluationMetrics),
+            functions, checks, algorithmEvaluation,
             references, RULE_VERSION);
     }
 
