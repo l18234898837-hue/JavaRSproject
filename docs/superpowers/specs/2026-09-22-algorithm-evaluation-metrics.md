@@ -1,0 +1,44 @@
+# Algorithm Evaluation Metrics Contract
+
+## Scope of this first slice
+
+This slice defines a versioned metric catalog for the six supported product
+profiles. It does not change processing algorithms, introduce automatic
+threshold tuning, or claim scientific accuracy.
+
+The implementation is in
+`rs-algorithm-worker/src/rs_algorithm_worker/algorithm_evaluation.py`.
+
+## Metric categories
+
+- `CORRECTNESS`: format, dimensions, coordinates, and required structure.
+- `DATA_QUALITY`: valid-pixel/point ratios, coverage, continuity, and residuals.
+- `PERFORMANCE`: reserved for a later phase; processing time and resource usage
+  will be recorded by the orchestration layer rather than inferred from files.
+
+Each metric declares:
+
+- direction: `PASS_FAIL`, `HIGHER_BETTER`, `LOWER_BETTER`, or `DESCRIPTIVE`;
+- source: existing artifact metadata, reference control points, or labels;
+- whether reference data is required;
+- an optional threshold. The first version intentionally leaves business
+  thresholds unset.
+
+## Interpretation rule
+
+`build_evaluation_contract()` means “these are the metrics to evaluate”.
+`observe_artifact_metrics()` only maps already available inspection fields and
+returns `UNAVAILABLE` when a field is absent. It never converts a file-health
+observation into an accuracy score.
+
+Scientific metrics such as navigation error, projection error, baseline
+residual, anomaly precision, and anomaly recall remain unavailable until
+reference control points, validated products, or human labels are supplied.
+
+## Next bounded slice
+
+The next implementation should add a read-only evaluation artifact for one
+representative raster profile (GF-6 WFV L1A) and one track profile (HY-2D).
+That artifact should contain observed metrics, parameter snapshot, algorithm
+version, and explicit `UNAVAILABLE` entries. It should not modify the
+calculation path or change the existing quality-report API.
