@@ -552,7 +552,17 @@ def _feature_artifacts(output_uri: str, output_dir: Path, raster: RasterData, co
         )
         artifacts.append(_cog_artifact(output_uri, output_dir, "FEATURE_COG", write_cog(feature_raster, feature_path)))
     metadata_path = output_dir / "features" / "czi-features.json"
-    _write_json(metadata_path, {"version": feature_set.version, "statistics": feature_set.statistics, "metrics": list(metrics)})
+    values = raster.values if raster.values.ndim == 3 else raster.values[np.newaxis, ...]
+    valid = np.isfinite(values)
+    _write_json(metadata_path, {
+        "version": feature_set.version,
+        "purpose": "局部梯度和纹理变化指标，不是目标分类结果",
+        "statistics": feature_set.statistics,
+        "metrics": list(metrics),
+        "windowSize": int(configuration.get("windowSize", 3)),
+        "validPixelRatio": float(valid.all(axis=0).mean()) if valid.size else 0.0,
+        "interpretation": "gradient 表示局部变化强度；local_variance 表示窗口内纹理变化；空白区域表示没有有效观测。",
+    })
     artifacts.append(_file_artifact(output_uri, output_dir, "FEATURE_METADATA_JSON", metadata_path))
     return artifacts
 
@@ -568,10 +578,23 @@ def _fusion_artifacts(output_uri: str, output_dir: Path, raster: RasterData, con
     fusion_path = output_dir / "fusion" / "czi-rgb.tif"
     fusion_path.parent.mkdir(parents=True, exist_ok=True)
     preview_path = output_dir / "fusion" / "czi-rgb.png"
-    Image.fromarray(np.ascontiguousarray(np.moveaxis(fused.values, 0, -1)), mode="RGB").save(preview_path, format="PNG")
+    rgb = np.ascontiguousarray(np.moveaxis(fused.values, 0, -1))
+    source_values = np.stack([raster.values[{metadata.name: index for index, metadata in enumerate(raster.band_metadata)}[name]]
+                              for name in (configuration["red"], configuration["green"], configuration["blue"])])
+    alpha = np.where(np.isfinite(source_values).all(axis=0), 255, 0).astype(np.uint8)
+    Image.fromarray(np.dstack((rgb, alpha)), mode="RGBA").save(preview_path, format="PNG")
+    metadata_path = output_dir / "fusion" / "czi-rgb.json"
+    _write_json(metadata_path, {
+        "purpose": "按指定波段组合生成的拉伸 RGB 预览",
+        "bands": {"red": configuration["red"], "green": configuration["green"], "blue": configuration["blue"]},
+        "stretch": {"lowPercentile": float(configuration.get("lowPercentile", 2)), "highPercentile": float(configuration.get("highPercentile", 98))},
+        "validPixelRatio": float(np.isfinite(source_values).all(axis=0).mean()),
+        "nodataDisplay": "透明",
+    })
     return [
         _cog_artifact(output_uri, output_dir, "FUSION_COG", write_cog(fused, fusion_path)),
         _file_artifact(output_uri, output_dir, "FUSION_PREVIEW_PNG", preview_path),
+        _file_artifact(output_uri, output_dir, "FUSION_METADATA_JSON", metadata_path),
     ]
 
 
@@ -596,11 +619,24 @@ def _saliency_artifacts(output_uri: str, output_dir: Path, raster: RasterData, c
         saliency.mask.astype(np.uint8), raster.crs, raster.transform, 0,
         (BandMetadata("saliency_mask"),),
     )
-    Image.fromarray(_saliency_preview_rgb(saliency.score.values), mode="RGB").save(preview_path, format="PNG")
+    preview_rgb = _saliency_preview_rgb(saliency.score.values)
+    alpha = np.where(np.isfinite(source_raster.values), 255, 0).astype(np.uint8)
+    Image.fromarray(np.dstack((preview_rgb, alpha)), mode="RGBA").save(preview_path, format="PNG")
+    metadata_path = directory / "metadata.json"
+    _write_json(metadata_path, {
+        "purpose": "基于局部均值差异的显著性候选区域，不代表已确认目标",
+        "sourceBand": source,
+        "windowSize": int(configuration.get("windowSize", 5)),
+        "threshold": float(configuration.get("threshold", 0.5)),
+        "validPixelRatio": float(np.isfinite(source_raster.values).mean()),
+        "candidatePixelRatio": float(saliency.mask[np.isfinite(source_raster.values)].mean()) if np.isfinite(source_raster.values).any() else 0.0,
+        "nodataDisplay": "透明",
+    })
     return [
         _cog_artifact(output_uri, output_dir, "SALIENCY_SCORE_COG", write_cog(saliency.score, score_path)),
         _cog_artifact(output_uri, output_dir, "SALIENCY_MASK_COG", write_cog(mask_raster, mask_path)),
         _file_artifact(output_uri, output_dir, "SALIENCY_PREVIEW_PNG", preview_path),
+        _file_artifact(output_uri, output_dir, "SALIENCY_METADATA_JSON", metadata_path),
     ]
 
 

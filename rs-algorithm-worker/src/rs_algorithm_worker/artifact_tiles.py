@@ -158,9 +158,13 @@ def _raster_quality(dataset: rasterio.io.DatasetReader) -> dict[str, Any]:
     )
     valid = finite & ~np.ma.getmaskarray(values)
     valid_values = raw[valid]
+    # ``masked=True`` represents nodata/outside-coverage pixels in the mask.
+    # Do not report those expected gaps as NaN/Inf corruption: inspect only
+    # unmasked samples, which are the values users can actually interpret.
     has_nonfinite = bool(
-        np.issubdtype(raw.dtype, np.inexact) and np.any(~np.isfinite(raw))
+        np.issubdtype(raw.dtype, np.inexact) and np.any(~np.isfinite(raw[~np.ma.getmaskarray(values)]))
     )
+    masked_ratio = float(np.ma.getmaskarray(values).sum() / values.size) if values.size else 0.0
     statistics: dict[str, float | int] = {}
     if valid_values.size:
         statistics = {
@@ -174,6 +178,7 @@ def _raster_quality(dataset: rasterio.io.DatasetReader) -> dict[str, Any]:
         "dtype": dataset.dtypes[0] if len(set(dataset.dtypes)) == 1 else list(dataset.dtypes),
         "boundsValid": True,
         "validPixelRatio": float(valid.sum() / valid.size) if valid.size else 0.0,
+        "nodataPixelRatio": masked_ratio,
         "statistics": statistics,
         "hasNanOrInf": has_nonfinite,
     }
@@ -252,7 +257,11 @@ def _render_rgba(
             _render_band(dataset, band, z, x, y, overview_resampling)
             for band in bands
         ]
-        alpha = np.isfinite(rendered[0])
+        # RGB COGs use 0 as a storage nodata sentinel, but 0 is also a valid
+        # stretched colour value.  The renderer already receives NaN for
+        # pixels outside the source footprint, so alpha must follow finiteness
+        # rather than the numeric nodata value here.
+        alpha = np.logical_and.reduce([np.isfinite(channel) for channel in rendered])
         rgb = np.stack([_stretch(channel) for channel in rendered], axis=-1)
     elif kind == "mask":
         values = _render_band(dataset, 1, z, x, y, Resampling.nearest)

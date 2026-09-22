@@ -330,11 +330,13 @@ def test_registry_executes_every_l2a_plan_v3_stage(synthetic_l2a_manifest, tmp_p
     assert {item["type"] for item in fusion["artifacts"]} == {
         "FUSION_COG",
         "FUSION_PREVIEW_PNG",
+        "FUSION_METADATA_JSON",
     }
     assert {item["type"] for item in saliency["artifacts"]} == {
         "SALIENCY_SCORE_COG",
         "SALIENCY_MASK_COG",
         "SALIENCY_PREVIEW_PNG",
+        "SALIENCY_METADATA_JSON",
     }
 
 
@@ -362,7 +364,7 @@ def test_registry_standardizes_l2a_into_archiveable_output_artifacts(synthetic_l
     assert {artifact["type"] for artifact in response["artifacts"]} == {
         "STANDARD_COG", "STANDARD_METADATA_JSON", "FEATURE_COG", "FEATURE_METADATA_JSON",
         "FUSION_COG", "FUSION_PREVIEW_PNG", "SALIENCY_SCORE_COG", "SALIENCY_MASK_COG",
-        "SALIENCY_PREVIEW_PNG",
+        "FUSION_METADATA_JSON", "SALIENCY_PREVIEW_PNG", "SALIENCY_METADATA_JSON",
     }
     assert all(artifact["uri"].startswith("rs://output/task-101/") for artifact in response["artifacts"])
     assert all(artifact["sizeBytes"] > 0 and artifact["checksum"].startswith("sha256:")

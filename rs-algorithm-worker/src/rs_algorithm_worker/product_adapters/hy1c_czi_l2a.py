@@ -182,12 +182,14 @@ def build_l2a_plan(candidate: dict[str, Any], parameter_snapshot: dict[str, Any]
         outputs.extend([
             _output("FUSION_COG", "fusion/czi-rgb.tif", "FINAL"),
             _output("FUSION_PREVIEW_PNG", "fusion/czi-rgb.png", "FINAL"),
+            _output("FUSION_METADATA_JSON", "fusion/czi-rgb.json", "FINAL"),
         ])
     if parameters.algorithms.get("saliency", {}).get("enabled"):
         outputs.extend([
             _output("SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"),
             _output("SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"),
             _output("SALIENCY_PREVIEW_PNG", "saliency/preview.png", "FINAL"),
+            _output("SALIENCY_METADATA_JSON", "saliency/metadata.json", "FINAL"),
         ])
     return {"version": "plan-v2", "stages": [
         _stage("STANDARDIZE_L2A", [], [raw_main, raw_metadata, raw_browse], outputs, stage_snapshot)
@@ -244,6 +246,7 @@ def build_l2a_staged_plan(candidate: dict[str, Any], parameter_snapshot: dict[st
                              [_input("cropped", "UPSTREAM_ARTIFACT", "CROPPED_CZI")], [
                                  _output("FUSION_COG", "fusion/czi-rgb.tif", "FINAL"),
                                  _output("FUSION_PREVIEW_PNG", "fusion/czi-rgb.png", "FINAL"),
+                                 _output("FUSION_METADATA_JSON", "fusion/czi-rgb.json", "FINAL"),
                              ], snapshot))
     if parameters.algorithms.get("saliency", {}).get("enabled"):
         source = parameters.algorithms["saliency"].get("source")
@@ -254,6 +257,7 @@ def build_l2a_staged_plan(candidate: dict[str, Any], parameter_snapshot: dict[st
                                  _output("SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"),
                                  _output("SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"),
                                  _output("SALIENCY_PREVIEW_PNG", "saliency/preview.png", "FINAL"),
+                                 _output("SALIENCY_METADATA_JSON", "saliency/metadata.json", "FINAL"),
                              ], snapshot))
     return {"version": "plan-v3", "stages": stages}
 

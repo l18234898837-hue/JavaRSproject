@@ -70,8 +70,9 @@ def test_inspect_raster_returns_wgs84_bounds_and_rgb_style(tmp_path):
         "bandCount": 3,
         "dtype": "uint8",
         "boundsValid": True,
-        "validPixelRatio": 1.0,
-        "statistics": {"min": 80, "max": 80},
+            "validPixelRatio": 1.0,
+            "nodataPixelRatio": 0.0,
+            "statistics": {"min": 80, "max": 80},
         "hasNanOrInf": False,
     }
 
