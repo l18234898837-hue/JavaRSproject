@@ -346,19 +346,18 @@ public class ProcessingExecutionController {
             AccessSubject subject = currentSubject.get();
             var preview = artifactRasterPreviewService.describe(detail, subject, companion, rasterFormat);
             if (!preview.renderable() || preview.bounds() == null) return null;
-            // Large PNG/JPEG previews can exceed the browser/GPU maximum texture
-            // size. Reuse the companion raster's protected XYZ tile service so
-            // Cesium never uploads the full-resolution image as one texture.
-            String ticket = artifactPreviewTicketService.issue(taskId, subject, companion.type(), companion.checksum()).token();
-            String encodedType = java.net.URLEncoder.encode(companion.type(), java.nio.charset.StandardCharsets.UTF_8);
+            // Use the companion raster only as georeferencing metadata. The
+            // user clicked a PNG/JPEG artifact, so the map layer must show that
+            // image rather than a derived score/mask COG that can be sparse or
+            // visually empty. The client downsizes large images before handing
+            // them to Cesium, keeping texture uploads bounded.
+            String ticket = artifactPreviewTicketService.issue(taskId, subject, artifact.type(), artifact.checksum()).token();
+            String encodedType = java.net.URLEncoder.encode(artifact.type(), java.nio.charset.StandardCharsets.UTF_8);
             String encodedTicket = java.net.URLEncoder.encode(ticket, java.nio.charset.StandardCharsets.UTF_8);
-            String tileUrl = "/api/multisource/processing-tasks/" + taskId + "/artifacts/"
-                + encodedType + "/tiles/{z}/{x}/{y}.png?ticket=" + encodedTicket;
+            String imageUrl = "/api/multisource/processing-tasks/" + taskId + "/artifacts/"
+                + encodedType + "/image?ticket=" + encodedTicket;
             return new ExecutionProgressResponse.ArtifactVisualizationResponse(
-                // Bounds are already WGS84 and the client always uses the
-                // server's Web Mercator XYZ grid; do not expose the source CRS
-                // here because it must not alter Cesium's tile scheme.
-                "tiles", tileUrl, null, preview.bounds(), null, preview.minZoom(), preview.maxZoom(), preview.legend());
+                "bounds", null, imageUrl, preview.bounds(), "EPSG:4326", null, null, null);
         } catch (RuntimeException exception) {
             log.debug("Unable to describe georeferenced image artifact {}", artifact.type(), exception);
             return null;

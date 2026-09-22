@@ -218,16 +218,16 @@ class ProcessingExecutionControllerTest {
             .filter(item -> item.type().equals("FUSION_PREVIEW_PNG")).findFirst().orElseThrow();
 
         assertThat(artifact.visualization()).isNotNull();
-        assertThat(artifact.visualization().kind()).isEqualTo("tiles");
-        assertThat(artifact.visualization().tileUrl())
-            .startsWith("/api/multisource/processing-tasks/101/artifacts/FUSION_COG/tiles/{z}/{x}/{y}.png?ticket=");
-        assertThat(artifact.visualization().imageUrl()).isNull();
+        assertThat(artifact.visualization().kind()).isEqualTo("bounds");
+        assertThat(artifact.visualization().tileUrl()).isNull();
+        assertThat(artifact.visualization().imageUrl())
+            .startsWith("/api/multisource/processing-tasks/101/artifacts/FUSION_PREVIEW_PNG/image?ticket=");
         assertThat(artifact.visualization().bounds()).containsExactly(111d, 12d, 121d, 18d);
-        assertThat(artifact.visualization().crs()).isNull();
+        assertThat(artifact.visualization().crs()).isEqualTo("EPSG:4326");
     }
 
     @Test
-    void progressUsesScoreCogForSaliencyPreviewPng() {
+    void progressUsesSaliencyScoreCogOnlyForPreviewPngBounds() {
         GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
         var png = artifact("SALIENCY_PREVIEW_PNG", "saliency/preview.png");
         var score = artifact("SALIENCY_SCORE_COG", "saliency/score.tif");
@@ -245,9 +245,11 @@ class ProcessingExecutionControllerTest {
         var artifact = controllerWithRasterPreview(details, rasterPreview).progress(101L).getBody().getData().artifacts()
             .stream().filter(item -> item.type().equals("SALIENCY_PREVIEW_PNG")).findFirst().orElseThrow();
         assertThat(artifact.visualization()).isNotNull();
+        assertThat(artifact.visualization().kind()).isEqualTo("bounds");
         assertThat(artifact.visualization().bounds()).containsExactly(110d, 20d, 120d, 30d);
-        assertThat(artifact.visualization().tileUrl())
-            .contains("/artifacts/SALIENCY_SCORE_COG/tiles/{z}/{x}/{y}.png?ticket=");
+        assertThat(artifact.visualization().tileUrl()).isNull();
+        assertThat(artifact.visualization().imageUrl())
+            .contains("/artifacts/SALIENCY_PREVIEW_PNG/image?ticket=");
     }
 
     @Test
