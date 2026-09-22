@@ -37,8 +37,13 @@ reference control points, validated products, or human labels are supplied.
 
 ## Next bounded slice
 
-The next implementation should add a read-only evaluation artifact for one
+The reference calculation primitives are implemented in
+`rs-algorithm-worker/src/rs_algorithm_worker/reference_evaluation.py`.
+They accept aligned arrays only and return JSON-safe MAE/RMSE/Bias,
+geolocation error, or Precision/Recall/F1 values. They do not read task files,
+change processing, or infer a threshold.
+
+The next integration step should add a read-only evaluation artifact for one
 representative raster profile (GF-6 WFV L1A) and one track profile (HY-2D).
-That artifact should contain observed metrics, parameter snapshot, algorithm
-version, and explicit `UNAVAILABLE` entries. It should not modify the
-calculation path or change the existing quality-report API.
+That artifact should contain observed metrics, reference provenance, parameter
+snapshot, algorithm version, and explicit unavailable entries.
