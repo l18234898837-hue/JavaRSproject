@@ -43,7 +43,19 @@ They accept aligned arrays only and return JSON-safe MAE/RMSE/Bias,
 geolocation error, or Precision/Recall/F1 values. They do not read task files,
 change processing, or infer a threshold.
 
-The next integration step should add a read-only evaluation artifact for one
-representative raster profile (GF-6 WFV L1A) and one track profile (HY-2D).
-That artifact should contain observed metrics, reference provenance, parameter
-snapshot, algorithm version, and explicit unavailable entries.
+Reference input contracts are now defined in
+`rs-algorithm-worker/src/rs_algorithm_worker/reference_inputs.py`:
+
+- `gf6-control-points-v1`: unique control-point IDs with predicted and
+  reference longitude/latitude pairs;
+- `hy2d-labels-v1`: unique observation IDs with predicted/reference anomaly
+  booleans.
+
+The validators reject duplicate IDs, invalid coordinates, non-boolean labels,
+empty samples, and oversized payloads. Evaluation results include the schema
+and reference ID for provenance. Upload, authorization, and task integration
+remain deliberately out of scope for this slice.
+
+The next integration step should add a read-only evaluation artifact containing
+observed metrics, reference provenance, parameter snapshot, algorithm version,
+and explicit unavailable entries.
