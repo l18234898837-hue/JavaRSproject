@@ -314,6 +314,39 @@ def test_staged_saliency_streams_cropped_input_and_writes_outputs(tmp_path, monk
     }
 
 
+def test_staged_saliency_handles_preview_blocks_misaligned_with_preview_scale(tmp_path, monkeypatch):
+    # A 4097-row raster uses a preview scale of three. The block beginning at
+    # column 512 is not aligned to that scale, exposing the edge-size mismatch.
+    values = np.zeros((1, 4097, 652), dtype=np.float32)
+    source = RasterData(
+        values, "EPSG:4326", (1, 0, 0, 0, -1, 4097), np.nan,
+        (BandMetadata("B460"),),
+    )
+    cropped = tmp_path / "cropped-czi.npz"
+    l2a_pipeline._write_raster_intermediate(cropped, source, None, "CROP_CZI")
+
+    def fake_write_cog_blocks(*, output_path, **_kwargs):
+        return l2a_pipeline.COGWriteResult(output_path, "0" * 64, 0, 0)
+
+    monkeypatch.setattr(l2a_pipeline, "write_cog_blocks", fake_write_cog_blocks)
+    snapshot = _standard_l2a_snapshot()
+    snapshot["algorithms"] = {
+        **snapshot["algorithms"],
+        "saliency": {"enabled": True, "source": "B460", "threshold": 0.5, "windowSize": 3},
+    }
+
+    response = l2a_pipeline.execute_l2a_staged_stage(
+        {
+            "stageKey": "DETECT_CZI_SALIENCY",
+            "outputUri": "rs://output/saliency",
+            "parameterSnapshot": json.dumps(snapshot),
+        },
+        {"output": {"path": str(tmp_path / "output")}, "inputs": [{"role": "source", "path": str(cropped)}]},
+    )
+
+    assert response["status"] == "SUCCEEDED"
+
+
 def test_registry_executes_l2a_staged_validation_with_logical_artifact(synthetic_l2a_manifest, tmp_path):
     output_dir = tmp_path / "output"
     manifest = synthetic_l2a_manifest | {"output": {"path": str(output_dir)}}

@@ -937,11 +937,22 @@ def _stream_saliency_artifacts(
                 score[valid] = 0.0
             candidate_count += int((np.isfinite(score) & (score >= threshold)).sum())
             row, column = int(window.row_off), int(window.col_off)
-            preview_rgba = _saliency_preview_rgba(score[::preview_scale, ::preview_scale], threshold)
-            preview_row = slice(row // preview_scale, (row + int(window.height) + preview_scale - 1) // preview_scale)
-            preview_column = slice(column // preview_scale, (column + int(window.width) + preview_scale - 1) // preview_scale)
-            preview[preview_row, preview_column] = preview_rgba[:preview[preview_row, preview_column].shape[0],
-                                                                :preview[preview_row, preview_column].shape[1]]
+            row_end = row + int(window.height)
+            column_end = column + int(window.width)
+            preview_row_start = (row + preview_scale - 1) // preview_scale
+            preview_row_end = (row_end + preview_scale - 1) // preview_scale
+            preview_column_start = (column + preview_scale - 1) // preview_scale
+            preview_column_end = (column_end + preview_scale - 1) // preview_scale
+            # Sample at global preview coordinates. Restarting at score[0, 0]
+            # for every tile shifts blocks whose origin is not scale-aligned.
+            row_offset = preview_row_start * preview_scale - row
+            column_offset = preview_column_start * preview_scale - column
+            preview_rgba = _saliency_preview_rgba(
+                score[row_offset::preview_scale, column_offset::preview_scale], threshold,
+            )
+            preview_row = slice(preview_row_start, preview_row_end)
+            preview_column = slice(preview_column_start, preview_column_end)
+            preview[preview_row, preview_column] = preview_rgba
         score_result = write_cog_blocks(
             output_path=score_path, width=width, height=height, count=1, dtype="float32",
             crs=crs, transform=transform, nodata=np.nan, band_metadata=score_metadata,
