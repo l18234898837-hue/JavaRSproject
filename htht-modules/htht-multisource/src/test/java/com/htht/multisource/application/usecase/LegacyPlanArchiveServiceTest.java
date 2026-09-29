@@ -26,6 +26,19 @@ class LegacyPlanArchiveServiceTest {
     }
 
     @Test
+    void archivesTerminalLegacyTaskWithPendingDownstreamSnapshotStages() {
+        var task = task(TaskLifecycleStatus.FAILED, "plan-v1");
+        var archive = new RecordingArchive();
+        var pending = new TaskStage(new StageId(202L), ID, "WRITE_REPORT", StageExecutionStatus.PENDING, 1);
+
+        boolean inserted = new LegacyPlanArchiveService(repo(task), stages(List.of(pending)), archive,
+            () -> Instant.parse("2026-09-16T04:00:00Z")).archive(ID, "retirement");
+
+        assertThat(inserted).isTrue();
+        assertThat(archive.record.planVersion()).isEqualTo("plan-v1");
+    }
+
+    @Test
     void rejectsNonTerminalLegacyTask() {
         assertThatThrownBy(() -> new LegacyPlanArchiveService(repo(task(TaskLifecycleStatus.RUNNING, "plan-v2")),
             stages(List.of()), new RecordingArchive(), Instant::now).archive(ID, "retirement"))

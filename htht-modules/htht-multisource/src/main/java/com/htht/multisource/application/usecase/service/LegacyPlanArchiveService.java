@@ -4,7 +4,6 @@ import com.htht.multisource.application.port.out.LegacyPlanArchiveRepository;
 import com.htht.multisource.application.port.out.ProcessingTaskRepository;
 import com.htht.multisource.application.port.out.TaskStageRepository;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
-import com.htht.multisource.domain.model.StageExecutionStatus;
 import com.htht.multisource.domain.model.TaskId;
 import com.htht.multisource.domain.model.TaskLifecycleStatus;
 
@@ -59,13 +58,9 @@ public final class LegacyPlanArchiveService {
                 throw new IllegalStateException("Task cancellation did not reach a terminal state: " + task.lifecycleStatus());
             }
         }
-        if (stageRepository.findByTaskId(taskId).stream()
-            .anyMatch(stage -> stage.status() == StageExecutionStatus.RUNNING
-                || stage.status() == StageExecutionStatus.RECOVERY_PENDING
-                || stage.status() == StageExecutionStatus.RETRYING
-                || stage.status() == StageExecutionStatus.PENDING)) {
-            throw new IllegalStateException("Task has executable stages and cannot be archived.");
-        }
+        // A terminal task can retain downstream PENDING stages as an immutable
+        // historical snapshot. It is not dispatchable once terminal, and the
+        // maintenance controller separately rejects any fresh running lease.
         return archiveRepository.insertIfAbsent(taskId, version, reason, clock.now());
     }
 
