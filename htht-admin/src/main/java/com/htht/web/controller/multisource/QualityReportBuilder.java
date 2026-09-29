@@ -1,6 +1,9 @@
 package com.htht.web.controller.multisource;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.htht.multisource.application.port.out.model.StageOutput;
 import com.htht.multisource.application.usecase.model.TaskArtifactView;
 import com.htht.multisource.application.usecase.model.TaskDetailView;
@@ -13,6 +16,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.Comparator;
 
 public class QualityReportBuilder {
     public static final String RULE_VERSION = "quality-check-v1";
@@ -36,6 +41,7 @@ public class QualityReportBuilder {
         Map<String, List<TaskArtifactView>> artifactsByType = new LinkedHashMap<>();
         Map<String, String> observedEvaluationMetrics = new LinkedHashMap<>();
         JsonNode evaluationReport = suppliedEvaluationReport;
+        List<ExplainabilityCandidate> explainabilityCandidates = new ArrayList<>();
         for (TaskArtifactView artifact : detail.artifacts()) {
             artifactsByType.computeIfAbsent(artifact.type(), ignored -> new ArrayList<>()).add(artifact);
         }
@@ -80,12 +86,23 @@ public class QualityReportBuilder {
                 if (isEvaluationReportArtifact(artifact) && inspection != null && inspection.isObject()) {
                     evaluationReport = inspection;
                 }
+                if (inspection != null && inspection.isObject()) {
+                    JsonNode candidate = inspection.path("explainability");
+                    if (!candidate.isObject()) {
+                        candidate = inspection.path("summary").path("explainability");
+                    }
+                    if (candidate.isObject()) {
+                        explainabilityCandidates.add(new ExplainabilityCandidate(
+                            artifact.type(), displayName(artifact), candidate));
+                    }
+                }
                 appendQualityChecks(checks, artifact, format, inspection);
             } catch (RuntimeException exception) {
                 checks.add(notChecked(artifact, format, "无法读取产物内容，质量指标未检查",
                     "Worker 检查失败，请确认文件可读后重试"));
             }
         }
+        checks = deduplicateRepeatedChecks(checks);
 
         int passed = (int) checks.stream().filter(check -> "PASS".equals(check.status())).count();
         int warnings = (int) checks.stream().filter(check -> "WARN".equals(check.status())).count();
@@ -106,10 +123,121 @@ public class QualityReportBuilder {
             evaluationReport == null
                 ? AlgorithmEvaluationCatalog.forProfile(profileCode, observedEvaluationMetrics)
                 : AlgorithmEvaluationCatalog.fromReport(profileCode, evaluationReport, observedEvaluationMetrics);
+        JsonNode explainability = aggregateExplainability(profileCode, explainabilityCandidates);
+        if (explainability != null && (algorithmEvaluation.explainability() == null
+            || algorithmEvaluation.explainability().isMissingNode()
+            || algorithmEvaluation.explainability().isNull())) {
+            algorithmEvaluation = AlgorithmEvaluationCatalog.withExplainability(
+                algorithmEvaluation, explainability);
+        }
         return new QualityReportResponse("task-" + detail.id().value() + "-quality", detail.id().value(),
             Instant.now(), overall, new QualityReportResponse.Summary(checks.size(), passed, warnings, failed),
             functions, checks, algorithmEvaluation,
             references, RULE_VERSION);
+    }
+
+    private static JsonNode aggregateExplainability(
+        String profileCode, List<ExplainabilityCandidate> candidates) {
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        Map<String, ExplainabilityCandidate> unique = new LinkedHashMap<>();
+        for (ExplainabilityCandidate candidate : candidates) {
+            JsonNode value = candidate.value();
+            String key = value.path("version").asText("") + "\u0001"
+                + value.path("algorithm").asText("") + "\u0001" + value.toString();
+            unique.putIfAbsent(key, candidate);
+        }
+        List<ExplainabilityCandidate> ordered = unique.values().stream()
+            .sorted(Comparator.comparingInt(QualityReportBuilder::explainabilityPriority)
+                .thenComparing(ExplainabilityCandidate::artifactType)
+                .thenComparing(ExplainabilityCandidate::displayName))
+            .toList();
+        if (ordered.size() == 1) {
+            return ordered.get(0).value();
+        }
+        ObjectNode aggregate = JsonNodeFactory.instance.objectNode();
+        aggregate.put("version", "task-explainability-aggregate-v1");
+        aggregate.put("algorithm", profileCode + " 任务处理链");
+        aggregate.put("purpose", "汇总本任务各处理阶段的算法用途、结果含义和使用限制。");
+        ArrayNode components = aggregate.putArray("components");
+        for (ExplainabilityCandidate candidate : ordered) {
+            ObjectNode component = components.addObject();
+            component.put("artifactType", candidate.artifactType());
+            component.put("displayName", candidate.displayName());
+            component.set("explainability", candidate.value());
+        }
+        return aggregate;
+    }
+
+    private static int explainabilityPriority(ExplainabilityCandidate candidate) {
+        String version = candidate.value().path("version").asText("").toLowerCase(Locale.ROOT);
+        String algorithm = candidate.value().path("algorithm").asText("").toLowerCase(Locale.ROOT);
+        String value = version + " " + algorithm + " " + candidate.artifactType().toLowerCase(Locale.ROOT);
+        if (value.contains("processing") || value.contains("standard-track")
+            || value.contains("standard_metadata")) return 10;
+        if (value.contains("validation")) return 20;
+        if (value.contains("navigation") || value.contains("calibration")
+            || value.contains("quality")) return 30;
+        if (value.contains("feature")) return 40;
+        if (value.contains("fusion")) return 50;
+        if (value.contains("saliency") || value.contains("anomaly")) return 60;
+        if (value.contains("grid")) return 70;
+        return 80;
+    }
+
+    private record ExplainabilityCandidate(
+        String artifactType, String displayName, JsonNode value) {}
+
+    private static List<QualityReportResponse.Check> deduplicateRepeatedChecks(
+        List<QualityReportResponse.Check> checks) {
+        Map<String, QualityReportResponse.Check> unique = new LinkedHashMap<>();
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (QualityReportResponse.Check check : checks) {
+            if (!isDeduplicableGenericCheck(check)) {
+                unique.put(check.checkId() + "#" + unique.size(), check);
+                continue;
+            }
+            String key = String.join("\u0001",
+                check.name(), check.status(), nullToEmpty(check.actualValue()),
+                nullToEmpty(check.threshold()), nullToEmpty(check.unit()),
+                nullToEmpty(check.userMessage()), nullToEmpty(check.recommendation()));
+            if (!unique.containsKey(key)) {
+                unique.put(key, check);
+                counts.put(key, 1);
+            } else {
+                counts.computeIfPresent(key, (ignored, value) -> value + 1);
+            }
+        }
+        List<QualityReportResponse.Check> result = new ArrayList<>();
+        for (Map.Entry<String, QualityReportResponse.Check> entry : unique.entrySet()) {
+            QualityReportResponse.Check check = entry.getValue();
+            Integer count = counts.get(entry.getKey());
+            if (count == null || count <= 1) {
+                result.add(check);
+                continue;
+            }
+            Map<String, Object> details = new LinkedHashMap<>(
+                check.details() == null ? Map.of() : check.details());
+            details.put("deduplicatedCount", count);
+            details.put("deduplicatedMessage", "多个产物结论一致，已合并展示");
+            result.add(new QualityReportResponse.Check(
+                check.checkId(), check.functionKey(), check.stageId(), check.artifactType(),
+                check.name(), check.status(), check.actualValue(), check.threshold(), check.unit(),
+                nullToEmpty(check.userMessage()) + "（已合并 " + count + " 个产物）",
+                check.technicalMessage(), check.severity(), details,
+                check.availability(), check.recommendation()));
+        }
+        return result;
+    }
+
+    private static boolean isDeduplicableGenericCheck(QualityReportResponse.Check check) {
+        return Set.of("空间范围有效", "有效覆盖率", "候选区域比例", "像元数值有限",
+                "栅格宽度", "栅格高度", "波段数量").contains(check.name());
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private static void collectEvaluationMetrics(Map<String, String> observed, String format, JsonNode inspection) {

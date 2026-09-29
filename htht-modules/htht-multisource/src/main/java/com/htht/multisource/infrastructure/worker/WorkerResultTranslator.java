@@ -42,22 +42,18 @@ public final class WorkerResultTranslator {
     public ProcessingPlan toPlan(DecodedWorkerResponse response) {
         JsonNode payload = response.payload();
         String version = requiredText(response, payload, "version");
+        if (!ProcessingPlan.CURRENT_VERSION.equals(version)) {
+            throw failure(response, "version must be " + ProcessingPlan.CURRENT_VERSION);
+        }
         List<ProcessingStage> stages = new ArrayList<>();
         for (JsonNode stage : requiredArray(response, payload, "stages")) {
             List<String> dependencies = new ArrayList<>();
             for (JsonNode dependency : requiredArray(response, stage, "dependsOnStageKeys")) {
                 dependencies.add(dependency.asText());
             }
-            boolean hasStageContract = "plan-v2".equals(version) || "plan-v3".equals(version);
-            List<StageInput> inputs = hasStageContract
-                ? parseInputs(response, stage)
-                : List.of();
-            List<StageOutput> outputs = hasStageContract
-                ? parseOutputs(response, stage)
-                : List.of();
-            String parameterSnapshot = hasStageContract
-                ? requiredText(response, stage, "parameterSnapshot")
-                : "{}";
+            List<StageInput> inputs = parseInputs(response, stage);
+            List<StageOutput> outputs = parseOutputs(response, stage);
+            String parameterSnapshot = requiredText(response, stage, "parameterSnapshot");
             stages.add(new ProcessingStage(
                 requiredText(response, stage, "stageKey"),
                 requiredText(response, stage, "stageCode"),

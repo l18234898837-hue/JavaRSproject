@@ -1,6 +1,7 @@
 package com.htht.web.controller.multisource;
 
 import cn.dev33.satoken.annotation.SaIgnore;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.htht.common.core.domain.R;
 import com.htht.config.multisource.LocalWorkerResultArchiveService;
 import com.htht.config.multisource.ArtifactInspectionService;
@@ -248,7 +249,124 @@ public class ProcessingExecutionController {
                 .append(metric.unit() == null ? "" : " " + escapeHtml(metric.unit()))
                 .append("</td><td>").append(escapeHtml(metric.message())).append("</td></tr>");
         }
-        return html.append("</tbody></table></body></html>").toString();
+        html.append("</tbody></table>");
+        var explainability = report.algorithmEvaluation().explainability();
+        if (explainability != null && explainability.isObject()) {
+            html.append("<h2>算法处理说明</h2>");
+            appendExplainabilityHtml(html, explainability);
+        }
+        return html.append("</body></html>").toString();
+    }
+
+    private static void appendExplainabilityHtml(StringBuilder html, JsonNode explainability) {
+        appendJsonField(html, explainability, "algorithm", "算法");
+        appendJsonField(html, explainability, "purpose", "用途");
+        appendJsonField(html, explainability, "processing", "处理方法");
+        appendJsonField(html, explainability, "interpretation", "结果解释");
+        JsonNode parameters = explainability.path("parameters");
+        if (parameters.isObject() && parameters.size() > 0) {
+            html.append("<h3>关键参数</h3><table><thead><tr><th>参数</th><th>值</th></tr></thead><tbody>");
+            parameters.fields().forEachRemaining(entry -> html.append("<tr><td>")
+                .append(escapeHtml(entry.getKey())).append("</td><td>")
+                .append(escapeHtml(entry.getValue().toString())).append("</td></tr>"));
+            html.append("</tbody></table>");
+        }
+        JsonNode stages = explainability.path("stages");
+        if (stages.isArray() && stages.size() > 0) {
+            html.append("<h3>处理阶段</h3><table><thead><tr><th>阶段</th><th>作用</th><th>结果含义</th></tr></thead><tbody>");
+            for (JsonNode stage : stages) {
+                html.append("<tr><td>").append(escapeHtml(stage.path("name").asText(stage.path("key").asText())))
+                    .append("</td><td>").append(escapeHtml(firstText(stage, "purpose", "meaning")))
+                    .append("</td><td>").append(escapeHtml(firstText(stage, "outputMeaning", "meaning")))
+                    .append("</td></tr>");
+            }
+            html.append("</tbody></table>");
+        }
+        JsonNode definitions = explainability.path("metricDefinitions");
+        if (definitions.isArray() && definitions.size() > 0) {
+            html.append("<h3>指标含义</h3><table><thead><tr><th>指标</th><th>用途</th><th>计算方法</th><th>解释</th></tr></thead><tbody>");
+            for (JsonNode definition : definitions) {
+                html.append("<tr><td>").append(escapeHtml(definition.path("name").asText()))
+                    .append("</td><td>").append(escapeHtml(definition.path("purpose").asText()))
+                    .append("</td><td>").append(escapeHtml(definition.path("method").asText()))
+                    .append("</td><td>").append(escapeHtml(definition.path("interpretation").asText()))
+                    .append("</td></tr>");
+            }
+            html.append("</tbody></table>");
+        } else if (definitions.isObject() && definitions.size() > 0) {
+            appendDefinitionObject(html, definitions, "指标含义");
+        }
+        appendDefinitionObject(html, explainability.path("reasonDefinitions"), "原因说明");
+        appendDefinitionObject(html, explainability.path("fieldDefinitions"), "字段含义");
+        appendDefinitionObject(html, explainability.path("bandDefinitions"), "波段含义");
+        appendDefinitionObject(html, explainability.path("outputs"), "输出说明");
+        appendStringArray(html, explainability.path("limitations"), "使用限制");
+        JsonNode components = explainability.path("components");
+        if (components.isArray() && components.size() > 0) {
+            html.append("<h3>分阶段说明</h3>");
+            for (JsonNode component : components) {
+                JsonNode value = component.path("explainability");
+                if (!value.isObject()) continue;
+                html.append("<section style=\"margin:18px 0;padding:14px;border:1px solid #dce8ed;border-radius:8px\">");
+                String title = value.path("algorithm").asText(component.path("displayName").asText("处理阶段"));
+                html.append("<h4>").append(escapeHtml(title)).append("</h4>");
+                appendExplainabilityHtml(html, value);
+                html.append("</section>");
+            }
+        }
+    }
+
+    private static String firstText(JsonNode node, String primary, String fallback) {
+        String value = node.path(primary).asText("");
+        return value.isBlank() ? node.path(fallback).asText("") : value;
+    }
+
+    private static void appendDefinitionObject(
+        StringBuilder html, JsonNode definitions, String title) {
+        if (!definitions.isObject() || definitions.isEmpty()) return;
+        html.append("<h3>").append(escapeHtml(title))
+            .append("</h3><table><thead><tr><th>名称</th><th>说明</th></tr></thead><tbody>");
+        definitions.fields().forEachRemaining(entry -> {
+            JsonNode value = entry.getValue();
+            String description;
+            if (value.isValueNode()) {
+                description = value.asText();
+            } else {
+                description = firstNonBlankText(
+                    value, "meaning", "interpretation", "purpose", "method");
+                if (description.isBlank()) {
+                    description = value.toString();
+                }
+            }
+            html.append("<tr><td>").append(escapeHtml(entry.getKey())).append("</td><td>")
+                .append(escapeHtml(description)).append("</td></tr>");
+        });
+        html.append("</tbody></table>");
+    }
+
+    private static String firstNonBlankText(JsonNode node, String... fields) {
+        for (String field : fields) {
+            String value = node.path(field).asText("");
+            if (!value.isBlank()) return value;
+        }
+        return "";
+    }
+
+    private static void appendJsonField(StringBuilder html, JsonNode node, String field, String label) {
+        JsonNode value = node.path(field);
+        if (value.isValueNode() && !value.isNull() && !value.asText().isBlank()) {
+            html.append("<p><strong>").append(escapeHtml(label)).append("：</strong>")
+                .append(escapeHtml(value.asText())).append("</p>");
+        }
+    }
+
+    private static void appendStringArray(StringBuilder html, JsonNode values, String title) {
+        if (!values.isArray() || values.isEmpty()) return;
+        html.append("<h3>").append(escapeHtml(title)).append("</h3><ul>");
+        for (JsonNode value : values) {
+            html.append("<li>").append(escapeHtml(value.asText())).append("</li>");
+        }
+        html.append("</ul>");
     }
 
     private QualityReportResponse buildQualityReport(

@@ -83,7 +83,29 @@ def write_standard_mersi_cogs(science: RasterData, quality: RasterData, output_d
     document.update({"profileKey": {"productCode": "FY-3H-MERSI", "profileVersion": "L1-1000M-GEO1K-v1"},
                      "ruleVersion": QUALITY_RULE_VERSION, "formulaVersion": FORMULA_VERSION,
                      "targetGrid": {"crs": science.crs, "width": science.values.shape[-1], "height": science.values.shape[-2]},
-                     "artifacts": {"standardSha256": standard.sha256, "qualitySha256": quality_result.sha256}})
+                     "artifacts": {"standardSha256": standard.sha256, "qualitySha256": quality_result.sha256},
+                     "explainability": {
+                         "version": "fy3h-processing-explainability-v1",
+                         "algorithm": "FY-3H MERSI L1 标准化处理",
+                         "purpose": "将观测和 GEO1K 配对数据完成解码、定标、质量筛选、条带网格化并写出标准 COG。",
+                         "stages": [
+                             {"key": "DECODE_MERSI_L1", "name": "数据解码",
+                              "meaning": "读取所选通道、导航数组、扫描帧质量标志和定标元数据。"},
+                             {"key": "CALIBRATE_MERSI_L1", "name": "辐射定标",
+                              "meaning": "反射通道转换为反射率，发射通道转换为亮温。"},
+                             {"key": "APPLY_MERSI_QUALITY", "name": "像元质量判定",
+                              "meaning": "根据缺测、饱和、坏探元、帧质量、导航和昼夜条件生成原因位。"},
+                             {"key": "GRID_MERSI_SWATH", "name": "条带网格化",
+                              "meaning": "将有效条带像元映射到用户指定的坐标系、范围和分辨率。"},
+                             {"key": "WRITE_MERSI_STANDARD_COG", "name": "标准 COG 写出",
+                              "meaning": "生成地图可读科学栅格和与其对齐的质量位图。"},
+                         ],
+                         "qualityInterpretation": "quality.tif 的非零位表示一种或多种无效原因；科学 COG 中无效像元写为 NoData。",
+                         "limitations": [
+                             "当前公式版本仍标记为 pending-manual-pdf-review，不能解释为已完成官方算法文档逐项复核。",
+                             "没有参考产品或地面真值时，不输出辐射、定位或分类准确率。",
+                         ],
+                     }})
     summary_path = output_dir / "summary.json"
     summary_path.write_text(json.dumps(document, ensure_ascii=True, sort_keys=True, allow_nan=False), encoding="utf-8")
     return StandardMersiOutput(standard.path, quality_result.path, summary_path)
@@ -104,7 +126,17 @@ def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         _require_roles(roles, {"OBSERVATION", "GEO1K"})
         path = directory / "validation" / "pair.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"profileKey": "FY-3H-MERSI", "valid": True}), encoding="utf-8")
+        path.write_text(json.dumps({
+            "profileKey": "FY-3H-MERSI",
+            "valid": True,
+            "explainability": {
+                "version": "fy3h-validation-explainability-v1",
+                "algorithm": "FY-3H MERSI 输入配对校验",
+                "purpose": "确认 1000M 观测文件与 GEO1K 文件属于同一卫星、传感器、轨道和观测时段。",
+                "interpretation": "校验通过仅表示文件配对和必要元数据满足处理前提，不代表像元质量已经合格。",
+                "limitations": ["该阶段不计算辐射质量、定位精度或有效像元比例。"],
+            },
+        }, sort_keys=True), encoding="utf-8")
         return _stage_response(output_uri, [("FY3H_INPUT_VALIDATION_JSON", path, "validation/pair.json")])
     if stage == "DECODE_MERSI_L1":
         _require_roles(roles, {"OBSERVATION", "GEO1K"})
@@ -140,7 +172,27 @@ def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         _write_intermediate_npz(path, longitude=decoded.longitude, latitude=decoded.latitude,
                                 **{f"quality__{key}": value.reason_bits for key, value in quality.items()},
                                 **{f"science__{key}": value for key, value in science.items()})
-        summary = directory / "quality" / "summary.json"; summary.write_text(json.dumps(summarize_quality(quality), sort_keys=True), encoding="utf-8")
+        quality_summary = summarize_quality(quality)
+        quality_summary["explainability"] = {
+            "version": "fy3h-quality-explainability-v1",
+            "algorithm": "FY-3H MERSI 像元质量判定",
+            "purpose": "按通道统计有效像元，并汇总导致像元不可用的原因位。",
+            "reasonDefinitions": {
+                "MISSING": "源 DN 为缺测填充值。",
+                "SATURATED": "源探测值达到饱和标志。",
+                "DEAD_DETECTOR": "源像元标记为坏探元。",
+                "OUT_OF_RANGE": "源值超出通道声明的有效范围。",
+                "FRAME_CHANNEL_FAILURE": "扫描帧标记当前通道失败。",
+                "FRAME_PREPROCESS_FAILURE": "扫描帧预处理质量标志失败。",
+                "CALIBRATION_FAILURE": "扫描帧或计算结果表明定标失败。",
+                "GEOLOCATION_FAILURE": "GEO1K 扫描帧地理定位质量标志失败。",
+                "INVALID_NAVIGATION": "经纬度或观测角度无效、越界或非有限值。",
+                "NON_DAYLIGHT": "反射通道处于非日照观测条件。",
+            },
+            "interpretation": "同一像元可同时具有多个原因位，因此 reasonCounts 之间不能直接相加得到唯一无效像元数。",
+            "limitations": ["质量标志描述输入可用性，不等同于与参考产品对比得到的科学精度。"],
+        }
+        summary = directory / "quality" / "summary.json"; summary.write_text(json.dumps(quality_summary, sort_keys=True), encoding="utf-8")
         return _stage_response(output_uri, [("QUALITY_MERSI_RASTER", path, "quality/mersi.npz"), ("MERSI_QUALITY_SUMMARY_JSON", summary, "quality/summary.json")])
     if stage == "GRID_MERSI_SWATH":
         _require_roles(roles, {"quality"})
@@ -206,7 +258,25 @@ def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         feature_dir = directory / "features"
         feature_dir.mkdir(parents=True, exist_ok=True)
         summary_path = feature_dir / "summary.json"
-        summary_path.write_text(json.dumps(feature_set.statistics, ensure_ascii=True, sort_keys=True, allow_nan=False), encoding="utf-8")
+        feature_summary = dict(feature_set.statistics)
+        feature_summary["explainability"] = {
+            "version": "fy3h-feature-explainability-v1",
+            "algorithm": "FY-3H MERSI 特征提取",
+            "purpose": "从所选标准化通道生成有效值统计、局部梯度和局部方差等描述性特征。",
+            "metricDefinitions": {
+                "statistics": "统计每个通道有效像元的数量、范围、均值和离散程度。",
+                "gradient": "衡量相邻像元的局部变化强度，用于描述边缘和突变。",
+                "local_variance": "衡量滑动窗口内像元的离散程度，用于描述纹理复杂度。",
+            },
+            "parameters": {
+                "metrics": parameters["features"]["metrics"],
+                "windowSize": parameters["features"].get("windowSize", 3),
+                "bands": parameters["bands"],
+            },
+            "interpretation": "特征用于描述影像，不直接代表地物分类、异常确认或产品准确率。",
+            "limitations": ["窗口大小和有效像元覆盖会影响局部特征；没有标注时不能计算准确率和召回率。"],
+        }
+        summary_path.write_text(json.dumps(feature_summary, ensure_ascii=True, sort_keys=True, allow_nan=False), encoding="utf-8")
         artifacts: list[tuple[Any, ...]] = [("MERSI_FEATURE_SUMMARY_JSON", summary_path, "features/summary.json")]
         if feature_set.rasters:
             values = np.stack([raster.values for raster in feature_set.rasters.values()])
@@ -228,7 +298,24 @@ def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         output_dir = directory / "fusion"
         output_dir.mkdir(parents=True, exist_ok=True)
         path = write_cog(result, output_dir / "mersi-rgb.tif").path
-        return _stage_response(output_uri, [("MERSI_FUSION_COG", path, "fusion/mersi-rgb.tif", True)])
+        summary_path = output_dir / "summary.json"
+        summary_path.write_text(json.dumps({
+            "version": "fy3h-fusion-v1",
+            "bands": {"red": fusion["red"], "green": fusion["green"], "blue": fusion["blue"]},
+            "percentiles": fusion["percentiles"],
+            "explainability": {
+                "version": "fy3h-fusion-explainability-v1",
+                "algorithm": "FY-3H MERSI RGB 融合",
+                "purpose": "将三个反射通道映射到 RGB，生成便于人工浏览的显示增强影像。",
+                "processing": "各通道按配置分位数线性拉伸后映射到红、绿、蓝显示通道。",
+                "interpretation": "颜色用于增强视觉对比，不是物理反射率，也不直接代表分类结果。",
+                "limitations": ["分位数拉伸会改变显示对比度，不适合跨任务直接比较像素绝对值。"],
+            },
+        }, sort_keys=True), encoding="utf-8")
+        return _stage_response(output_uri, [
+            ("MERSI_FUSION_COG", path, "fusion/mersi-rgb.tif", True),
+            ("MERSI_FUSION_SUMMARY_JSON", summary_path, "fusion/summary.json"),
+        ])
     if stage == "DETECT_MERSI_SALIENCY":
         parameters = parse_fy3h_parameters(_payload_parameters(payload))
         saliency = parameters["saliency"]
@@ -247,9 +334,35 @@ def execute_fy3h_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         mask = RasterData(result.mask.astype(np.uint8), result.score.crs, result.score.transform, np.uint8(0),
                           (BandMetadata("saliency_mask"),))
         mask_path = write_cog(mask, output_dir / "mask.tif").path
+        source_values = source.values if source.values.ndim == 2 else source.values[0]
+        valid = np.isfinite(source_values)
+        if source.nodata is not None:
+            valid &= source_values != source.nodata
+        candidate_count = int(np.count_nonzero(result.mask & valid))
+        valid_count = int(np.count_nonzero(valid))
+        summary_path = output_dir / "summary.json"
+        summary_path.write_text(json.dumps({
+            "algorithm": "contrast-v1",
+            "source": saliency["source"],
+            "windowSize": saliency["windowSize"],
+            "threshold": saliency["threshold"],
+            "candidatePixelCount": candidate_count,
+            "validPixelCount": valid_count,
+            "candidatePixelRatio": candidate_count / valid_count if valid_count else 0.0,
+            "semanticLabel": "NONE",
+            "explainability": {
+                "version": "fy3h-saliency-explainability-v1",
+                "algorithm": "FY-3H MERSI 局部对比显著性检测",
+                "purpose": "识别相对于局部邻域变化较强的候选像元。",
+                "processing": "在指定通道或特征上计算局部对比得分，并按阈值生成候选掩膜。",
+                "interpretation": "候选区域是人工复核线索，不等同于目标识别、异常确认或分类结论。",
+                "limitations": ["窗口和阈值会影响候选范围；没有人工标注时不能计算检测准确率。"],
+            },
+        }, sort_keys=True), encoding="utf-8")
         return _stage_response(output_uri, [
             ("MERSI_SALIENCY_SCORE_COG", score_path, "saliency/score.tif"),
             ("MERSI_SALIENCY_MASK_COG", mask_path, "saliency/mask.tif"),
+            ("MERSI_SALIENCY_SUMMARY_JSON", summary_path, "saliency/summary.json"),
         ])
     raise ValueError("unsupported FY-3H MERSI stage")
 

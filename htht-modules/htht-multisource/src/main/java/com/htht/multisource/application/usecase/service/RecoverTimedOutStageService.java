@@ -6,6 +6,7 @@ import com.htht.multisource.application.port.out.ProcessingTaskRepository;
 import com.htht.multisource.application.port.out.TaskStageRepository;
 import com.htht.multisource.application.port.out.model.ExecutionEvent;
 import com.htht.multisource.application.usecase.RecoverTimedOutStageUseCase;
+import com.htht.multisource.domain.model.ProcessingPlan;
 import com.htht.multisource.domain.model.TaskLifecycleStatus;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,7 +37,7 @@ public class RecoverTimedOutStageService implements RecoverTimedOutStageUseCase 
         for (var stage : stageRepository.findExpiredRunning(now)) {
             var task = taskRepository.findById(stage.taskId())
                 .orElseThrow(() -> new IllegalStateException("Processing task not found for expired stage."));
-            if (!"plan-v3".equals(task.plan().version())) {
+            if (!ProcessingPlan.CURRENT_VERSION.equals(task.plan().version())) {
                 // Legacy tasks are retired and handled by the archive maintenance
                 // flow; the scheduler must not revive them automatically.
                 continue;

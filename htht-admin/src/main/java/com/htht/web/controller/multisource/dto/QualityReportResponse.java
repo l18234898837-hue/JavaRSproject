@@ -1,5 +1,6 @@
 package com.htht.web.controller.multisource.dto;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -21,7 +22,8 @@ public record QualityReportResponse(
     public record AlgorithmEvaluation(
         String catalogVersion,
         String profileCode,
-        List<EvaluationMetric> metrics
+        List<EvaluationMetric> metrics,
+        JsonNode explainability
     ) {}
 
     public record EvaluationMetric(

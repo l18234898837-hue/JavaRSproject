@@ -163,7 +163,7 @@ def parse_hy2d_parameters(value: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("HY-2D anomaly thresholds must be positive")
     if not isinstance(grid, dict) or set(grid).difference({"enabled", "spacingDegrees"}):
         raise ValueError("invalid HY-2D grid parameters")
-    enabled = grid.get("enabled", False)
+    enabled = grid.get("enabled", True)
     spacing = grid.get("spacingDegrees", 0.25)
     if not isinstance(enabled, bool) or not _positive(spacing) or spacing < 0.1 or spacing > 5.0:
         raise ValueError("HY-2D grid parameters are invalid")

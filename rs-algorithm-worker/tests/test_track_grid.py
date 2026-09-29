@@ -52,3 +52,5 @@ def test_write_track_grid_outputs_are_georeferenced_statistical_artifacts(tmp_pa
         assert dataset.tags()["method"] == "bin-statistics-no-interpolation"
     summary = __import__("json").loads(outputs.paths["summary"].read_text(encoding="utf-8"))
     assert summary["method"] == "bin-statistics-no-interpolation"
+    assert summary["explainability"]["algorithm"] == "HY-2D 沿轨 SSH 空间分箱"
+    assert "不执行空间插值" in summary["explainability"]["method"]

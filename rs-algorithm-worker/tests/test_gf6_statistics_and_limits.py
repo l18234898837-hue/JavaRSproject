@@ -15,6 +15,8 @@ from rs_algorithm_worker.gf6_processing import detect_gf6_saliency
 from rs_algorithm_worker.gf6_wfv_pipeline import (
     _write_features,
     _write_fusion,
+    _write_grid_metadata,
+    _write_processing_summary,
     _write_saliency,
     _write_standard_cog,
 )
@@ -51,6 +53,47 @@ def _standard_raster(path):
     return values
 
 
+def test_gf6_processing_metadata_explains_the_main_chain(tmp_path):
+    manifest = make_gf6_package(tmp_path / "input")
+    evidence = gf6_pipeline.inspect_evidence(manifest)
+    parameters = parse_parameters({
+        "targetCrs": "EPSG:4326",
+        "resolution": 0.003,
+        "bands": [1, 2, 3],
+        "roi": [110.0, 20.0, 111.0, 21.0],
+    })
+    standard = tmp_path / "standard" / "gf6-standard.tif"
+    standard.parent.mkdir()
+
+    summary_path = _write_processing_summary(standard, evidence, parameters)
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["explainability"]["version"] == "gf6-processing-explainability-v1"
+    assert [item["key"] for item in summary["explainability"]["stages"]] == [
+        "VALIDATE_GF6_WFV_L1A",
+        "MOSAIC_GF6_TILES",
+        "GEOLOCATE_GF6_RPC",
+        "STANDARDIZE_GF6_PROJECTION",
+        "WRITE_GF6_STANDARD_COG",
+    ]
+    assert summary["explainability"]["parameters"]["roi"] == [110.0, 20.0, 111.0, 21.0]
+
+    grid_path = tmp_path / "grid.json"
+    _write_grid_metadata(
+        grid_path,
+        NominalRpcGrid(
+            "EPSG:4326",
+            Affine(0.003, 0, 110, 0, -0.003, 21),
+            333,
+            333,
+            (110, 20, 111, 21),
+            0.0,
+        ),
+    )
+    grid = json.loads(grid_path.read_text(encoding="utf-8"))
+    assert grid["explainability"]["method"] == "nominal-RPC-grid"
+    assert grid["explainability"]["heightMode"] == "CONSTANT"
+
+
 def test_statistics_only_writes_valid_value_carriers_and_stable_per_band_summary(tmp_path):
     standard = tmp_path / "standard.tif"
     values = _standard_raster(standard)
@@ -78,6 +121,9 @@ def test_statistics_only_writes_valid_value_carriers_and_stable_per_band_summary
     summary = json.loads(artifacts[1][1].read_text(encoding="utf-8"))
     assert summary["statisticsMethod"] == "windowed-chan-population-v1"
     assert summary["nodataPolicy"] == "IGNORE_NODATA_AND_NAN"
+    assert summary["explainability"]["version"] == "gf6-feature-explainability-v1"
+    assert summary["explainability"]["metricDefinitions"][0]["name"] == "有效像元统计"
+    assert summary["explainability"]["outputBands"][0]["meaning"] == "原始有效标准化值载体"
     assert [item["sourceBand"] for item in summary["bandStatistics"]] == ["B2", "B5"]
     assert [item["sourceBandIndex"] for item in summary["bandStatistics"]] == [1, 2]
     assert all("outputBand" not in item for item in summary["bandStatistics"])
@@ -114,6 +160,11 @@ def test_statistics_summary_is_retained_when_raster_metrics_are_mixed(tmp_path):
         )
     summary = json.loads(artifacts[1][1].read_text(encoding="utf-8"))
     assert summary["metrics"] == ["statistics", "gradient"]
+    assert [item["name"] for item in summary["explainability"]["metricDefinitions"]] == [
+        "有效像元统计",
+        "局部梯度",
+    ]
+    assert summary["explainability"]["parameters"]["windowSize"] == 3
     assert [item["sourceBandIndex"] for item in summary["bandStatistics"]] == [1, 2]
     assert all("outputBand" not in item for item in summary["bandStatistics"])
     assert [item["count"] for item in summary["bandStatistics"]] == [
@@ -458,6 +509,46 @@ def test_fusion_cog_uses_an_internal_validity_mask_without_reserving_dark_zero(t
     assert summary["outputNodata"] is None
     assert summary["validityPolicy"] == "INTERNAL_DATASET_MASK_ALL_RGB_SOURCE_BANDS_VALID"
     assert summary["datasetMaskValues"] == {"invalid": 0, "valid": 255}
+    assert summary["pixelCounts"] == {
+        "total": 32 * 512,
+        "valid": 32 * (512 - 3),
+        "invalid": 32 * 3,
+        "validRatio": pytest.approx((512 - 3) / 512),
+    }
+
+
+def test_fusion_inherits_an_upstream_internal_source_mask(tmp_path):
+    standard = tmp_path / "standard-with-mask.tif"
+    _write_two_distribution_rgb_source(standard)
+    with rasterio.open(standard, "r+") as source:
+        source.write_mask(
+            np.where(
+                np.indices((source.height, source.width))[1] == 200,
+                0,
+                255,
+            ).astype(np.uint8)
+        )
+
+    artifacts = _write_fusion(
+        standard,
+        tmp_path / "output",
+        {
+            "bands": [1, 2, 3],
+            "fusion": {
+                "enabled": True,
+                "red": 3,
+                "green": 2,
+                "blue": 1,
+                "percentiles": [0, 100],
+            },
+        },
+    )
+
+    with rasterio.open(artifacts[0][1]) as fusion:
+        assert fusion.dataset_mask()[0, 200] == 0
+        assert fusion.dataset_mask()[0, 199] == 255
+    summary = json.loads(artifacts[1][1].read_text(encoding="utf-8"))
+    assert summary["pixelCounts"]["invalid"] == 32 * 4
 
 
 def test_global_fusion_sampling_is_memory_bounded_at_the_output_pixel_limit():
@@ -507,6 +598,15 @@ def test_fusion_and_saliency_restore_their_band_descriptions(tmp_path):
     with rasterio.open(saliency_artifacts[0][1]) as score, rasterio.open(saliency_artifacts[1][1]) as mask:
         assert score.descriptions == ("saliency_score:B2",)
         assert mask.descriptions == ("saliency_mask:B2",)
+    fusion_summary = json.loads(fusion_artifacts[1][1].read_text(encoding="utf-8"))
+    assert fusion_summary["explainability"]["algorithm"] == "GF-6 WFV RGB 融合"
+    assert fusion_summary["explainability"]["parameters"]["stretchMethod"] == "global-sampled-percentile-linear"
+    saliency_summary = json.loads(saliency_artifacts[2][1].read_text(encoding="utf-8"))
+    assert saliency_summary["explainability"]["algorithm"] == "GF-6 WFV 显著性检测"
+    assert saliency_summary["explainability"]["parameters"] == {"windowSize": 5, "threshold": 0.6}
+    assert saliency_summary["candidatePixelRatio"] == pytest.approx(
+        saliency_summary["candidatePixelCount"] / (32 * 512)
+    )
 
 
 @pytest.mark.parametrize(

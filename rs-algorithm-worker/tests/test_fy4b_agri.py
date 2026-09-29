@@ -195,6 +195,57 @@ def test_staged_plan_v3_splits_fy4b_pipeline_into_real_dag(tmp_path):
     assert plan["stages"][0]["outputs"][0]["artifactType"] == "FY4B_INPUT_VALIDATION_JSON"
 
 
+def test_staged_feature_plan_declares_500m_red_source_for_c02_metrics(tmp_path):
+    candidate = inspect_manifest(make_fy4b_package(tmp_path))[0]
+    plan = build_staged_plan(candidate, {
+        "schemaVersion": "1",
+        "features": {"enabled": True, "metrics": ["toa_nir_red_nd"]},
+    })
+
+    features = next(stage for stage in plan["stages"] if stage["stageKey"] == "EXTRACT_FY4B_FEATURES")
+
+    assert {item["artifactType"] for item in features["inputs"]} == {
+        "FY4B_VIS_NIR_1000M_COG",
+        "FY4B_RED_500M_COG",
+    }
+
+
+def test_staged_feature_plan_declares_4000m_thermal_source_for_btd_metric(tmp_path):
+    candidate = inspect_manifest(make_fy4b_package(tmp_path))[0]
+    plan = build_staged_plan(candidate, {
+        "schemaVersion": "1",
+        "features": {"enabled": True, "metrics": ["btd_c13_c14"]},
+    })
+
+    features = next(stage for stage in plan["stages"] if stage["stageKey"] == "EXTRACT_FY4B_FEATURES")
+
+    assert {item["artifactType"] for item in features["inputs"]} == {
+        "FY4B_VIS_NIR_1000M_COG",
+        "FY4B_MULTISPECTRAL_4000M_COG",
+    }
+
+
+@pytest.mark.parametrize(("metrics", "expected_inputs"), [
+    (["statistics"], {"FY4B_VIS_NIR_1000M_COG"}),
+    (["gradient"], {"FY4B_VIS_NIR_1000M_COG", "FY4B_RED_500M_COG"}),
+    (["local_variance"], {"FY4B_VIS_NIR_1000M_COG", "FY4B_RED_500M_COG"}),
+    (["toa_nir_red_nd"], {"FY4B_VIS_NIR_1000M_COG", "FY4B_RED_500M_COG"}),
+    (["btd_c13_c14"], {"FY4B_VIS_NIR_1000M_COG", "FY4B_MULTISPECTRAL_4000M_COG"}),
+    (["gradient", "btd_c13_c14"], {
+        "FY4B_VIS_NIR_1000M_COG", "FY4B_RED_500M_COG", "FY4B_MULTISPECTRAL_4000M_COG",
+    }),
+])
+def test_staged_feature_plan_declares_all_metric_sources(tmp_path, metrics, expected_inputs):
+    candidate = inspect_manifest(make_fy4b_package(tmp_path))[0]
+    plan = build_staged_plan(candidate, {
+        "schemaVersion": "1", "features": {"enabled": True, "metrics": metrics},
+    })
+
+    features = next(stage for stage in plan["stages"] if stage["stageKey"] == "EXTRACT_FY4B_FEATURES")
+
+    assert {item["artifactType"] for item in features["inputs"]} == expected_inputs
+
+
 def test_staged_saliency_plan_declares_source_matching_c02_parameter(tmp_path):
     candidate = inspect_manifest(make_fy4b_package(tmp_path))[0]
     plan = build_staged_plan(candidate, {

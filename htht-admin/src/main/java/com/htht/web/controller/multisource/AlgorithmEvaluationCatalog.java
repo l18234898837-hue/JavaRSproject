@@ -31,7 +31,8 @@ final class AlgorithmEvaluationCatalog {
                     : metric.referenceRequired()
                     ? "需要参考产品、控制点或人工标注后才能评价"
                     : "当前版本尚未接入该指标的自动观测"
-            )).toList()
+            )).toList(),
+            null
         );
     }
 
@@ -64,7 +65,13 @@ final class AlgorithmEvaluationCatalog {
             .map(metric -> mergeMetric(metric, reportMetrics.get(metric.key())))
             .toList();
         return new QualityReportResponse.AlgorithmEvaluation(
-            baseline.catalogVersion(), baseline.profileCode(), merged);
+            baseline.catalogVersion(), baseline.profileCode(), merged, report.path("explainability"));
+    }
+
+    static QualityReportResponse.AlgorithmEvaluation withExplainability(
+        QualityReportResponse.AlgorithmEvaluation evaluation, JsonNode explainability) {
+        return new QualityReportResponse.AlgorithmEvaluation(
+            evaluation.catalogVersion(), evaluation.profileCode(), evaluation.metrics(), explainability);
     }
 
     private static QualityReportResponse.EvaluationMetric mergeMetric(

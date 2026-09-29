@@ -9,7 +9,10 @@ import h5py
 import numpy as np
 from PIL import Image
 
+from rs_algorithm_worker import l2a_pipeline
+from rs_algorithm_worker.algorithms.features import FeatureParameters, extract_features
 from rs_algorithm_worker.l2a_profile import parse_l2a_parameters
+from rs_algorithm_worker.models import BandMetadata, RasterData
 from rs_algorithm_worker.product_adapters.hy1c_czi_l2a import (
     build_l2a_plan,
     inspect_l2a_manifest,
@@ -236,6 +239,81 @@ def test_l2a_staged_plan_declares_real_dag(synthetic_l2a_manifest):
     ]
 
 
+def test_staged_feature_extraction_streams_cropped_input_and_matches_feature_values(tmp_path, monkeypatch):
+    values = np.arange(4 * 9 * 11, dtype=np.float32).reshape(4, 9, 11) / 100
+    values[:, 4, 5] = np.nan
+    source = RasterData(
+        values, "EPSG:4326", (1, 0, 0, 0, -1, 9), np.nan,
+        tuple(BandMetadata(name) for name in ("B460", "B560", "B650", "B825")),
+    )
+    cropped = tmp_path / "cropped-czi.npz"
+    l2a_pipeline._write_raster_intermediate(cropped, source, None, "CROP_CZI")
+    expected = extract_features(
+        source, FeatureParameters(("gradient", "local_variance"), window_size=3),
+    )
+
+    def reject_full_intermediate_read(*_args, **_kwargs):
+        raise AssertionError("feature stage must read bounded source windows")
+
+    monkeypatch.setattr(l2a_pipeline, "_read_raster_intermediate", reject_full_intermediate_read)
+    output = tmp_path / "output"
+    response = l2a_pipeline.execute_l2a_staged_stage(
+        {
+            "stageKey": "EXTRACT_CZI_FEATURES",
+            "outputUri": "rs://output/features",
+            "parameterSnapshot": json.dumps({
+                **_standard_l2a_snapshot(),
+                "algorithms": {"features": {
+                    "enabled": True, "metrics": ["gradient", "local_variance"], "windowSize": 3,
+                }},
+            }),
+        },
+        {"output": {"path": str(output)}, "inputs": [{"role": "cropped", "path": str(cropped)}]},
+    )
+
+    assert response["status"] == "SUCCEEDED"
+    import rasterio
+    with rasterio.open(output / "features" / "czi-features.tif") as dataset:
+        assert dataset.descriptions == tuple(expected.rasters)
+        for index, raster in enumerate(expected.rasters.values(), start=1):
+            np.testing.assert_allclose(dataset.read(index), raster.values, equal_nan=True)
+
+
+def test_staged_saliency_streams_cropped_input_and_writes_outputs(tmp_path, monkeypatch):
+    values = np.arange(4 * 9 * 11, dtype=np.float32).reshape(4, 9, 11) / 100
+    values[:, 4, 5] = np.nan
+    source = RasterData(
+        values, "EPSG:4326", (1, 0, 0, 0, -1, 9), np.nan,
+        tuple(BandMetadata(name) for name in ("B460", "B560", "B650", "B825")),
+    )
+    cropped = tmp_path / "cropped-czi.npz"
+    l2a_pipeline._write_raster_intermediate(cropped, source, None, "CROP_CZI")
+
+    def reject_full_intermediate_read(*_args, **_kwargs):
+        raise AssertionError("saliency stage must read bounded source windows")
+
+    monkeypatch.setattr(l2a_pipeline, "_read_raster_intermediate", reject_full_intermediate_read)
+    output = tmp_path / "output"
+    snapshot = _standard_l2a_snapshot()
+    snapshot["algorithms"] = {
+        **snapshot["algorithms"],
+        "saliency": {"enabled": True, "source": "B460", "threshold": 0.5, "windowSize": 3},
+    }
+    response = l2a_pipeline.execute_l2a_staged_stage(
+        {
+            "stageKey": "DETECT_CZI_SALIENCY",
+            "outputUri": "rs://output/saliency",
+            "parameterSnapshot": json.dumps(snapshot),
+        },
+        {"output": {"path": str(output)}, "inputs": [{"role": "source", "path": str(cropped)}]},
+    )
+
+    assert response["status"] == "SUCCEEDED"
+    assert {item["type"] for item in response["artifacts"]} == {
+        "SALIENCY_SCORE_COG", "SALIENCY_MASK_COG", "SALIENCY_PREVIEW_PNG", "SALIENCY_METADATA_JSON",
+    }
+
+
 def test_registry_executes_l2a_staged_validation_with_logical_artifact(synthetic_l2a_manifest, tmp_path):
     output_dir = tmp_path / "output"
     manifest = synthetic_l2a_manifest | {"output": {"path": str(output_dir)}}
@@ -338,6 +416,27 @@ def test_registry_executes_every_l2a_plan_v3_stage(synthetic_l2a_manifest, tmp_p
         "SALIENCY_PREVIEW_PNG",
         "SALIENCY_METADATA_JSON",
     }
+    validation_metadata = json.loads(
+        (output_dir / "validation" / "source.json").read_text(encoding="utf-8")
+    )
+    standard_metadata = json.loads(
+        (output_dir / "standard" / "czi-l2a.json").read_text(encoding="utf-8")
+    )
+    feature_metadata = json.loads(
+        (output_dir / "features" / "czi-features.json").read_text(encoding="utf-8")
+    )
+    fusion_metadata = json.loads(
+        (output_dir / "fusion" / "czi-rgb.json").read_text(encoding="utf-8")
+    )
+    saliency_metadata = json.loads(
+        (output_dir / "saliency" / "metadata.json").read_text(encoding="utf-8")
+    )
+    assert validation_metadata["explainability"]["algorithm"] == "HY-1C CZI L2A 输入产品校验"
+    assert standard_metadata["explainability"]["algorithm"] == "HY-1C CZI L2A 标准化处理"
+    assert standard_metadata["explainability"]["qualityPolicy"]["excludedFlags"]
+    assert feature_metadata["explainability"]["algorithm"] == "HY-1C CZI L2A 特征提取"
+    assert fusion_metadata["explainability"]["algorithm"] == "HY-1C CZI L2A RGB 融合"
+    assert saliency_metadata["explainability"]["algorithm"] == "HY-1C CZI L2A 局部对比显著性检测"
 
 
 def test_registry_standardizes_l2a_into_archiveable_output_artifacts(synthetic_l2a_manifest, tmp_path):

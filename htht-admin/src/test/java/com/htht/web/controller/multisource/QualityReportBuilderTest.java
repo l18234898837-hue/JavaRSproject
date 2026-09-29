@@ -154,4 +154,76 @@ class QualityReportBuilderTest {
             .extracting("status")
             .containsExactly("PASS");
     }
+
+    @Test
+    void merges_identical_generic_raster_checks_but_keeps_per_artifact_availability() throws Exception {
+        StageId stageId = new StageId(401L);
+        TaskArtifactView first = new TaskArtifactView(stageId, "FIRST_COG",
+            new StorageUri("rs://output/101/first.tif"), "sha256:first", 1024L, "FINAL");
+        TaskArtifactView second = new TaskArtifactView(stageId, "SECOND_COG",
+            new StorageUri("rs://output/101/second.tif"), "sha256:second", 2048L, "FINAL");
+        ProcessingStage stage = new ProcessingStage("WRITE", "WRITE", List.of());
+        TaskDetailView detail = new TaskDetailView(
+            TaskId.of(101L), 33L, TaskLifecycleStatus.SUCCEEDED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-v3", List.of(stage)), List.of(),
+            List.of(new TaskStageView(stageId, "WRITE", StageExecutionStatus.SUCCEEDED, 1)),
+            List.of(first, second));
+        var inspection = new com.fasterxml.jackson.databind.ObjectMapper().readTree("""
+            {"quality":{"boundsValid":true,"validPixelRatio":0.8,"hasNanOrInf":false,
+            "width":77,"height":41,"bandCount":1,"statistics":{"min":1,"max":2}}}
+            """);
+
+        var report = new QualityReportBuilder().build(detail,
+            (ignoredDetail, ignoredSubject, ignoredArtifact, format) -> inspection,
+            new AccessSubject(7L));
+
+        assertThat(report.checks()).filteredOn(check -> "栅格宽度".equals(check.name())).hasSize(1);
+        assertThat(report.checks()).filteredOn(check -> "有效覆盖率".equals(check.name())).hasSize(1);
+        assertThat(report.checks()).filteredOn(check -> "产物文件可用性".equals(check.name())).hasSize(2);
+        assertThat(report.checks()).filteredOn(check -> "栅格宽度".equals(check.name()))
+            .first().extracting(check -> check.details().get("deduplicatedCount"))
+            .isEqualTo(2);
+    }
+
+    @Test
+    void aggregatesAllArtifactExplainabilityInsteadOfKeepingTheLastArtifactOnly() throws Exception {
+        StageId stageId = new StageId(501L);
+        TaskArtifactView standard = new TaskArtifactView(stageId, "STANDARD_METADATA_JSON",
+            new StorageUri("rs://output/101/standard/summary.json"), "sha256:standard", 1024L, "FINAL");
+        TaskArtifactView saliency = new TaskArtifactView(stageId, "SALIENCY_METADATA_JSON",
+            new StorageUri("rs://output/101/saliency/summary.json"), "sha256:saliency", 1024L, "FINAL");
+        TaskDetailView detail = new TaskDetailView(
+            TaskId.of(101L), 33L, TaskLifecycleStatus.SUCCEEDED, QualityStatus.NOT_CHECKED,
+            new ProcessingPlan("plan-v3", List.of(new ProcessingStage("WRITE", "WRITE", List.of()))),
+            List.of(new ProductCandidate("pkg", new ProductProfileKey("HY-1C-CZI", "L2A-v1"),
+                ProductDataShape.RASTER_GRID, ProductSupportStatus.SUPPORTED,
+                List.of(new InputAsset("MAIN", 0, new AssetReference("SYS_FILE", "42"),
+                    new StorageUri("rs://sys-file/42"), "sha256:input", true)), 1.0)),
+            List.of(new TaskStageView(stageId, "WRITE", StageExecutionStatus.SUCCEEDED, 1)),
+            List.of(saliency, standard));
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var standardInspection = mapper.readTree("""
+            {"explainability":{"version":"hy1c-processing-explainability-v1",
+            "algorithm":"标准化处理","purpose":"生成标准产物"}}
+            """);
+        var saliencyInspection = mapper.readTree("""
+            {"explainability":{"version":"hy1c-saliency-explainability-v1",
+            "algorithm":"显著性检测","purpose":"生成候选区域"}}
+            """);
+
+        var report = new QualityReportBuilder().build(detail,
+            (ignoredDetail, ignoredSubject, artifact, format) ->
+                "STANDARD_METADATA_JSON".equals(artifact.type())
+                    ? standardInspection : saliencyInspection,
+            new AccessSubject(7L));
+
+        var explainability = report.algorithmEvaluation().explainability();
+        assertThat(explainability.path("version").asText())
+            .isEqualTo("task-explainability-aggregate-v1");
+        assertThat(explainability.path("components")).hasSize(2);
+        assertThat(explainability.path("components").get(0).path("explainability")
+            .path("algorithm").asText()).isEqualTo("标准化处理");
+        assertThat(explainability.path("components").get(1).path("explainability")
+            .path("algorithm").asText()).isEqualTo("显著性检测");
+    }
 }

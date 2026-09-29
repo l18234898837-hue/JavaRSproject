@@ -56,6 +56,12 @@ def test_hy2d_plan_declares_track_artifacts_and_optional_grid() -> None:
     assert stages["APPLY_TRACK_QUALITY"]["outputs"][0]["artifactType"] == "QUALITY_FILTERED_ALTIMETER_TRACK"
 
 
+def test_hy2d_staged_plan_enables_track_gridding_by_default() -> None:
+    plan = build_staged_plan(_candidate())
+
+    assert "GRID_TRACK_OPTIONAL" in {stage["stageKey"] for stage in plan["stages"]}
+
+
 def test_hy2d_staged_plan_declares_quality_stage_for_standard_output() -> None:
     plan = build_staged_plan(_candidate(), {"grid": {"enabled": False, "spacingDegrees": 0.25}})
     stages = {stage["stageKey"]: stage for stage in plan["stages"]}

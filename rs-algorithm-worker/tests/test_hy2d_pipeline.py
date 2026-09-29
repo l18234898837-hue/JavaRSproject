@@ -151,6 +151,11 @@ def test_execute_hy2d_quality_stage_uses_only_declared_upstream_track(tmp_path):
     assert {item["type"] for item in result["artifacts"]} == {
         "QUALITY_FILTERED_ALTIMETER_TRACK", "TRACK_QUALITY_SUMMARY_JSON",
     }
+    summary = __import__("json").loads(
+        (quality_output / "quality" / "summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["explainability"]["algorithm"] == "HY-2D 高度计沿轨质量筛选"
+    assert "NON_OCEAN_SURFACE" in summary["explainability"]["reasonDefinitions"]
 
 
 def test_registry_builds_hy2d_plan_v3_for_recognized_package(tmp_path):
@@ -215,8 +220,10 @@ def test_registry_executes_integrated_hy2d_product(tmp_path):
         "STANDARD_TRACK_NETCDF", "STANDARD_TRACK_PARQUET", "STANDARD_TRACK_CSV",
         "STANDARD_TRACK_GEOJSON", "STANDARD_TRACK_ANOMALIES_GEOJSON",
         "STANDARD_TRACK_SUMMARY_JSON",
+        "TRACK_GRID_NETCDF", "TRACK_GRID_COG", "TRACK_GRID_SUMMARY_JSON",
     }
     assert (output / "standard" / "track.nc").is_file()
+    assert (output / "grid" / "track-grid.tif").is_file()
 
 
 def test_execute_hy2d_ssh_stage_uses_only_quality_track(tmp_path):
@@ -320,6 +327,8 @@ def test_write_standard_track_output_writes_interoperable_track_artifacts(tmp_pa
     assert summary["anomalySummary"] == anomalies.summary
     assert summary["fieldMissingRates"]["alt"] == pytest.approx(1 / 3)
     assert "official review" in summary["scientificBoundary"].lower()
+    assert summary["explainability"]["algorithm"] == "HY-2D 高度计标准沿轨产品"
+    assert summary["explainability"]["outputs"]["track.geojson"].startswith("用于地图展示")
 
 
 def test_track_geojson_is_empty_when_fewer_than_two_finite_coordinates(tmp_path) -> None:

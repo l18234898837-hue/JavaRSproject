@@ -99,14 +99,14 @@ public final class TaskCreationCoordinator {
     ) {
         try {
             return planner.buildPlan(new PlanRequest(
-                taskId, candidate, parameterSnapshot, "plan-v3", assetStorage.grantRead(subject, candidate.files())
+                taskId, candidate, parameterSnapshot, ProcessingPlan.CURRENT_VERSION, assetStorage.grantRead(subject, candidate.files())
             ));
         } catch (WorkerProtocolException error) {
             if (!error.isManifestExpired()) {
                 throw error;
             }
             return planner.buildPlan(new PlanRequest(
-                taskId, candidate, parameterSnapshot, "plan-v3", assetStorage.grantRead(subject, candidate.files())
+                taskId, candidate, parameterSnapshot, ProcessingPlan.CURRENT_VERSION, assetStorage.grantRead(subject, candidate.files())
             ));
         }
     }

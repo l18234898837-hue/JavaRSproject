@@ -4,6 +4,7 @@ import com.htht.multisource.application.port.out.LegacyPlanArchiveRepository;
 import com.htht.multisource.application.port.out.ProcessingTaskRepository;
 import com.htht.multisource.application.port.out.TaskStageRepository;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
+import com.htht.multisource.domain.model.ProcessingPlan;
 import com.htht.multisource.domain.model.TaskId;
 import com.htht.multisource.domain.model.TaskLifecycleStatus;
 
@@ -45,7 +46,9 @@ public final class LegacyPlanArchiveService {
         var task = taskRepository.findById(taskId)
             .orElseThrow(() -> new IllegalArgumentException("Processing task not found: " + taskId.value()));
         String version = task.plan().version();
-        if ("plan-v3".equals(version)) throw new IllegalStateException("plan-v3 tasks cannot be archived as legacy tasks.");
+        if (ProcessingPlan.CURRENT_VERSION.equals(version)) {
+            throw new IllegalStateException("plan-v3 tasks cannot be archived as legacy tasks.");
+        }
         if (archiveRepository.findByTaskId(taskId).isPresent()) return false;
         if (!isTerminal(task.lifecycleStatus())) {
             if (cancelUseCase == null) {

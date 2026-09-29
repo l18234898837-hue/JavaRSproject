@@ -295,12 +295,17 @@ def test_execute_fusion_stage_maps_selected_rgb_bands_and_marks_display_product(
         }},
     }, {"output": {"path": str(output)}, "inputs": [{"role": "standard", "path": str(standard)}]})
 
-    _assert_stage_artifacts(response, "rs://output/task-fusion", {"MERSI_FUSION_COG": "fusion/mersi-rgb.tif"}, output)
+    _assert_stage_artifacts(response, "rs://output/task-fusion", {
+        "MERSI_FUSION_COG": "fusion/mersi-rgb.tif",
+        "MERSI_FUSION_SUMMARY_JSON": "fusion/summary.json",
+    }, output)
     assert response["artifacts"][0]["displayProduct"] is True
     with rasterio.open(output / "fusion" / "mersi-rgb.tif") as dataset:
         assert dataset.descriptions == ("red", "green", "blue")
         assert dataset.crs.to_string() == "EPSG:4326"
         assert dataset.transform == Affine(0.01, 0, 120, 0, -0.01, 31)
+    summary = json.loads((output / "fusion" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["explainability"]["algorithm"] == "FY-3H MERSI RGB 融合"
 
 
 @pytest.mark.parametrize("inputs", [
@@ -345,9 +350,13 @@ def test_execute_saliency_stage_uses_declared_standard_or_feature_source_and_wri
         _assert_stage_artifacts(response, f"rs://output/task-saliency-{role}", {
             "MERSI_SALIENCY_SCORE_COG": "saliency/score.tif",
             "MERSI_SALIENCY_MASK_COG": "saliency/mask.tif",
+            "MERSI_SALIENCY_SUMMARY_JSON": "saliency/summary.json",
         }, output)
         with rasterio.open(output / "saliency" / "score.tif") as score, rasterio.open(output / "saliency" / "mask.tif") as mask:
             assert (score.crs, score.transform, score.height, score.width) == (mask.crs, mask.transform, mask.height, mask.width)
+        summary = json.loads((output / "saliency" / "summary.json").read_text(encoding="utf-8"))
+        assert summary["source"] == source
+        assert summary["explainability"]["algorithm"] == "FY-3H MERSI 局部对比显著性检测"
 
 
 @pytest.mark.real_sample

@@ -53,7 +53,7 @@ class WorkerContractCodecTest {
         assertThat(root.path("payload").path("executionId").asText()).isEqualTo("exec-01");
         assertThat(root.path("payload").path("inputs")).hasSize(1);
         assertThat(root.path("payload").path("outputs")).hasSize(0);
-        assertThat(root.path("payload").path("planVersion").asText()).isEqualTo("plan-v2");
+        assertThat(root.path("payload").path("planVersion").asText()).isEqualTo("plan-v3");
         assertThat(root.path("payload").path("outputUri").asText()).isEqualTo("rs://output/task-101");
     }
 
@@ -123,39 +123,17 @@ class WorkerContractCodecTest {
     }
 
     @Test
-    void decodesPlanV2StageContracts() {
+    void rejectsLegacyPlanVersions() {
         String response = """
             {"schemaVersion":"1.0","operation":"build-plan","requestId":"req-plan","payload":{
-              "version":"plan-v2","stages":[
-              {
-                "stageKey":"DECODE","stageCode":"DECODE_SCALE_AND_NODATA","dependsOnStageKeys":[],
-                "inputs":[{"key":"main","source":"RAW_INPUT","artifactType":"MAIN","required":true}],
-                "outputs":[{"artifactType":"DECODED_CZI_RASTER","relativePath":"decoded/raster.npz","retention":"INTERMEDIATE"}],
-                "parameterSnapshot":"{}"
-              }, {
-                "stageKey":"APPLY_L2_FLAGS","stageCode":"APPLY_L2_FLAGS","dependsOnStageKeys":["DECODE"],
-                "inputs":[
-                  {"key":"decoded","source":"UPSTREAM_ARTIFACT","artifactType":"DECODED_CZI_RASTER","required":true},
-                  {"key":"main","source":"RAW_INPUT","artifactType":"MAIN","required":true}
-                ],
-                "outputs":[{"artifactType":"QUALITY_MASKED_CZI_RASTER","relativePath":"quality/masked.npz","retention":"INTERMEDIATE"}],
-                "parameterSnapshot":"{\\"quality\\":{\\"policy\\":\\"default\\"}}"
-              }]
+              "version":"plan-v2","stages":[]
             }}
             """;
 
-        var plan = new WorkerResultTranslator(objectMapper).toPlan(
+        assertThatThrownBy(() -> new WorkerResultTranslator(objectMapper).toPlan(
             codec.decodeResponse("req-plan", WorkerOperation.BUILD_PLAN, response)
-        );
-
-        assertThat(plan.stages().get(1).inputs()).containsExactly(
-            new StageInput("decoded", StageInput.Source.UPSTREAM_ARTIFACT, "DECODED_CZI_RASTER", true),
-            new StageInput("main", StageInput.Source.RAW_INPUT, "MAIN", true)
-        );
-        assertThat(plan.stages().get(1).outputs()).containsExactly(
-            new StageOutput("QUALITY_MASKED_CZI_RASTER", "quality/masked.npz", StageOutput.Retention.INTERMEDIATE)
-        );
-        assertThat(plan.stages().get(1).parameterSnapshot()).contains("quality");
+        )).isInstanceOf(WorkerProtocolException.class)
+            .hasMessageContaining("version must be plan-v3");
     }
 
     @Test
@@ -244,7 +222,7 @@ class WorkerContractCodecTest {
             TaskId.of(101L), new StageId(201L), "CAL", 1, new ExecutionId("exec-01"),
             "1.0", "FY-3H-MERSI", "v1", "processor-1", "{\"mode\":\"standard\"}",
             List.of(asset()), new StorageUri("rs://output/task-101"),
-            new ExecutionGrant("write-01", Instant.parse("2026-08-20T00:00:00Z"))
+            new ExecutionGrant("write-01", Instant.parse("2026-08-20T00:00:00Z")), "plan-v3", List.of()
         );
     }
 

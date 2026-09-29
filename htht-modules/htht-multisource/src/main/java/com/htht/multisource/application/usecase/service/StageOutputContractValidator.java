@@ -20,7 +20,7 @@ public final class StageOutputContractValidator {
         Objects.requireNonNull(outputUri, "outputUri");
         Objects.requireNonNull(artifacts, "artifacts");
         if (stage.outputs().isEmpty()) {
-            return; // Legacy plan-v1 stages do not declare an output contract.
+            return;
         }
 
         String prefix = outputUri.value().endsWith("/") ? outputUri.value() : outputUri.value() + "/";

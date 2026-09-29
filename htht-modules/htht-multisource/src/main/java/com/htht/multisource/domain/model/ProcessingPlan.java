@@ -5,6 +5,8 @@ import java.util.Objects;
 
 public record ProcessingPlan(String version, String processorVersion, List<ProcessingStage> stages) {
 
+    public static final String CURRENT_VERSION = "plan-v3";
+
     public ProcessingPlan(String version, List<ProcessingStage> stages) {
         this(version, "unspecified", stages);
     }

@@ -59,15 +59,15 @@ class LocalProcessWorkerGatewayTest {
     @Test
     void plannerGatewayRebuildsValidatedProcessingPlan() {
         LocalProcessWorkerGateway gateway = gatewayReturning("build-plan", """
-            {"version":"plan-v1","stages":[
-              {"stageKey":"READ","stageCode":"READ_SOURCE","dependsOnStageKeys":[]},
-              {"stageKey":"CAL","stageCode":"CALIBRATE","dependsOnStageKeys":["READ"]}
+            {"version":"plan-v3","stages":[
+              {"stageKey":"READ","stageCode":"READ_SOURCE","dependsOnStageKeys":[],"inputs":[{"key":"main","source":"RAW_INPUT","artifactType":"MAIN","required":true}],"outputs":[],"parameterSnapshot":"{}"},
+              {"stageKey":"CAL","stageCode":"CALIBRATE","dependsOnStageKeys":["READ"],"inputs":[{"key":"main","source":"RAW_INPUT","artifactType":"MAIN","required":true}],"outputs":[],"parameterSnapshot":"{}"}
             ]}
             """);
 
         ProcessingPlan plan = gateway.buildPlan(planRequest());
 
-        assertThat(plan.version()).isEqualTo("plan-v1");
+        assertThat(plan.version()).isEqualTo("plan-v3");
         assertThat(plan.stages()).extracting(stage -> stage.stageKey()).containsExactly("READ", "CAL");
     }
 
@@ -160,12 +160,23 @@ class LocalProcessWorkerGatewayTest {
         return new PlanRequest(TaskId.of(101L), candidate(), "{\"mode\":\"standard\"}", "plan-v3", grant());
     }
 
+    @Test
+    void plannerGatewayRejectsLegacyWorkerPlan() {
+        LocalProcessWorkerGateway gateway = gatewayReturning("build-plan", """
+            {"version":"plan-v2","stages":[]}
+            """);
+
+        assertThatThrownBy(() -> gateway.buildPlan(planRequest()))
+            .isInstanceOf(WorkerProtocolException.class)
+            .hasMessageContaining("version must be plan-v3");
+    }
+
     private static StageExecutionRequest stageRequest() {
         return new StageExecutionRequest(TaskId.of(101L), new StageId(201L), "CAL", 1,
             new ExecutionId("exec-01"), "1.0", "FY-3H-MERSI", "v1", "processor-1",
             "{\"mode\":\"standard\"}", List.of(asset("package-01")), new StorageUri("rs://output/task-101"),
             new ExecutionGrant("write-01", Instant.parse("2026-08-20T00:00:00Z"), TaskId.of(101L),
-                new StageId(201L), new ExecutionId("exec-01"), 1));
+                new StageId(201L), new ExecutionId("exec-01"), 1), "plan-v3", List.of());
     }
 
     private static ProductCandidate candidate() {
@@ -219,8 +230,10 @@ class LocalProcessWorkerGatewayTest {
                 case INSPECT_ARTIFACT -> "{\"format\":\"JSON\",\"kind\":\"table\",\"columns\":[],\"rowCount\":0,\"rows\":[]}";
                 case INSPECT_RASTER_ARTIFACT -> "{\"kind\":\"raster\",\"renderable\":true,\"reason\":null,\"crs\":\"EPSG:4326\",\"bounds\":[110,30,111,31],\"minZoom\":0,\"maxZoom\":16,\"style\":{\"kind\":\"rgb\"},\"legend\":null}";
                 case RENDER_ARTIFACT_TILE -> "{\"contentType\":\"image/png\",\"pngBase64\":\"iVBORw0KGgo=\"}";
-                case BUILD_PLAN -> "{\"version\":\"plan-v1\",\"stages\":["
-                    + "{\"stageKey\":\"READ\",\"stageCode\":\"READ_SOURCE\",\"dependsOnStageKeys\":[]}] }";
+                case BUILD_PLAN -> "{\"version\":\"plan-v3\",\"stages\":["
+                    + "{\"stageKey\":\"READ\",\"stageCode\":\"READ_SOURCE\",\"dependsOnStageKeys\":[],"
+                    + "\"inputs\":[{\"key\":\"main\",\"source\":\"RAW_INPUT\",\"artifactType\":\"MAIN\",\"required\":true}],"
+                    + "\"outputs\":[],\"parameterSnapshot\":\"{}\"}] }";
                 case EXECUTE_STAGE -> "{\"workerId\":\"worker-local-01\",\"status\":\"SUCCEEDED\",\"artifacts\":[]}";
             };
             String response = "{\"schemaVersion\":\"1.0\",\"operation\":\"" + operation

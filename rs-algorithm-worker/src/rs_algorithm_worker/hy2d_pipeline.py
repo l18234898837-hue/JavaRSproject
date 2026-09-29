@@ -30,7 +30,17 @@ def execute_hy2d_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
     parameters = _parameters(payload)
     if stage_key == "VALIDATE_SOURCE":
         track = decode_tar_gz(_input_path(manifest, "MAIN"))
-        path = _write_json(output_dir / "validation" / "source.json", {"metadata": track.metadata, "observationCount": int(track.time.size)})
+        path = _write_json(output_dir / "validation" / "source.json", {
+            "metadata": track.metadata,
+            "observationCount": int(track.time.size),
+            "explainability": {
+                "version": "hy2d-validation-explainability-v1",
+                "algorithm": "HY-2D 高度计源数据校验",
+                "purpose": "确认压缩包中的 NetCDF 和元数据可读取，并统计沿轨观测点数量。",
+                "interpretation": "校验通过表示文件结构满足处理前提，不代表轨迹点质量或海面高度结果已经合格。",
+                "limitations": ["该阶段不执行质量筛选、SSH 计算或异常检测。"],
+            },
+        })
         return _response(payload, [("VALIDATION_METADATA_JSON", path, "validation/source.json")])
     if stage_key == "DECODE_ALTIMETER_TRACK":
         track = decode_tar_gz(_input_path(manifest, "MAIN"))
@@ -41,7 +51,7 @@ def execute_hy2d_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
     if stage_key == "APPLY_TRACK_QUALITY":
         quality = apply_quality_policy(track, QualityPolicy.baseline())
         track_path = _write_quality_track(output_dir / "quality" / "track.npz", quality)
-        summary_path = _write_json(output_dir / "quality" / "summary.json", quality.summary)
+        summary_path = _write_json(output_dir / "quality" / "summary.json", _quality_summary(quality))
         return _response(payload, [("QUALITY_FILTERED_ALTIMETER_TRACK", track_path, "quality/track.npz"),
                                    ("TRACK_QUALITY_SUMMARY_JSON", summary_path, "quality/summary.json")])
 
@@ -56,7 +66,10 @@ def execute_hy2d_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
                                      mad_threshold=parameters["anomaly"]["madThreshold"],
                                      jump_threshold_meters=parameters["anomaly"]["jumpThresholdMeters"])
     if stage_key == "EXTRACT_TRACK_FEATURES":
-        summary_path = _write_json(output_dir / "features" / "summary.json", {"version": "track-statistics-v1", "windows": features})
+        summary_path = _write_json(
+            output_dir / "features" / "summary.json",
+            _feature_summary(features, ssh.summary, parameters["featureWindowSize"]),
+        )
         parquet_path = output_dir / "features" / "windows.parquet"
         parquet_path.parent.mkdir(parents=True, exist_ok=True)
         pa, pq = _pyarrow_modules()
@@ -66,7 +79,10 @@ def execute_hy2d_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
     if stage_key == "DETECT_TRACK_ANOMALIES":
         geojson = _anomaly_geojson(track, ssh.values, anomaly)
         geojson_path = _write_json(output_dir / "anomalies" / "points.geojson", geojson)
-        summary_path = _write_json(output_dir / "anomalies" / "summary.json", anomaly.summary)
+        summary_path = _write_json(
+            output_dir / "anomalies" / "summary.json",
+            _anomaly_summary(anomaly, parameters),
+        )
         return _response(payload, [("TRACK_ANOMALIES_GEOJSON", geojson_path, "anomalies/points.geojson"),
                                    ("TRACK_ANOMALY_SUMMARY_JSON", summary_path, "anomalies/summary.json")])
     if stage_key == "WRITE_STANDARD_TRACK_OUTPUT":
@@ -117,14 +133,17 @@ def execute_hy2d_product(payload: dict[str, Any], manifest: dict[str, Any]) -> d
 
     feature_summary = _write_json(
         output_dir / "features" / "summary.json",
-        {"version": "track-statistics-v1", "ssh": ssh.summary, "windows": features},
+        _feature_summary(features, ssh.summary, parameters["featureWindowSize"]),
     )
     feature_parquet = output_dir / "features" / "windows.parquet"
     feature_parquet.parent.mkdir(parents=True, exist_ok=True)
     pa, pq = _pyarrow_modules()
     pq.write_table(pa.Table.from_pylist(features), feature_parquet)
     anomaly_geojson = _write_json(output_dir / "anomalies" / "points.geojson", _anomaly_geojson(track, ssh.values, anomaly))
-    anomaly_summary = _write_json(output_dir / "anomalies" / "summary.json", anomaly.summary)
+    anomaly_summary = _write_json(
+        output_dir / "anomalies" / "summary.json",
+        _anomaly_summary(anomaly, parameters),
+    )
     standard = write_standard_track_output(
         track=quality.track,
         ssh=ssh,
@@ -257,6 +276,93 @@ def _write_json(path: Path, value: Any) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=True, sort_keys=True, allow_nan=False), encoding="utf-8")
     return path
+
+
+def _quality_summary(quality: TrackQualityResult) -> dict[str, Any]:
+    return {
+        **quality.summary,
+        "explainability": {
+            "version": "hy2d-quality-explainability-v1",
+            "algorithm": "HY-2D 高度计沿轨质量筛选",
+            "purpose": "判断每个沿轨观测点是否具备计算工程基线 SSH 的必要坐标、测高和质量条件。",
+            "reasonDefinitions": {
+                "NONFINITE_LONGITUDE": "经度缺失或不是有限数值。",
+                "NONFINITE_LATITUDE": "纬度缺失或不是有限数值。",
+                "NONFINITE_ALT": "卫星高度缺失，无法完成 SSH 公式。",
+                "NONFINITE_RANGE_KU": "Ku 波段测距缺失，无法完成 SSH 公式。",
+                "NON_OCEAN_SURFACE": "产品明确标记为非海洋表面。",
+                "RAIN_FLAG": "产品雨标志表明该观测可能受降雨影响。",
+                "ICE_FLAG": "产品冰标志表明该观测可能受海冰影响。",
+                "RANGE_QUALITY_FLAG": "Ku 波段测距质量标志失败。",
+                "ORBIT_STATE_FLAG": "轨道状态被产品标记为不合格。",
+            },
+            "interpretation": "validRatio 是通过基线排除规则的轨迹点比例；reasonCounts 可重叠，同一点可能具有多个原因。",
+            "unknownAndUnavailablePolicy": "缺失、未知或尚无官方阈值的辅助质量字段会被记录，不会在没有依据时全部强制剔除。",
+            "limitations": [
+                "当前策略是保守的工程基线，不代表官方 HY-2D IDR/IGDR 完整质量规范。",
+                "质量通过仅表示满足本处理链前提，不代表 SSH 科学精度已验证。",
+            ],
+        },
+    }
+
+
+def _feature_summary(
+    features: list[dict[str, float | int]],
+    ssh_summary: Any,
+    window_size: int,
+) -> dict[str, Any]:
+    return {
+        "version": "track-statistics-v1",
+        "ssh": dict(ssh_summary),
+        "windows": features,
+        "explainability": {
+            "version": "hy2d-feature-explainability-v1",
+            "algorithm": "HY-2D 沿轨 SSH 窗口特征",
+            "purpose": "在连续有效轨迹段内按固定观测点数量汇总 SSH 的局部分布和变化趋势。",
+            "parameters": {"windowSize": window_size, "windowUnit": "observation-count"},
+            "fieldDefinitions": {
+                "startIndex": "窗口在原始轨迹中的起始观测索引。",
+                "endIndex": "窗口在原始轨迹中的结束观测索引。",
+                "sshMean": "窗口内有效 SSH 平均值。",
+                "sshStd": "窗口内有效 SSH 总体标准差。",
+                "sshTrend": "SSH 相对样本索引的最小二乘斜率，不是按距离或时间归一化的速度。",
+                "sshGradientMean": "窗口内相邻有效 SSH 差值绝对值的平均值。",
+                "validRatio": "窗口实际有效样本数除以请求窗口大小；末尾不足整窗时可能小于 1。",
+            },
+            "validityPolicy": "无效点会切断连续轨迹段，特征窗口不会跨越无效点连接。",
+            "interpretation": "这些特征用于描述局部水平和变化，不直接代表海洋事件分类或异常确认。",
+            "limitations": [
+                "窗口按观测点数量划分，不保证每个窗口覆盖相同时间或空间距离。",
+                "没有参考数据时不能由这些统计量推导测高精度。",
+            ],
+        },
+    }
+
+
+def _anomaly_summary(anomaly: TrackAnomalyResult, parameters: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **anomaly.summary,
+        "parameters": {
+            "windowSize": parameters["featureWindowSize"],
+            "madThreshold": parameters["anomaly"]["madThreshold"],
+            "jumpThresholdMeters": parameters["anomaly"]["jumpThresholdMeters"],
+        },
+        "explainability": {
+            "version": "hy2d-anomaly-explainability-v1",
+            "algorithm": "HY-2D 沿轨 SSH 候选异常检测",
+            "purpose": "利用局部 MAD、相邻点跳变和工程绝对值上限标记需要人工复核的轨迹点。",
+            "reasonDefinitions": {
+                "MAD_OUTLIER": "该点相对于局部窗口中位数的稳健标准化偏差超过阈值。",
+                "ADJACENT_JUMP": "该点与前一个连续有效轨迹点的 SSH 差超过跳变阈值。",
+                "ABSOLUTE_SSH_LIMIT": "SSH 绝对值超过工程基线上限；该上限仍需官方规范复核。",
+            },
+            "interpretation": "anomalyCount 是至少命中一种规则的候选点数；同一点可能同时命中多种规则。",
+            "limitations": [
+                "结果是候选异常提示，不等同于传感器故障、海洋事件或错误数据的确认。",
+                "没有人工标注或权威参考轨迹时，不能计算异常检测准确率和召回率。",
+            ],
+        },
+    }
 
 
 def _anomaly_geojson(track: TrackData, ssh: np.ndarray, anomaly: TrackAnomalyResult) -> dict[str, Any]:

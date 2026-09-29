@@ -112,7 +112,10 @@ def build_integrated_plan(product: dict[str, Any], parameter_snapshot: dict[str,
         outputs.extend([_output("FY4B_FEATURE_COG", "features/fy4b-features.tif"),
                         _output("FY4B_FEATURE_SUMMARY_JSON", "features/summary.json")])
     if parameters["fusion"]["enabled"]:
-        outputs.append(_output("FY4B_FALSE_COLOR_COG", "fusion/false-color.tif"))
+        outputs.extend([
+            _output("FY4B_FALSE_COLOR_COG", "fusion/false-color.tif"),
+            _output("FY4B_FUSION_SUMMARY_JSON", "fusion/summary.json"),
+        ])
     if parameters["saliency"]["enabled"]:
         outputs.extend([_output("FY4B_SALIENCY_SCORE_COG", "saliency/score.tif"),
                         _output("FY4B_SALIENCY_MASK_COG", "saliency/mask.tif"),
@@ -170,15 +173,22 @@ def build_staged_plan(product: dict[str, Any], parameter_snapshot: dict[str, Any
                              [_upstream(f"gridQuality{resolution}", f"FY4B_GRIDDED_{resolution}_QUALITY") for resolution in ("0500M", "1000M", "2000M", "4000M")],
                    "outputs": standard_outputs, "parameterSnapshot": parameter_snapshot_json})
     if parameters["features"]["enabled"]:
+        feature_metrics = set(parameters["features"]["metrics"])
+        feature_inputs = [_upstream("standard", "FY4B_VIS_NIR_1000M_COG")]
+        if feature_metrics.intersection({"gradient", "local_variance", "toa_nir_red_nd"}):
+            feature_inputs.append(_upstream("red", "FY4B_RED_500M_COG"))
+        if "btd_c13_c14" in feature_metrics:
+            feature_inputs.append(_upstream("thermal", "FY4B_MULTISPECTRAL_4000M_COG"))
         stages.append({"stageKey": "EXTRACT_FY4B_FEATURES", "stageCode": "EXTRACT_FY4B_FEATURES",
                        "dependsOnStageKeys": ["WRITE_FY4B_STANDARD_COG"],
-                       "inputs": [_upstream("standard", "FY4B_VIS_NIR_1000M_COG")],
+                       "inputs": feature_inputs,
                        "outputs": [_output("FY4B_FEATURE_COG", "features/fy4b-features.tif", "FINAL"), _output("FY4B_FEATURE_SUMMARY_JSON", "features/summary.json", "FINAL")],
                        "parameterSnapshot": parameter_snapshot_json})
     if parameters["fusion"]["enabled"]:
         stages.append({"stageKey": "FUSE_FY4B_BANDS", "stageCode": "FUSE_FY4B_BANDS", "dependsOnStageKeys": ["WRITE_FY4B_STANDARD_COG"],
                        "inputs": [_upstream("standard", "FY4B_VIS_NIR_1000M_COG"), _upstream("red", "FY4B_RED_500M_COG")],
-                       "outputs": [_output("FY4B_FALSE_COLOR_COG", "fusion/false-color.tif", "FINAL")], "parameterSnapshot": parameter_snapshot_json})
+                       "outputs": [_output("FY4B_FALSE_COLOR_COG", "fusion/false-color.tif", "FINAL"),
+                                   _output("FY4B_FUSION_SUMMARY_JSON", "fusion/summary.json", "FINAL")], "parameterSnapshot": parameter_snapshot_json})
     if parameters["saliency"]["enabled"]:
         dependencies = ["WRITE_FY4B_STANDARD_COG"]
         source = parameters["saliency"]["source"]

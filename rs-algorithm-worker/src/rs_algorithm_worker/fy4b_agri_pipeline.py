@@ -359,6 +359,8 @@ def execute_fy4b_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dic
         metrics = parameters["features"]["metrics"]
         if any(metric in {"gradient", "local_variance", "toa_nir_red_nd"} for metric in metrics):
             standard["FY4B_RED_500M_COG"] = raw_paths.get("FY4B_RED_500M_COG")
+        if "btd_c13_c14" in metrics:
+            standard["FY4B_MULTISPECTRAL_4000M_COG"] = raw_paths.get("FY4B_MULTISPECTRAL_4000M_COG")
         _require_paths(standard, ("FY4B_VIS_NIR_1000M_COG",), "FY-4B feature extraction requires standard artifacts")
         return _stage_response(output_uri, directory, _write_fy4b_features(
             {key: Path(value) for key, value in standard.items() if value is not None}, directory, parameters,
@@ -393,7 +395,17 @@ def _validate_fy4b_package(manifest: dict[str, Any], directory: Path) -> list[tu
         raise ValueError("FY-4B execution requires exactly one validated package")
     path = directory / "validation" / "package.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(candidates[0]["metadataSnapshot"], sort_keys=True), encoding="utf-8")
+    path.write_text(json.dumps({
+        **candidates[0]["metadataSnapshot"],
+        "explainability": {
+            "version": "fy4b-validation-explainability-v1",
+            "algorithm": "FY-4B AGRI 输入包校验",
+            "purpose": "确认五个必需 HDF 文件属于同一观测、版本和时间窗口，并检查必要元数据可读。",
+            "checks": ["文件角色完整且唯一。", "观测时间、卫星标识和版本一致。", "必要通道、尺寸和质量元数据可读取。"],
+            "interpretation": "校验通过表示输入结构满足处理前提，不代表像元质量或定位精度已经验证。",
+            "limitations": ["该阶段不计算辐射误差、定位误差或最终产品质量指标。"],
+        },
+    }, sort_keys=True), encoding="utf-8")
     return [("FY4B_INPUT_VALIDATION_JSON", path)]
 
 
@@ -419,6 +431,14 @@ def _build_fy4b_nominal_grid(geo_path: Path, directory: Path) -> list[tuple[str,
     path.write_text(json.dumps({
         "crs": grid.crs, "transform": list(grid.transform), "width": grid.width, "height": grid.height,
         "status": grid.status, "parameters": grid.parameters,
+        "explainability": {
+            "version": "fy4b-navigation-explainability-v1",
+            "algorithm": "FY-4B AGRI 标称导航网格",
+            "purpose": "根据 GEO 导航参数建立后续定标和投影使用的像元坐标网格。",
+            "method": "geostationary-nominal-grid",
+            "interpretation": "网格描述名义坐标关系，不等同于逐像元定位精度验证。",
+            "limitations": ["未使用 DEM 地形改正；NOMINAL_UNVERIFIED 不代表导航精度已验证。"],
+        },
     }, sort_keys=True), encoding="utf-8")
     return [("FY4B_NOMINAL_GRID_JSON", path)]
 
@@ -445,7 +465,21 @@ def _calibrate_and_georeference_fy4b(
         ])
     summary = directory / "calibration" / "summary.json"
     summary.parent.mkdir(parents=True, exist_ok=True)
-    summary.write_text(json.dumps({"formulaVersion": "fy4b-agri-l1-v1"}), encoding="utf-8")
+    summary.write_text(json.dumps({
+        "formulaVersion": "fy4b-agri-l1-v1",
+        "explainability": {
+            "version": "fy4b-calibration-explainability-v1",
+            "algorithm": "FY-4B AGRI 辐射定标与原生网格地理配准",
+            "purpose": "将 DN 转换为反射率/亮温，并生成与科学栅格严格对齐的质量栅格。",
+            "processing": [
+                "反射通道使用查找表、比例因子、偏移量和太阳天顶角计算反射率。",
+                "红外通道使用查找表和定标系数计算亮温或辐亮度。",
+                "质量栅格按填充值、范围、导航、定标、文件质量和地球盘外原因编码。",
+            ],
+            "interpretation": "质量位图用于解释无效像元原因。",
+            "limitations": ["该阶段不提供与参考产品比较得到的绝对辐射精度。"],
+        },
+    }, sort_keys=True), encoding="utf-8")
     artifacts.append(("FY4B_CALIBRATION_SUMMARY_JSON", summary))
     return artifacts
 
@@ -463,8 +497,15 @@ def _reproject_and_crop_fy4b(
         if source is None or quality_source is None:
             raise ValueError("FY-4B reprojection requires all native science and quality rasters")
         science_path, quality_path = grid / f"{resolution.lower()}.tif", grid / f"quality-{resolution.lower()}.tif"
-        _reproject_raster_windows(source, science_path, parameters, Resampling.bilinear)
-        _reproject_raster_windows(quality_source, quality_path, parameters, Resampling.nearest)
+        # Derive the target grid from the science raster once.  The quality
+        # raster uses a different numeric convention (0 is a valid quality
+        # value), so deriving its extent independently would either retain the
+        # old full-disk canvas or produce a grid that does not align with the
+        # science output.
+        with rasterio.open(source) as science_source:
+            target_grid = _target_grid(science_source, parameters)
+        _reproject_raster_windows(source, science_path, parameters, Resampling.bilinear, target_grid=target_grid)
+        _reproject_raster_windows(quality_source, quality_path, parameters, Resampling.nearest, target_grid=target_grid)
         artifacts.extend([
             (f"FY4B_GRIDDED_{resolution}_RASTER", science_path),
             (f"FY4B_GRIDDED_{resolution}_QUALITY", quality_path),
@@ -496,6 +537,18 @@ def _write_fy4b_standard_cog(gridded: list[tuple[str, Path]], directory: Path) -
         "profileKey": {"productCode": "FY-4B-AGRI", "profileVersion": "v1"},
         "formulaVersion": "fy4b-agri-l1-v1", "qualityRuleVersion": "fy4b-agri-l1-quality-v1",
         "navigationStatus": "NOMINAL_UNVERIFIED", "artifacts": summaries,
+        "explainability": {
+            "version": "fy4b-processing-explainability-v1",
+            "algorithm": "FY-4B AGRI 标准化处理",
+            "purpose": "将四个原生分辨率的定标栅格重投影并写出为可分发、可地图读取的标准 COG。",
+            "stages": [
+                {"key": "CALIBRATE_AND_GEOREFERENCE_FY4B", "name": "辐射定标与原生配准", "meaning": "生成科学值和原因位质量栅格。"},
+                {"key": "REPROJECT_AND_CROP_FY4B", "name": "重投影与裁剪", "meaning": "以科学栅格有效范围确定目标网格，质量栅格复用同一网格。"},
+                {"key": "WRITE_FY4B_STANDARD_COG", "name": "标准 COG 写出", "meaning": "输出统一 CRS、范围和元数据的地图可读栅格。"},
+            ],
+            "qualityInterpretation": "validPixelRatio 表示有限科学像元覆盖比例；质量 COG 的非零位表示对应无效原因。",
+            "limitations": ["NOMINAL_UNVERIFIED 不代表定位精度已验证；没有参考产品时不输出科学准确率。"],
+        },
     }, sort_keys=True), encoding="utf-8")
     artifacts.append(("FY4B_STANDARD_SUMMARY_JSON", summary))
     return artifacts
@@ -563,7 +616,24 @@ def _write_fy4b_features(standard: dict[str, Path], directory: Path, parameters:
     _write(np.stack(values), path, raster.crs, raster.transform, tuple(names))
     artifacts.append(("FY4B_FEATURE_COG", path))
     summary = feature_dir / "summary.json"
-    summary.write_text(json.dumps({"classification": "NONE", **feature_set.statistics}, allow_nan=False, sort_keys=True), encoding="utf-8")
+    summary.write_text(json.dumps({
+        "classification": "NONE", **feature_set.statistics,
+        "explainability": {
+            "version": "fy4b-feature-explainability-v1",
+            "algorithm": "FY-4B AGRI 特征提取",
+            "purpose": "从标准化波段生成统计、纹理和跨波段物理特征，辅助用户理解影像变化。",
+            "metricDefinitions": {
+                "statistics": "描述有效像元值的数量、范围和分布，不把 NoData 计入统计。",
+                "gradient": "相邻像元有限差分的变化强度，用于描述边缘和局部变化。",
+                "local_variance": "窗口内有效像元的离散程度，用于描述纹理复杂度。",
+                "toa_nir_red_nd": "由 C03 与对齐后的 C02 计算的归一化差异指标。",
+                "btd_c13_c14": "C13 与 C14 亮温差，用于描述热红外差异。",
+            },
+            "inputs": "以 1000M 标准 COG 为主网格；500M/4000M 波段先重采样对齐。",
+            "interpretation": "特征值是描述性指标，不直接代表分类、异常确认或科学精度结论。",
+            "limitations": ["窗口大小、重采样方式和有效像元覆盖会影响特征值；无参考标注时不能计算准确率和召回率。"],
+        },
+    }, allow_nan=False, sort_keys=True), encoding="utf-8")
     artifacts.append(("FY4B_FEATURE_SUMMARY_JSON", summary))
     return artifacts
 
@@ -576,7 +646,22 @@ def _write_fy4b_fusion(standard: dict[str, Path], directory: Path, parameters: d
     path.parent.mkdir(parents=True, exist_ok=True)
     _write(result.values, path, result.crs, result.transform,
            ("NIR_RED_BLUE_FALSE_COLOR_R", "NIR_RED_BLUE_FALSE_COLOR_G", "NIR_RED_BLUE_FALSE_COLOR_B"), 0)
-    return [("FY4B_FALSE_COLOR_COG", path)]
+    summary = path.with_name("summary.json")
+    summary.write_text(json.dumps({
+        "version": "fy4b-fusion-v1",
+        "mode": "NIR_RED_BLUE",
+        "inputs": {"red": "C03_REFLECTANCE", "green": "C02_REFLECTANCE", "blue": "C01_REFLECTANCE"},
+        "percentiles": parameters["fusion"]["percentiles"],
+        "explainability": {
+            "version": "fy4b-fusion-explainability-v1",
+            "algorithm": "FY-4B AGRI 假彩色融合",
+            "purpose": "将 C03/C02/C01 映射为 RGB 通道，增强视觉对比以便浏览。",
+            "processing": "按配置分位数拉伸并写入红、绿、蓝通道；无效输入像元不参与有效输出。",
+            "interpretation": "RGB 颜色是显示增强结果，不是物理反射率，也不直接代表分类结论。",
+            "limitations": ["分位数拉伸会改变对比度，不适合跨任务直接比较绝对像素值。"],
+        },
+    }, sort_keys=True), encoding="utf-8")
+    return [("FY4B_FALSE_COLOR_COG", path), ("FY4B_FUSION_SUMMARY_JSON", summary)]
 
 
 def _write_fy4b_saliency(standard: dict[str, Path], directory: Path, parameters: dict[str, Any]) -> list[tuple[str, Path]]:
@@ -602,9 +687,21 @@ def _write_fy4b_saliency(standard: dict[str, Path], directory: Path, parameters:
     score, mask, summary = saliency / "score.tif", saliency / "mask.tif", saliency / "summary.json"
     _write(result.score.values, score, result.score.crs, result.score.transform, ("saliency_score",), 0.0)
     _write(result.mask.astype(np.uint8), mask, result.score.crs, result.score.transform, ("saliency_mask",), 0)
+    valid_count = int(np.isfinite(raster.values).sum())
     summary.write_text(json.dumps({
         "algorithm": "contrast-v1", "source": source_name, "threshold": parameters["saliency"]["threshold"],
-        "windowSize": parameters["saliency"]["windowSize"], "candidatePixelCount": int(result.mask.sum()), "semanticLabel": "NONE",
+        "windowSize": parameters["saliency"]["windowSize"], "candidatePixelCount": int(result.mask.sum()),
+        "validPixelCount": valid_count,
+        "candidatePixelRatio": int(result.mask.sum()) / valid_count if valid_count else 0.0,
+        "semanticLabel": "NONE",
+        "explainability": {
+            "version": "fy4b-saliency-explainability-v1",
+            "algorithm": "FY-4B AGRI 局部对比显著性检测",
+            "purpose": "识别相对于局部邻域变化较强的候选像元。",
+            "processing": "在有效像元上计算局部对比得分，并按阈值生成候选掩膜。",
+            "interpretation": "候选区域提示，不等同于目标识别、异常确认或分类结论。",
+            "limitations": ["窗口和阈值会影响候选范围；没有人工标注时不能计算检测准确率。"],
+        },
     }, sort_keys=True), encoding="utf-8")
     return [("FY4B_SALIENCY_SCORE_COG", score), ("FY4B_SALIENCY_MASK_COG", mask), ("FY4B_SALIENCY_SUMMARY_JSON", summary)]
 
@@ -991,9 +1088,16 @@ def _source_nominal_grid(path: Path, *, width: int, height: int, fallback: tuple
     return grid.crs, grid.transform
 
 
-def _reproject_raster_windows(source_path: Path, destination_path: Path, parameters: dict[str, Any], resampling: Resampling) -> None:
+def _reproject_raster_windows(
+    source_path: Path,
+    destination_path: Path,
+    parameters: dict[str, Any],
+    resampling: Resampling,
+    *,
+    target_grid: tuple[Affine, int, int] | None = None,
+) -> None:
     with rasterio.open(source_path) as source:
-        transform, width, height = _target_grid(source, parameters)
+        transform, width, height = target_grid or _target_grid(source, parameters)
         nodata = source.nodata
         profile = _tiled_profile(width, height, source.count, source.dtypes[0], parameters["targetCrs"], transform, nodata)
         with rasterio.open(destination_path, "w", **profile) as destination:
@@ -1023,11 +1127,16 @@ def _reproject_raster_windows(source_path: Path, destination_path: Path, paramet
 
 def _target_grid(source: Any, parameters: dict[str, Any]) -> tuple[Affine, int, int]:
     source_transform, source_width, source_height = _full_source_grid(source)
+    roi = parameters.get("roi")
+    if roi is None and any(np.issubdtype(np.dtype(dtype), np.floating) for dtype in source.dtypes):
+        valid_window = _valid_data_window(source)
+        if valid_window is not None:
+            source_transform = window_transform(valid_window, source.transform)
+            source_width, source_height = int(valid_window.width), int(valid_window.height)
     source_bounds = array_bounds(source_height, source_width, source_transform)
     transform, width, height = calculate_default_transform(
         source.crs, parameters["targetCrs"], source_width, source_height, *source_bounds,
     )
-    roi = parameters.get("roi")
     if roi is None:
         return transform, width, height
     bounds = transform_bounds("EPSG:4326", parameters["targetCrs"], *roi, densify_pts=21)
@@ -1040,6 +1149,39 @@ def _target_grid(source: Any, parameters: dict[str, Any]) -> tuple[Affine, int, 
         raise ValueError("FY-4B ROI does not intersect raster")
     cropped = Window(column, row, right - column, bottom - row)
     return window_transform(cropped, transform), int(cropped.width), int(cropped.height)
+
+
+def _valid_data_window(source: Any, block_size: int = 1024) -> Window | None:
+    """Return the tight source-pixel window containing at least one valid value.
+
+    FY-4B science rasters use NaN as NoData after calibration.  Scanning
+    windows keeps this bounded in memory and, importantly, does not treat
+    numeric zero as invalid.  The helper is only used for floating-point
+    science rasters; quality rasters reuse the science-derived grid.
+    """
+    min_row, min_column = source.height, source.width
+    max_row = max_column = -1
+    for window in _raster_windows(source.width, source.height, block_size):
+        values = source.read(window=window)
+        valid = np.isfinite(values)
+        if source.nodata is not None and np.isfinite(source.nodata):
+            valid &= values != source.nodata
+        valid_pixels = np.any(valid, axis=0)
+        rows, columns = np.where(valid_pixels)
+        if rows.size == 0:
+            continue
+        min_row = min(min_row, int(window.row_off) + int(rows.min()))
+        max_row = max(max_row, int(window.row_off) + int(rows.max()))
+        min_column = min(min_column, int(window.col_off) + int(columns.min()))
+        max_column = max(max_column, int(window.col_off) + int(columns.max()))
+    if max_row < min_row or max_column < min_column:
+        return None
+    return Window(
+        min_column,
+        min_row,
+        max_column - min_column + 1,
+        max_row - min_row + 1,
+    )
 
 
 def _full_source_grid(source: Any) -> tuple[Affine, int, int]:

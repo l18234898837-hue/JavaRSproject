@@ -119,6 +119,23 @@ def write_track_grid_outputs(result: TrackGridResult, output_dir: Path) -> Track
         "observedBinCount": int((result.count > 0).sum()),
         "validObservationCount": int(result.count.sum()),
         "scientificBoundary": result.metadata["scientificBoundary"],
+        "explainability": {
+            "version": "hy2d-grid-explainability-v1",
+            "algorithm": "HY-2D 沿轨 SSH 空间分箱",
+            "purpose": "将离散沿轨观测按经纬度网格聚合，便于地图展示轨迹覆盖和局部统计。",
+            "method": "仅统计落入网格的观测点，不执行空间插值。",
+            "bandDefinitions": {
+                "ssh_mean": "网格内通过质量筛选的 SSH 平均值。",
+                "ssh_std": "网格内通过质量筛选的 SSH 总体标准差。",
+                "count": "网格内通过质量筛选且 SSH 有限的观测点数量。",
+                "valid_ratio": "有效观测点数量除以落入该网格的全部有限坐标观测点数量。",
+            },
+            "interpretation": "空网格表示没有轨迹观测覆盖，不表示 SSH 为零；count 较小时均值和标准差稳定性有限。",
+            "limitations": [
+                "结果是沿轨观测的空间分箱统计，不是连续海面场，也没有填补轨迹之间的空白。",
+                "经度跨越日期变更线时可能使用连续展开坐标域，展示端应结合 bounds 解释。",
+            ],
+        },
     }
     paths["summary"].write_text(json.dumps(summary, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
     return TrackGridOutput(destination, paths, summary)

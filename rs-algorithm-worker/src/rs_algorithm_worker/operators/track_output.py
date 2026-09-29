@@ -169,6 +169,29 @@ def _summary(
         "features": [dict(feature) for feature in features],
         "anomalySummary": dict(anomalies.summary),
         "scientificBoundary": _SCIENTIFIC_BOUNDARY,
+        "explainability": {
+            "version": "hy2d-standard-track-explainability-v1",
+            "algorithm": "HY-2D 高度计标准沿轨产品",
+            "purpose": "将质量筛选、工程基线 SSH、窗口特征和候选异常组织为可下载、可表格查看和可地图联动的标准产物。",
+            "outputs": {
+                "track.nc": "保留沿轨维度、坐标、质量状态、质量原因和 SSH 的科学数据文件。",
+                "track.parquet": "适合字段筛选、统计分析和有限行表格预览的列式文件。",
+                "track.csv": "便于通用软件查看的逐观测点表格。",
+                "track.geojson": "用于地图展示的有效坐标轨迹线。",
+                "anomalies.geojson": "用于地图展示的候选异常点及其触发原因。",
+            },
+            "fieldDefinitions": {
+                "quality_status": "是否通过工程基线质量筛选。",
+                "quality_reason_codes": "该点记录的排除、未知或需复核原因。",
+                "ssh": "按当前工程基线公式计算的海面高度；无效点为缺失值。",
+                "passRate": "质量通过且 SSH 为有限值的观测点比例。",
+            },
+            "interpretation": "不同文件是同一条轨迹结果的不同表达方式，不应作为相互独立的检测结论重复计数。",
+            "limitations": [
+                "当前产品使用工程基线质量规则和 SSH 公式，仍需要官方产品规范复核。",
+                "没有交叉验证轨迹或地面真值时，不能据此声称绝对测高精度。",
+            ],
+        },
     }
 
 

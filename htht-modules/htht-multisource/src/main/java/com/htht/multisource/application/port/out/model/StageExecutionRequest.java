@@ -3,6 +3,7 @@ package com.htht.multisource.application.port.out.model;
 import com.htht.multisource.domain.model.ExecutionId;
 import com.htht.multisource.domain.model.StageId;
 import com.htht.multisource.domain.model.InputAsset;
+import com.htht.multisource.domain.model.ProcessingPlan;
 import com.htht.multisource.domain.model.StorageUri;
 import com.htht.multisource.domain.model.TaskId;
 
@@ -26,15 +27,6 @@ public record StageExecutionRequest(
     String planVersion,
     List<StageOutput> outputs
 ) {
-    public StageExecutionRequest(
-        TaskId taskId, StageId stageId, String stageKey, int attempt, ExecutionId executionId,
-        String schemaVersion, String profileCode, String profileVersion, String processorVersion,
-        String parameterSnapshot, List<InputAsset> inputs, StorageUri outputUri, ExecutionGrant executionGrant
-    ) {
-        this(taskId, stageId, stageKey, attempt, executionId, schemaVersion, profileCode, profileVersion,
-            processorVersion, parameterSnapshot, inputs, outputUri, executionGrant, "plan-v2", List.of());
-    }
-
     public StageExecutionRequest {
         Objects.requireNonNull(inputs, "inputs");
         Objects.requireNonNull(outputUri, "outputUri");
@@ -52,6 +44,9 @@ public record StageExecutionRequest(
         }
         if (inputs.isEmpty()) {
             throw new IllegalArgumentException("Stage execution request inputs must not be empty.");
+        }
+        if (!ProcessingPlan.CURRENT_VERSION.equals(planVersion)) {
+            throw new IllegalArgumentException("Only plan-v3 stage execution requests are supported.");
         }
     }
 }

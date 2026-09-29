@@ -1,6 +1,7 @@
 package com.htht.multisource.application.port.out.model;
 
 import com.htht.multisource.domain.model.ProductCandidate;
+import com.htht.multisource.domain.model.ProcessingPlan;
 import com.htht.multisource.domain.model.TaskId;
 
 import java.util.Objects;
@@ -20,7 +21,7 @@ public record PlanRequest(
         if (parameterSnapshot == null || parameterSnapshot.isBlank() || requestedPlanVersion.isBlank()) {
             throw new IllegalArgumentException("Parameter snapshot must not be blank.");
         }
-        if (!"plan-v3".equals(requestedPlanVersion)) {
+        if (!ProcessingPlan.CURRENT_VERSION.equals(requestedPlanVersion)) {
             throw new IllegalArgumentException("Only plan-v3 may be requested for new tasks.");
         }
     }

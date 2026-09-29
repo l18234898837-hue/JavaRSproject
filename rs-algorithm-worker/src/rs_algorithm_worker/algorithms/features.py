@@ -56,10 +56,15 @@ def extract_features(raster: RasterData, parameters: FeatureParameters) -> Featu
 
 
 def _gradient(values: np.ndarray) -> np.ndarray:
+    return _gradient_with_fill(values, None)
+
+
+def _gradient_with_fill(values: np.ndarray, fill_value: float | None) -> np.ndarray:
     valid = np.isfinite(values)
     if not valid.any():
         return np.full(values.shape, np.nan, dtype=np.float32)
-    filled = np.where(valid, values, float(np.nanmean(values)))
+    replacement = float(np.nanmean(values)) if fill_value is None else float(fill_value)
+    filled = np.where(valid, values, replacement)
     vertical, horizontal = np.gradient(filled)
     gradient = np.hypot(vertical, horizontal).astype(np.float32)
     gradient[~valid] = np.nan
@@ -75,6 +80,29 @@ def _local_variance(values: np.ndarray, window_size: int) -> np.ndarray:
     variance = np.maximum(mean_square - mean * mean, 0.0).astype(np.float32)
     variance[(counts == 0) | ~valid] = np.nan
     return variance
+
+
+def feature_tile(
+    values: np.ndarray,
+    metrics: tuple[str, ...],
+    window_size: int,
+    core: tuple[int, int, int, int],
+    *,
+    gradient_fill: float | None = None,
+) -> dict[str, np.ndarray]:
+    """Compute feature metrics for a halo-inclusive tile and return its core."""
+    top, bottom, left, right = core
+    if not (0 <= top <= bottom <= values.shape[0] and 0 <= left <= right <= values.shape[1]):
+        raise ValueError("feature tile core is outside the tile")
+    if "local_variance" in metrics and (window_size < 3 or window_size % 2 == 0):
+        raise ValueError("local variance window size must be an odd integer of at least three")
+    result: dict[str, np.ndarray] = {}
+    core_slice = np.s_[top:bottom, left:right]
+    if "gradient" in metrics:
+        result["gradient"] = _gradient_with_fill(values, gradient_fill)[core_slice]
+    if "local_variance" in metrics:
+        result["local_variance"] = _local_variance(values, window_size)[core_slice]
+    return result
 
 
 def _feature_raster(values: np.ndarray, source: RasterData, name: str) -> RasterData:

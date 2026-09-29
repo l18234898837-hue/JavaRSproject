@@ -163,6 +163,7 @@ def _build_validated_plan(candidate: dict[str, Any], parameter_snapshot: dict[st
         stages.append(_stage("FUSE_MERSI_BANDS", ["WRITE_MERSI_STANDARD_COG"],
             [_input("standard", "UPSTREAM_ARTIFACT", "STANDARD_MERSI_COG")], [
                 _output("MERSI_FUSION_COG", "fusion/mersi-rgb.tif", "FINAL"),
+                _output("MERSI_FUSION_SUMMARY_JSON", "fusion/summary.json", "FINAL"),
             ], snapshot))
     if parameters["saliency"]["enabled"]:
         saliency_input = _input("standard", "UPSTREAM_ARTIFACT", "STANDARD_MERSI_COG")
@@ -173,6 +174,7 @@ def _build_validated_plan(candidate: dict[str, Any], parameter_snapshot: dict[st
         stages.append(_stage("DETECT_MERSI_SALIENCY", dependencies, [saliency_input], [
             _output("MERSI_SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"),
             _output("MERSI_SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"),
+            _output("MERSI_SALIENCY_SUMMARY_JSON", "saliency/summary.json", "FINAL"),
         ], snapshot))
     return {"version": "plan-v2", "stages": stages}
 
@@ -196,11 +198,15 @@ def build_integrated_plan(candidate: dict[str, Any], parameter_snapshot: dict[st
             outputs.append(_output("MERSI_FEATURE_COG", "features/mersi.tif", "FINAL"))
         outputs.append(_output("MERSI_FEATURE_SUMMARY_JSON", "features/summary.json", "FINAL"))
     if parameters["fusion"]["enabled"]:
-        outputs.append(_output("MERSI_FUSION_COG", "fusion/mersi-rgb.tif", "FINAL"))
+        outputs.extend([
+            _output("MERSI_FUSION_COG", "fusion/mersi-rgb.tif", "FINAL"),
+            _output("MERSI_FUSION_SUMMARY_JSON", "fusion/summary.json", "FINAL"),
+        ])
     if parameters["saliency"]["enabled"]:
         outputs.extend([
             _output("MERSI_SALIENCY_SCORE_COG", "saliency/score.tif", "FINAL"),
             _output("MERSI_SALIENCY_MASK_COG", "saliency/mask.tif", "FINAL"),
+            _output("MERSI_SALIENCY_SUMMARY_JSON", "saliency/summary.json", "FINAL"),
         ])
     inputs = [
         _input("observation", "RAW_INPUT", "OBSERVATION"),

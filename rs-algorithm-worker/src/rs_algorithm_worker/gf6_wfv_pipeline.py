@@ -67,7 +67,16 @@ def execute_gf6_stage(payload: dict[str, Any], manifest: dict[str, Any]) -> dict
     if stage == "VALIDATE_GF6_WFV_L1A":
         evidence = inspect_evidence(manifest)
         path = directory / "validation" / "package.json"; path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"profileKey": PROFILE_KEY, "packageId": evidence.package_id, "valid": True}, sort_keys=True) + "\n", encoding="utf-8")
+        path.write_text(json.dumps({
+            "profileKey": PROFILE_KEY,
+            "packageId": evidence.package_id,
+            "valid": True,
+            "explainability": {
+                "stage": "输入校验",
+                "purpose": "确认 GF-6 WFV L1A 文件集合、命名角色和基础元数据满足后续处理要求。",
+                "resultMeaning": "valid=true 只表示输入结构和必要元数据通过预检，不代表影像科学质量已经验证。",
+            },
+        }, sort_keys=True) + "\n", encoding="utf-8")
         return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [_artifact(output_uri, "GF6_INPUT_VALIDATION_JSON", path, directory)]}
     parameters = parse_parameters(_payload_parameters(payload))
     if stage == "MOSAIC_GF6_TILES":
@@ -223,6 +232,17 @@ def _write_grid_metadata(path: Path, grid) -> None:
         "height": grid.height,
         "bounds": list(grid.bounds),
         "heightM": grid.height_m,
+        "explainability": {
+            "stage": "RPC 地理定位网格",
+            "purpose": "根据产品 RPC 元数据建立目标投影的像元网格。",
+            "method": "nominal-RPC-grid",
+            "heightMode": "CONSTANT",
+            "heightMeaning": "heightM 是 RPC 重采样使用的固定高程，不是逐像元高程。",
+            "limitations": [
+                "当前网格使用固定高程，不包含 DEM 地形改正。",
+                "该网格描述定位和投影过程，不等同于定位精度验证。",
+            ],
+        },
     }, sort_keys=True) + "\n", encoding="utf-8")
 
 
@@ -282,7 +302,66 @@ def _resample_vrt_to_standard(evidence: Gf6ProductEvidence, vrt: Path, path: Pat
 
 def _write_processing_summary(standard: Path, evidence: Gf6ProductEvidence, parameters: dict[str, Any]) -> Path:
     path = standard.with_name("summary.json")
-    path.write_text(json.dumps({"profileKey": {"productCode": "GF-6-WFV-L1A", "profileVersion": "v1"}, "declaredDimensions": evidence.metadata_snapshot["declaredDimensions"], "tileCoverageDimensions": evidence.metadata_snapshot["tileCoverageDimensions"], "tileCoverageDelta": evidence.metadata_snapshot["tileCoverageDelta"], "navigationStatus": "NOMINAL_RPC_NO_DEM", "accuracyStatus": "UNVALIDATED", "rpcHeightMode": "CONSTANT", "rpcHeight": 0.0, "bands": parameters["bands"]}, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps({
+        "profileKey": {"productCode": "GF-6-WFV-L1A", "profileVersion": "v1"},
+        "declaredDimensions": evidence.metadata_snapshot["declaredDimensions"],
+        "tileCoverageDimensions": evidence.metadata_snapshot["tileCoverageDimensions"],
+        "tileCoverageDelta": evidence.metadata_snapshot["tileCoverageDelta"],
+        "navigationStatus": "NOMINAL_RPC_NO_DEM",
+        "accuracyStatus": "UNVALIDATED",
+        "rpcHeightMode": "CONSTANT",
+        "rpcHeight": 0.0,
+        "bands": parameters["bands"],
+        "explainability": {
+            "version": "gf6-processing-explainability-v1",
+            "algorithm": "GF-6 WFV L1A 标准化处理",
+            "purpose": "说明从输入瓦片到标准化 COG 的处理链和每一步的结果含义。",
+            "stages": [
+                {
+                    "key": "VALIDATE_GF6_WFV_L1A",
+                    "name": "输入校验",
+                    "purpose": "检查文件角色、尺寸和必要元数据。",
+                    "outputMeaning": "通过预检不代表科学质量已验证。",
+                },
+                {
+                    "key": "MOSAIC_GF6_TILES",
+                    "name": "瓦片拼接",
+                    "purpose": "按产品声明的行列偏移组织多景瓦片。",
+                    "outputMeaning": "VRT 是逻辑拼接视图，不是重新采样后的独立栅格。",
+                },
+                {
+                    "key": "GEOLOCATE_GF6_RPC",
+                    "name": "RPC 地理定位",
+                    "purpose": "根据 RPC 建立目标坐标系和分辨率网格。",
+                    "outputMeaning": "使用固定高程的名义定位网格，未包含 DEM 改正。",
+                },
+                {
+                    "key": "STANDARDIZE_GF6_PROJECTION",
+                    "name": "投影标准化",
+                    "purpose": "按目标网格对源波段进行 RPC 重采样和辐射定标。",
+                    "outputMeaning": "输出为统一 CRS、分辨率和波段顺序的中间栅格。",
+                },
+                {
+                    "key": "WRITE_GF6_STANDARD_COG",
+                    "name": "标准 COG 写出",
+                    "purpose": "将标准化栅格转换为可分发和地图读取的 COG。",
+                    "outputMeaning": "该文件是后续特征、融合和显著性处理的共同输入。",
+                },
+            ],
+            "parameters": {
+                "targetCrs": parameters["targetCrs"],
+                "resolution": parameters["resolution"],
+                "bands": parameters["bands"],
+                "roi": parameters["roi"],
+                "resampling": "bilinear",
+                "rpcHeight": 0.0,
+            },
+            "limitations": [
+                "当前 accuracyStatus=UNVALIDATED，不代表已经完成定位精度验证。",
+                "需要控制点或参考产品后，才能计算 RPC 定位误差和投影误差。",
+            ],
+        },
+    }, sort_keys=True) + "\n", encoding="utf-8")
     return path
 
 
@@ -348,7 +427,16 @@ def _write_features(standard: Path, directory: Path, parameters: dict[str, Any])
                         np.where(centre_valid, centre_values, _NODATA).astype(np.float32),
                         window=window,
                     )
-    payload: dict[str, Any] = {"metrics": parameters["features"]["metrics"]}
+    payload: dict[str, Any] = {
+        "metrics": parameters["features"]["metrics"],
+        "explainability": _feature_explainability(
+            parameters["features"]["metrics"],
+            parameters["features"].get("windowSize", 3),
+            parameters["bands"],
+            descriptions,
+            statistics_only=statistics_only,
+        ),
+    }
     if "statistics" in parameters["features"]["metrics"]:
         payload.update({
             "statisticsMethod": "windowed-chan-population-v1",
@@ -362,6 +450,81 @@ def _write_features(standard: Path, directory: Path, parameters: dict[str, Any])
         })
     summary.write_text(json.dumps(payload, allow_nan=False, sort_keys=True) + "\n", encoding="utf-8")
     return [("GF6_FEATURES_COG", path), ("GF6_FEATURES_SUMMARY_JSON", summary)]
+
+
+def _feature_explainability(
+    metrics: list[str],
+    window_size: int,
+    bands: list[int],
+    descriptions: tuple[str, ...],
+    *,
+    statistics_only: bool,
+) -> dict[str, Any]:
+    definitions = {
+        "statistics": {
+            "name": "有效像元统计",
+            "purpose": "描述每个输入波段的有效值分布，不把无效像元计入统计。",
+            "method": "逐窗口 Chan 合并统计",
+            "interpretation": "count 越低表示有效观测覆盖越少；mean、std 反映有效像元的整体分布。",
+        },
+        "gradient": {
+            "name": "局部梯度",
+            "purpose": "衡量像元与相邻像元之间的变化强度，用于识别边缘和纹理变化。",
+            "method": "水平与垂直有限差分的欧氏范数",
+            "interpretation": "数值越大表示局部变化越明显，不等同于目标分类或异常结论。",
+        },
+        "local_variance": {
+            "name": "局部方差",
+            "purpose": "衡量窗口内像元值的离散程度，用于描述局部纹理复杂度。",
+            "method": f"{window_size}×{window_size} 有效像元窗口方差",
+            "interpretation": "数值越大表示局部纹理或辐射变化越复杂；窗口内无有效像元时输出无效值。",
+        },
+    }
+    selected = [definitions[metric] for metric in metrics if metric in definitions]
+    output_bands = []
+    if statistics_only:
+        output_bands = [
+            {
+                "band": index,
+                "name": f"statistics:value:{description}",
+                "sourceBand": f"B{band}",
+                "meaning": "原始有效标准化值载体",
+            }
+            for index, (band, description) in enumerate(zip(bands, descriptions), 1)
+        ]
+    else:
+        index = 1
+        for metric in metrics:
+            if metric == "statistics":
+                continue
+            for band, description in zip(bands, descriptions):
+                output_bands.append({
+                    "band": index,
+                    "name": f"{metric}:{description}",
+                    "sourceBand": f"B{band}",
+                    "meaning": definitions[metric]["name"],
+                })
+                index += 1
+    return {
+        "version": "gf6-feature-explainability-v1",
+        "algorithm": "GF-6 WFV 特征提取",
+        "purpose": "基于标准化波段生成可解释的纹理和有效值统计特征。",
+        "inputs": [
+            {"band": f"B{band}", "description": description}
+            for band, description in zip(bands, descriptions)
+        ],
+        "parameters": {
+            "metrics": metrics,
+            "windowSize": window_size,
+        },
+        "metricDefinitions": selected,
+        "outputBands": output_bands,
+        "validityPolicy": "仅使用有限值且不等于 NoData 的源像元；窗口计算不把无效邻域当作 0。",
+        "limitations": [
+            "特征值用于描述输入影像，不直接代表分类、检测或科学精度结论。",
+            "未提供参考产品或人工标注时，报告不输出准确率、召回率等效果指标。",
+        ],
+    }
 
 
 def _empty_statistics() -> dict[str, float | int | None]:
@@ -431,9 +594,15 @@ def _write_fusion(standard: Path, directory: Path, parameters: dict[str, Any]) -
             overview_resampling="AVERAGE",
             internal_mask=True,
         ) as dest:
+            total_pixel_count = 0
+            valid_pixel_count = 0
             for window in _windows(source.width, source.height):
                 values = source.read(selected, window=window).astype(np.float32)
-                valid_channels = np.isfinite(values) & (values != _NODATA)
+                source_masks = source.read_masks(selected, window=window) > 0
+                valid_channels = source_masks & np.isfinite(values) & (values != _NODATA)
+                pixel_validity = valid_channels.all(axis=0)
+                total_pixel_count += int(pixel_validity.size)
+                valid_pixel_count += int(pixel_validity.sum())
                 output = np.zeros(values.shape, dtype=np.uint8)
                 for index, (lower, upper) in enumerate(stretches):
                     valid = valid_channels[index]
@@ -446,7 +615,7 @@ def _write_fusion(standard: Path, directory: Path, parameters: dict[str, Any]) -
                     ).astype(np.uint8)
                 dest.write(output, window=window)
                 dest.write_mask(
-                    np.where(valid_channels.all(axis=0), 255, 0).astype(np.uint8),
+                    np.where(pixel_validity, 255, 0).astype(np.uint8),
                     window=window,
                 )
             for index, name in enumerate(("red", "green", "blue"), 1):
@@ -462,6 +631,34 @@ def _write_fusion(standard: Path, directory: Path, parameters: dict[str, Any]) -
                 "outputNodata": None,
                 "validityPolicy": "INTERNAL_DATASET_MASK_ALL_RGB_SOURCE_BANDS_VALID",
                 "datasetMaskValues": {"invalid": 0, "valid": 255},
+                "pixelCounts": {
+                    "total": total_pixel_count,
+                    "valid": valid_pixel_count,
+                    "invalid": total_pixel_count - valid_pixel_count,
+                    "validRatio": valid_pixel_count / total_pixel_count if total_pixel_count else 0.0,
+                },
+                "explainability": {
+                    "version": "gf6-fusion-explainability-v1",
+                    "algorithm": "GF-6 WFV RGB 融合",
+                    "purpose": "将三个标准化波段映射为便于浏览的 RGB 合成影像。",
+                    "inputs": {
+                        name: f"B{config[name]}" for name in names
+                    },
+                    "parameters": {
+                        "percentiles": config["percentiles"],
+                        "stretchMethod": "global-sampled-percentile-linear",
+                    },
+                    "processing": "对每个输入波段按全局有效样本分位数拉伸到 0-255，再写入对应 RGB 通道。",
+                    "outputChannels": {
+                        name: f"{name}_B{config[name]}" for name in names
+                    },
+                    "validityPolicy": "只有红、绿、蓝三个源波段同时有效时，输出像元才有效。",
+                    "interpretation": "RGB 颜色用于增强视觉对比，不是物理反射率，也不直接代表分类结果。",
+                    "limitations": [
+                        "分位数拉伸会改变显示对比度，不能用于跨任务直接比较像素绝对值。",
+                        "没有参考影像时，不输出融合影像的科学精度结论。",
+                    ],
+                },
                 "sampling": {
                     **sampling,
                     "validSamplesPerBand": dict(zip(names, valid_sample_counts)),
@@ -515,10 +712,14 @@ def _global_fusion_stretches(source, selected: tuple[int, int, int], percentiles
             sampled = source.read(band_index, window=window)[
                 ::_FUSION_SAMPLE_STEP, ::_FUSION_SAMPLE_STEP
             ].reshape(-1)
+            sampled_mask = source.read_masks(band_index, window=window)[
+                ::_FUSION_SAMPLE_STEP, ::_FUSION_SAMPLE_STEP
+            ].reshape(-1)
             start = (-visited_count) % sampling["thinningStride"]
             retained = sampled[start::sampling["thinningStride"]]
+            retained_mask = sampled_mask[start::sampling["thinningStride"]]
             visited_count += int(sampled.size)
-            valid = np.isfinite(retained) & (retained != _NODATA)
+            valid = (retained_mask > 0) & np.isfinite(retained) & (retained != _NODATA)
             retained = retained[valid]
             next_count = retained_count + int(retained.size)
             if next_count > samples.size:
@@ -537,8 +738,10 @@ def _global_fusion_stretches(source, selected: tuple[int, int, int], percentiles
 def _write_saliency(standard: Path, directory: Path, parameters: dict[str, Any]) -> list[tuple[str, Path]]:
     score_path, mask_path, summary = directory / "saliency" / "score.tif", directory / "saliency" / "mask.tif", directory / "saliency" / "summary.json"; score_path.parent.mkdir(parents=True, exist_ok=True); config = parameters["saliency"]
     with rasterio.open(standard) as source:
+        source_width, source_height = source.width, source.height
         profile = source.profile.copy(); profile.update(driver="GTiff", count=1, dtype="float32", nodata=_NODATA, BLOCKSIZE=_BLOCK, COMPRESS="DEFLATE", BIGTIFF="IF_SAFER"); mask_profile = profile.copy(); mask_profile.update(dtype="uint8", nodata=255)
         source_index = parameters["bands"].index(int(config["source"][1:])) + 1
+        candidate_pixel_count = 0
         with open_windowed_cog(
             score_path,
             profile,
@@ -568,6 +771,7 @@ def _write_saliency(standard: Path, directory: Path, parameters: dict[str, Any])
                 )
                 centre_scores = scores[centre_rows, centre_columns]
                 centre_masks = masks[centre_rows, centre_columns]
+                candidate_pixel_count += int((centre_valid & centre_masks).sum())
                 score.write(
                     np.where(
                         centre_valid & np.isfinite(centre_scores),
@@ -584,7 +788,37 @@ def _write_saliency(standard: Path, directory: Path, parameters: dict[str, Any])
                 )
             score.set_band_description(1, f"saliency_score:{config['source']}")
             mask.set_band_description(1, f"saliency_mask:{config['source']}")
-    summary.write_text(json.dumps({"interpretation": "CANDIDATE_ONLY", **config, "scoreNodata": _NODATA, "maskNodata": 255, "maskValues": {"notSalient": 0, "salient": 1, "invalid": 255}, "validityPolicy": "SOURCE_PIXEL_MUST_BE_VALID"}, sort_keys=True) + "\n", encoding="utf-8")
+    total_pixels = source_width * source_height
+    summary.write_text(json.dumps({
+        "interpretation": "CANDIDATE_ONLY",
+        **config,
+        "candidatePixelCount": candidate_pixel_count,
+        "candidatePixelRatio": candidate_pixel_count / total_pixels if total_pixels else 0.0,
+        "scoreNodata": _NODATA,
+        "maskNodata": 255,
+        "maskValues": {"notSalient": 0, "salient": 1, "invalid": 255},
+        "validityPolicy": "SOURCE_PIXEL_MUST_BE_VALID",
+        "explainability": {
+            "version": "gf6-saliency-explainability-v1",
+            "algorithm": "GF-6 WFV 显著性检测",
+            "purpose": "在指定源波段中识别相对于局部邻域具有较强变化的候选像元。",
+            "input": f"{config['source']}",
+            "parameters": {
+                "windowSize": config["windowSize"],
+                "threshold": config["threshold"],
+            },
+            "processing": "计算局部均值和标准差，以标准化偏离程度形成显著性分数，再按阈值生成候选掩膜。",
+            "outputs": {
+                "score": "0-1 的显著性分数，越高表示相对局部背景越突出。",
+                "mask": "1 表示达到阈值的候选像元，0 表示未达到阈值，255 表示无效像元。",
+            },
+            "interpretation": "结果是候选区域提示，不等同于目标识别、异常确认或分类结论。",
+            "limitations": [
+                "窗口大小会影响局部背景和候选区域范围。",
+                "阈值越高，候选区域通常越少；没有人工标注时不能据此计算准确率和召回率。",
+            ],
+        },
+    }, sort_keys=True) + "\n", encoding="utf-8")
     return [("GF6_SALIENCY_SCORE_COG", score_path), ("GF6_SALIENCY_MASK_COG", mask_path), ("GF6_SALIENCY_SUMMARY_JSON", summary)]
 
 

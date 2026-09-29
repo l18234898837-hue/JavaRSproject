@@ -449,6 +449,37 @@ def test_reprojection_runs_once_per_band_instead_of_once_per_output_tile(tmp_pat
         np.testing.assert_allclose(dataset.read(), 1.0)
 
 
+def test_target_grid_without_roi_is_clipped_to_science_valid_footprint(tmp_path):
+    source_path = tmp_path / "source-with-footprint.tif"
+    values = np.full((2, 10, 12), np.nan, dtype=np.float32)
+    values[:, 3:8, 4:10] = 1.0
+    with rasterio.open(
+        source_path,
+        "w",
+        driver="GTiff",
+        width=12,
+        height=10,
+        count=2,
+        dtype="float32",
+        crs="EPSG:4326",
+        transform=from_origin(100, 40, 0.1, 0.1),
+        nodata=np.nan,
+    ) as dataset:
+        dataset.write(values)
+
+    with rasterio.open(source_path) as source:
+        transform, width, height = pipeline._target_grid(
+            source,
+            {"targetCrs": "EPSG:4326", "roi": None},
+        )
+
+    assert (width, height) == (6, 5)
+    assert transform.c == pytest.approx(100.4)
+    assert transform.f == pytest.approx(39.7)
+    assert transform.a == pytest.approx(0.1)
+    assert transform.e == pytest.approx(-0.1)
+
+
 def test_toa_nir_red_nd_consumes_geo_corrected_c03_reflectance(tmp_path):
     """Would fail if the TOA feature consumed uncorrected C03 values after native calibration."""
     l1, geo = tmp_path / "l1-1000m.hdf", tmp_path / "geo-4000m.hdf"
@@ -515,6 +546,46 @@ def test_statistics_only_features_still_write_the_declared_feature_cog(tmp_path)
     assert (tmp_path / "features" / "fy4b-features.tif").is_file()
 
 
+def test_feature_summary_exposes_user_facing_explainability(tmp_path):
+    standard = tmp_path / "standard.tif"
+    with rasterio.open(
+        standard, "w", driver="GTiff", width=2, height=2, count=1, dtype="float32",
+        crs="EPSG:4326", transform=from_origin(0, 2, 1, 1), nodata=np.nan,
+    ) as dataset:
+        dataset.write(np.ones((1, 2, 2), dtype=np.float32))
+        dataset.set_band_description(1, "C03_REFLECTANCE")
+
+    pipeline._write_fy4b_features(
+        {"FY4B_VIS_NIR_1000M_COG": standard},
+        tmp_path,
+        {"features": {"enabled": True, "metrics": ["statistics"], "windowSize": 3}},
+    )
+    summary = json.loads((tmp_path / "features" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["explainability"]["algorithm"] == "FY-4B AGRI 特征提取"
+    assert "statistics" in summary["explainability"]["metricDefinitions"]
+
+
+def test_fusion_writes_explainability_summary(tmp_path):
+    source = tmp_path / "standard.tif"
+    profile = {
+        "driver": "GTiff", "width": 2, "height": 2, "count": 3, "dtype": "float32",
+        "crs": "EPSG:4326", "transform": from_origin(0, 2, 1, 1), "nodata": np.nan,
+    }
+    with rasterio.open(source, "w", **profile) as dataset:
+        dataset.write(np.ones((3, 2, 2), dtype=np.float32))
+        for index, name in enumerate(("C01_REFLECTANCE", "C02_REFLECTANCE", "C03_REFLECTANCE"), 1):
+            dataset.set_band_description(index, name)
+
+    artifacts = pipeline._write_fy4b_fusion(
+        {"FY4B_VIS_NIR_1000M_COG": source},
+        tmp_path,
+        {"fusion": {"percentiles": [2.0, 98.0]}},
+    )
+    assert "FY4B_FUSION_SUMMARY_JSON" in dict(artifacts)
+    summary = json.loads((tmp_path / "fusion" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["explainability"]["algorithm"] == "FY-4B AGRI 假彩色融合"
+
+
 def test_staged_statistics_only_features_do_not_require_optional_red_upstream_artifact(tmp_path):
     standard = tmp_path / "standard.tif"
     with rasterio.open(
@@ -539,6 +610,44 @@ def test_staged_statistics_only_features_do_not_require_optional_red_upstream_ar
 
     assert response["status"] == "SUCCEEDED"
     assert (output / "features" / "fy4b-features.tif").is_file()
+
+
+def test_staged_btd_features_pass_4000m_thermal_upstream_artifact(tmp_path, monkeypatch):
+    standard = tmp_path / "standard.tif"
+    thermal = tmp_path / "thermal.tif"
+    for path in (standard, thermal):
+        with rasterio.open(
+            path, "w", driver="GTiff", width=2, height=2, count=1, dtype="float32",
+            crs="EPSG:4326", transform=from_origin(0, 2, 1, 1), nodata=np.nan,
+        ) as dataset:
+            dataset.write(np.ones((1, 2, 2), dtype=np.float32))
+    seen = {}
+
+    def write_features(sources, directory, _parameters):
+        seen.update(sources)
+        result = directory / "features" / "fy4b-features.tif"
+        result.parent.mkdir(parents=True, exist_ok=True)
+        result.write_bytes(b"feature")
+        return [("FY4B_FEATURE_COG", result)]
+
+    monkeypatch.setattr(pipeline, "_write_fy4b_features", write_features)
+    response = pipeline.execute_fy4b_stage(
+        {
+            "stageKey": "EXTRACT_FY4B_FEATURES",
+            "outputUri": "rs://output/fy4b",
+            "parameterSnapshot": json.dumps({
+                "schemaVersion": "1",
+                "features": {"enabled": True, "metrics": ["btd_c13_c14"]},
+            }),
+        },
+        {"inputs": [
+            {"path": str(standard), "role": "FY4B_VIS_NIR_1000M_COG"},
+            {"path": str(thermal), "role": "FY4B_MULTISPECTRAL_4000M_COG"},
+        ], "output": {"path": str(tmp_path / "stage-output")}},
+    )
+
+    assert response["status"] == "SUCCEEDED"
+    assert set(seen) == {"FY4B_VIS_NIR_1000M_COG", "FY4B_MULTISPECTRAL_4000M_COG"}
 
 
 def test_staged_c02_saliency_reads_declared_red_upstream_artifact(tmp_path, monkeypatch):
