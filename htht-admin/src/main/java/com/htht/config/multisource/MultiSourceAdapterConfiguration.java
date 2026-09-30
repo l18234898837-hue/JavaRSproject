@@ -20,6 +20,7 @@ import com.htht.multisource.application.port.out.StageIdGenerator;
 import com.htht.multisource.application.port.out.TaskIdGenerator;
 import com.htht.multisource.application.port.out.TaskArtifactStore;
 import com.htht.multisource.application.port.out.TaskArtifactRetentionRepository;
+import com.htht.multisource.application.port.out.TaskHistoryRepository;
 import com.htht.multisource.application.port.out.TaskStageRepository;
 import com.htht.multisource.application.usecase.AcceptWorkerEventUseCase;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
@@ -29,6 +30,7 @@ import com.htht.multisource.application.usecase.DispatchNextStageUseCase;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
 import com.htht.multisource.application.usecase.PreflightProductUseCase;
 import com.htht.multisource.application.usecase.RetryFailedStageUseCase;
+import com.htht.multisource.application.usecase.TaskHistoryQueryUseCase;
 import com.htht.multisource.application.usecase.service.AcceptWorkerEventService;
 import com.htht.multisource.application.usecase.service.CancelProcessingTaskService;
 import com.htht.multisource.application.usecase.service.CreateProcessingBatchService;
@@ -38,6 +40,7 @@ import com.htht.multisource.application.usecase.service.PreflightProductService;
 import com.htht.multisource.application.usecase.service.DispatchNextStageService;
 import com.htht.multisource.application.usecase.service.RetryFailedStageService;
 import com.htht.multisource.application.usecase.service.TaskCreationCoordinator;
+import com.htht.multisource.application.usecase.service.TaskHistoryQueryService;
 import com.htht.multisource.application.usecase.service.ArtifactRegistration;
 import com.htht.multisource.application.usecase.service.ArtifactRegistrationService;
 import com.htht.multisource.application.usecase.service.LegacyPlanArchiveService;
@@ -48,6 +51,7 @@ import com.htht.multisource.infrastructure.persistence.MyBatisProcessingBatchRep
 import com.htht.multisource.infrastructure.persistence.MyBatisProcessingTaskRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskStageRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskArtifactRetentionRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisTaskHistoryRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisLegacyPlanArchiveRepository;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierProcessingBatchIdGenerator;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierStageIdGenerator;
@@ -61,6 +65,7 @@ import com.htht.multisource.infrastructure.persistence.mapper.TaskEventMyBatisMa
 import com.htht.multisource.infrastructure.persistence.mapper.TaskProductMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskStageMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskArtifactRetentionMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskHistoryMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.LegacyPlanArchiveMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMapper;
 import com.htht.multisource.infrastructure.session.InMemoryPreflightSessionStore;
@@ -156,6 +161,16 @@ public class MultiSourceAdapterConfiguration {
         TaskArtifactRetentionMyBatisMapper mapper
     ) {
         return new MyBatisTaskArtifactRetentionRepository(mapper);
+    }
+
+    @Bean
+    public TaskHistoryRepository multisourceTaskHistoryRepository(TaskHistoryMyBatisMapper mapper) {
+        return new MyBatisTaskHistoryRepository(mapper);
+    }
+
+    @Bean
+    public TaskHistoryQueryUseCase taskHistoryQueryUseCase(TaskHistoryRepository repository) {
+        return new TaskHistoryQueryService(repository);
     }
 
     @Bean
