@@ -91,6 +91,9 @@ public final class TaskHistoryController {
     ) {
         ArtifactRetentionOperation operation = enumValue(request == null ? null : request.operation(),
             ArtifactRetentionOperation.class, "operation");
+        if (operation == null) {
+            throw new IllegalArgumentException("operation is required.");
+        }
         TaskArtifactRetention retention = retentionUseCase.change(TaskId.of(taskId), currentSubject.get(), operation);
         return ResponseEntity.ok(R.ok(retention));
     }
