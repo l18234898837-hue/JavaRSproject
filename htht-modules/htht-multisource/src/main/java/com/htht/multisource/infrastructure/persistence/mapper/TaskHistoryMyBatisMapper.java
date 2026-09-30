@@ -18,4 +18,7 @@ public interface TaskHistoryMyBatisMapper {
 
     @Select("SELECT count(a.artifact_id) FILTER (WHERE COALESCE(r.retention_status,'AVAILABLE') IN ('AVAILABLE','PINNED')) availableArtifactCount,COALESCE(sum(a.size_bytes) FILTER (WHERE COALESCE(r.retention_status,'AVAILABLE')='RECYCLE_BIN'),0) recycleBinBytes,COALESCE(sum(a.size_bytes),0) totalArtifactBytes FROM rs_processing_task t LEFT JOIN rs_artifact a ON a.task_id=t.task_id LEFT JOIN rs_task_artifact_retention r ON r.task_id=t.task_id WHERE t.creator_id=#{userId}")
     ProcessingStorageSummaryRow selectStorageSummary(@Param("userId") long userId);
+
+    @Select("SELECT task_no FROM rs_processing_task WHERE task_id=#{taskId} AND creator_id=#{userId}")
+    String selectTaskNo(@Param("taskId") long taskId, @Param("userId") long userId);
 }

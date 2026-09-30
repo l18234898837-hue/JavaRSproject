@@ -20,6 +20,9 @@ public final class MyBatisTaskHistoryRepository implements TaskHistoryRepository
         ProcessingStorageSummaryRow row = mapper.selectStorageSummary(subject.userId());
         return new StorageSummary(row == null || row.getAvailableArtifactCount() == null ? 0 : row.getAvailableArtifactCount(), row == null || row.getRecycleBinBytes() == null ? 0 : row.getRecycleBinBytes(), row == null || row.getTotalArtifactBytes() == null ? 0 : row.getTotalArtifactBytes());
     }
+    @Override public java.util.Optional<String> findTaskNo(TaskId taskId, AccessSubject subject) {
+        return java.util.Optional.ofNullable(mapper.selectTaskNo(taskId.value(), subject.userId()));
+    }
     private TaskHistoryItem toItem(TaskHistoryRow r) { return new TaskHistoryItem(TaskId.of(r.getTaskId()), r.getTaskNo(), r.getTaskName(), r.getProductCodes().isBlank() ? List.of() : List.of(r.getProductCodes().split(",")), r.getCompletedAt(), TaskLifecycleStatus.valueOf(r.getLifecycleStatus()), r.getArtifactCount().intValue(), r.getArtifactSizeBytes(), TaskArtifactRetentionStatus.valueOf(r.getRetentionStatus())); }
     private static String name(Enum<?> value) { return value == null ? null : value.name(); }
 }

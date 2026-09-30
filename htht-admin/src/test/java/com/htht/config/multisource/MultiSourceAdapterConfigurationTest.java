@@ -1,7 +1,9 @@
 package com.htht.config.multisource;
 
 import com.htht.multisource.application.port.out.AssetStorage;
+import com.htht.multisource.application.port.out.TaskArtifactPurgePort;
 import com.htht.multisource.application.port.out.TaskArtifactStore;
+import com.htht.multisource.application.usecase.TaskArtifactPurgeUseCase;
 import com.htht.multisource.application.usecase.CreateProcessingBatchUseCase;
 import com.htht.multisource.application.usecase.CreateProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
@@ -14,6 +16,8 @@ import com.htht.multisource.infrastructure.persistence.mapper.TaskInputAssetMyBa
 import com.htht.multisource.infrastructure.persistence.mapper.TaskEventMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskProductMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskStageMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskArtifactRetentionMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskHistoryMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.LegacyPlanArchiveMyBatisMapper;
 import com.htht.system.service.ISysFileService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -44,6 +48,8 @@ class MultiSourceAdapterConfigurationTest {
             assertThat(context).hasSingleBean(CreateProcessingTaskUseCase.class);
             assertThat(context).hasSingleBean(CreateProcessingBatchUseCase.class);
             assertThat(context).hasSingleBean(GetTaskDetailUseCase.class);
+            assertThat(context).hasSingleBean(TaskArtifactPurgePort.class);
+            assertThat(context).hasSingleBean(TaskArtifactPurgeUseCase.class);
             assertThat(context).hasSingleBean(MultiSourceWorkerProperties.class);
             assertThat(context).hasBean("multisourceStageExecutor");
             MultiSourceWorkerProperties properties = context.getBean(MultiSourceWorkerProperties.class);
@@ -68,6 +74,8 @@ class MultiSourceAdapterConfigurationTest {
             .withBean(BatchProductMyBatisMapper.class, () -> mock(BatchProductMyBatisMapper.class))
             .withBean(TaskStageMyBatisMapper.class, () -> mock(TaskStageMyBatisMapper.class))
             .withBean(ArtifactMyBatisMapper.class, () -> mock(ArtifactMyBatisMapper.class))
+            .withBean(TaskArtifactRetentionMyBatisMapper.class, () -> mock(TaskArtifactRetentionMyBatisMapper.class))
+            .withBean(TaskHistoryMyBatisMapper.class, () -> mock(TaskHistoryMyBatisMapper.class))
             .withBean(LegacyPlanArchiveMyBatisMapper.class, () -> mock(LegacyPlanArchiveMyBatisMapper.class))
             .run(context -> {
                 assertThat(context).hasFailed();
@@ -97,6 +105,8 @@ class MultiSourceAdapterConfigurationTest {
             .withBean(BatchProductMyBatisMapper.class, () -> mock(BatchProductMyBatisMapper.class))
             .withBean(TaskStageMyBatisMapper.class, () -> mock(TaskStageMyBatisMapper.class))
             .withBean(ArtifactMyBatisMapper.class, () -> mock(ArtifactMyBatisMapper.class))
+            .withBean(TaskArtifactRetentionMyBatisMapper.class, () -> mock(TaskArtifactRetentionMyBatisMapper.class))
+            .withBean(TaskHistoryMyBatisMapper.class, () -> mock(TaskHistoryMyBatisMapper.class))
             .withBean(LegacyPlanArchiveMyBatisMapper.class, () -> mock(LegacyPlanArchiveMyBatisMapper.class));
     }
 }

@@ -19,6 +19,7 @@ import com.htht.multisource.application.port.out.ProductInspector;
 import com.htht.multisource.application.port.out.StageIdGenerator;
 import com.htht.multisource.application.port.out.TaskIdGenerator;
 import com.htht.multisource.application.port.out.TaskArtifactStore;
+import com.htht.multisource.application.port.out.TaskArtifactPurgePort;
 import com.htht.multisource.application.port.out.TaskArtifactRetentionRepository;
 import com.htht.multisource.application.port.out.TaskHistoryRepository;
 import com.htht.multisource.application.port.out.TaskStageRepository;
@@ -31,6 +32,9 @@ import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
 import com.htht.multisource.application.usecase.PreflightProductUseCase;
 import com.htht.multisource.application.usecase.RetryFailedStageUseCase;
 import com.htht.multisource.application.usecase.TaskHistoryQueryUseCase;
+import com.htht.multisource.application.usecase.TaskArtifactAccessGuard;
+import com.htht.multisource.application.usecase.TaskArtifactPurgeUseCase;
+import com.htht.multisource.application.usecase.TaskArtifactRetentionUseCase;
 import com.htht.multisource.application.usecase.service.AcceptWorkerEventService;
 import com.htht.multisource.application.usecase.service.CancelProcessingTaskService;
 import com.htht.multisource.application.usecase.service.CreateProcessingBatchService;
@@ -41,6 +45,9 @@ import com.htht.multisource.application.usecase.service.DispatchNextStageService
 import com.htht.multisource.application.usecase.service.RetryFailedStageService;
 import com.htht.multisource.application.usecase.service.TaskCreationCoordinator;
 import com.htht.multisource.application.usecase.service.TaskHistoryQueryService;
+import com.htht.multisource.application.usecase.service.DefaultTaskArtifactAccessGuard;
+import com.htht.multisource.application.usecase.service.TaskArtifactPurgeService;
+import com.htht.multisource.application.usecase.service.TaskArtifactRetentionService;
 import com.htht.multisource.application.usecase.service.ArtifactRegistration;
 import com.htht.multisource.application.usecase.service.ArtifactRegistrationService;
 import com.htht.multisource.application.usecase.service.LegacyPlanArchiveService;
@@ -174,6 +181,23 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
+    public TaskArtifactRetentionUseCase taskArtifactRetentionUseCase(
+        ProcessingTaskRepository taskRepository,
+        TaskArtifactRetentionRepository retentionRepository,
+        ExecutionClock executionClock
+    ) {
+        return new TaskArtifactRetentionService(taskRepository, retentionRepository, executionClock::now);
+    }
+
+    @Bean
+    public TaskArtifactAccessGuard taskArtifactAccessGuard(
+        ProcessingTaskRepository taskRepository,
+        TaskArtifactRetentionRepository retentionRepository
+    ) {
+        return new DefaultTaskArtifactAccessGuard(taskRepository, retentionRepository);
+    }
+
+    @Bean
     public ExecutionEventRepository multisourceExecutionEventRepository(TaskEventMyBatisMapper eventMapper,
                                                                          TaskPersistenceMapper persistenceMapper) {
         return new MyBatisExecutionEventRepository(eventMapper, persistenceMapper);
@@ -271,9 +295,16 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
-    public ArtifactRasterPreviewService artifactRasterPreviewService(ArtifactInspectionService inspectionService,
-                                                                     ObjectMapper objectMapper) {
+    public WorkerArtifactRasterPreviewService artifactRasterPreviewService(ArtifactInspectionService inspectionService,
+                                                                            ObjectMapper objectMapper) {
         return new WorkerArtifactRasterPreviewService(inspectionService, objectMapper);
+    }
+
+    @Bean
+    public TaskArtifactPurgePort taskArtifactPurgePort(MultiSourceWorkerProperties properties,
+                                                        WorkerArtifactRasterPreviewService rasterPreviewService) {
+        return new LocalTaskArtifactPurgeService(properties.toLocalProcessProperties().workRoot(),
+            properties.requireArtifactRoot(), rasterPreviewService::invalidateTask);
     }
 
     @Bean
@@ -320,6 +351,20 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
+    public TaskArtifactPurgeUseCase taskArtifactPurgeUseCase(
+        ProcessingTaskRepository taskRepository,
+        TaskArtifactRetentionRepository retentionRepository,
+        TaskHistoryRepository historyRepository,
+        GetTaskDetailUseCase taskDetailUseCase,
+        TaskArtifactPurgePort purgePort,
+        @Qualifier("multisourceArtifactPurgeExecutor") Executor purgeExecutor,
+        ExecutionClock executionClock
+    ) {
+        return new TaskArtifactPurgeService(taskRepository, retentionRepository, historyRepository,
+            taskDetailUseCase, purgePort, purgeExecutor, executionClock::now);
+    }
+
+    @Bean
     public AcceptWorkerEventUseCase acceptWorkerEventUseCase(TaskStageRepository stageRepository,
                                                              ExecutionEventRepository eventRepository,
                                                              ArtifactRegistration artifactRegistration,
@@ -332,6 +377,16 @@ public class MultiSourceAdapterConfiguration {
         AtomicInteger threadNumber = new AtomicInteger();
         return Executors.newFixedThreadPool(2, command -> {
             Thread thread = new Thread(command, "multisource-stage-" + threadNumber.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    @Bean(name = "multisourceArtifactPurgeExecutor", destroyMethod = "shutdown")
+    public ExecutorService multisourceArtifactPurgeExecutor() {
+        AtomicInteger threadNumber = new AtomicInteger();
+        return Executors.newSingleThreadExecutor(command -> {
+            Thread thread = new Thread(command, "multisource-artifact-purge-" + threadNumber.incrementAndGet());
             thread.setDaemon(true);
             return thread;
         });

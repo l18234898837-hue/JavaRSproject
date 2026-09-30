@@ -21,12 +21,12 @@ public final class WorkerArtifactRasterPreviewService implements ArtifactRasterP
     private static final Duration METADATA_TTL = Duration.ofMinutes(5);
     private static final int MAX_TILE_CACHE_ENTRIES = 512;
 
-    private final ArtifactInspectionService inspectionService;
+    private final RasterArtifactInspection inspectionService;
     private final ObjectMapper objectMapper;
     private final ConcurrentMap<MetadataKey, CachedPreview> metadataCache = new ConcurrentHashMap<>();
     private final ConcurrentMap<TileKey, byte[]> tileCache = new ConcurrentHashMap<>();
 
-    public WorkerArtifactRasterPreviewService(ArtifactInspectionService inspectionService, ObjectMapper objectMapper) {
+    public WorkerArtifactRasterPreviewService(RasterArtifactInspection inspectionService, ObjectMapper objectMapper) {
         this.inspectionService = Objects.requireNonNull(inspectionService, "inspectionService");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     }
@@ -49,7 +49,7 @@ public final class WorkerArtifactRasterPreviewService implements ArtifactRasterP
         if (!preview.renderable() || preview.style() == null) {
             throw new IllegalArgumentException(preview.reason() == null ? "TIFF 暂不支持地图查看" : preview.reason());
         }
-        TileKey key = new TileKey(artifact.checksum(), preview.style().toString(), z, x, y);
+        TileKey key = new TileKey(detail.id().value(), artifact.checksum(), preview.style().toString(), z, x, y);
         byte[] cached = tileCache.get(key);
         if (cached != null) return cached.clone();
         JsonNode payload = inspectionService.renderRasterTile(detail, subject, artifact, format, z, x, y, preview.style());
@@ -63,6 +63,11 @@ public final class WorkerArtifactRasterPreviewService implements ArtifactRasterP
         if (tileCache.size() >= MAX_TILE_CACHE_ENTRIES) tileCache.clear();
         tileCache.put(key, png);
         return png.clone();
+    }
+
+    public void invalidateTask(long taskId) {
+        metadataCache.keySet().removeIf(key -> key.taskId() == taskId);
+        tileCache.keySet().removeIf(key -> key.taskId() == taskId);
     }
 
     private RasterPreview toPreview(JsonNode response) {
@@ -95,6 +100,6 @@ public final class WorkerArtifactRasterPreviewService implements ArtifactRasterP
     private record CachedPreview(RasterPreview preview, Instant expiresAt) {
     }
 
-    private record TileKey(String checksum, String style, int z, int x, int y) {
+    private record TileKey(long taskId, String checksum, String style, int z, int x, int y) {
     }
 }
