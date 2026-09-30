@@ -19,6 +19,7 @@ import com.htht.multisource.application.port.out.ProductInspector;
 import com.htht.multisource.application.port.out.StageIdGenerator;
 import com.htht.multisource.application.port.out.TaskIdGenerator;
 import com.htht.multisource.application.port.out.TaskArtifactStore;
+import com.htht.multisource.application.port.out.TaskArtifactRetentionRepository;
 import com.htht.multisource.application.port.out.TaskStageRepository;
 import com.htht.multisource.application.usecase.AcceptWorkerEventUseCase;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
@@ -46,6 +47,7 @@ import com.htht.multisource.infrastructure.persistence.MyBatisExecutionEventRepo
 import com.htht.multisource.infrastructure.persistence.MyBatisProcessingBatchRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisProcessingTaskRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskStageRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisTaskArtifactRetentionRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisLegacyPlanArchiveRepository;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierProcessingBatchIdGenerator;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierStageIdGenerator;
@@ -58,6 +60,7 @@ import com.htht.multisource.infrastructure.persistence.mapper.TaskInputAssetMyBa
 import com.htht.multisource.infrastructure.persistence.mapper.TaskEventMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskProductMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskStageMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskArtifactRetentionMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.LegacyPlanArchiveMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMapper;
 import com.htht.multisource.infrastructure.session.InMemoryPreflightSessionStore;
@@ -146,6 +149,13 @@ public class MultiSourceAdapterConfiguration {
     public ArtifactRepository multisourceArtifactRepository(ArtifactMyBatisMapper artifactMapper,
                                                              TaskPersistenceMapper persistenceMapper) {
         return new MyBatisArtifactRepository(artifactMapper, persistenceMapper);
+    }
+
+    @Bean
+    public TaskArtifactRetentionRepository multisourceTaskArtifactRetentionRepository(
+        TaskArtifactRetentionMyBatisMapper mapper
+    ) {
+        return new MyBatisTaskArtifactRetentionRepository(mapper);
     }
 
     @Bean
