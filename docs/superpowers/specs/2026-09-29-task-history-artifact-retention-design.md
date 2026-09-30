@@ -50,7 +50,7 @@ CREATE TABLE rs_task_artifact_retention (
     status varchar(32) NOT NULL,
     pinned boolean NOT NULL DEFAULT false,
     recycled_at timestamptz,
-    purge_scheduled_at timestamptz,
+    purge_started_at timestamptz,
     purged_at timestamptz,
     operator_id bigint,
     failure_reason text,
@@ -61,7 +61,7 @@ CREATE TABLE rs_task_artifact_retention (
     CHECK ((status = 'PINNED') = pinned)
 );
 CREATE INDEX idx_rs_task_artifact_retention_status_time
-    ON rs_task_artifact_retention(status, purge_scheduled_at);
+    ON rs_task_artifact_retention(status, purge_started_at);
 CREATE INDEX idx_rs_task_product_product_code
     ON rs_task_product(product_code);
 CREATE INDEX idx_rs_processing_task_creator_updated
@@ -94,7 +94,7 @@ CREATE INDEX idx_rs_processing_task_creator_updated
 - 删除过程按路径逐项执行；文件不存在视为幂等成功，其他异常记录失败原因。
 - 删除成功后让内存预览服务按 `taskId`/checksum 失效缓存；失败不得清除数据库任务记录。
 
-异步执行可先使用受控线程池和数据库状态抢占：事务内将记录从 `RECYCLE_BIN` 或 `PURGE_FAILED` 更新为 `PURGING`，提交后提交清理任务；进程重启时只把带有过期租约的遗留 `PURGING` 标记为 `PURGE_FAILED`，不隐式继续物理删除，等待用户或运维显式重试。第一期不启用自动过期扫描。
+异步执行可先使用受控线程池和数据库状态抢占：事务内将记录从 `RECYCLE_BIN` 或 `PURGE_FAILED` 更新为 `PURGING` 并写入 `purge_started_at`，提交后提交清理任务；进程重启时只把超过固定恢复阈值的遗留 `PURGING` 标记为 `PURGE_FAILED`，不隐式继续物理删除，等待用户或运维显式重试。第一期不启用自动过期扫描。
 
 ## 访问控制
 
