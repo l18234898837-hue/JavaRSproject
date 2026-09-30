@@ -31,6 +31,11 @@ public final class MyBatisTaskArtifactRetentionRepository implements TaskArtifac
     }
 
     @Override
+    public boolean createIfAbsent(TaskArtifactRetention retention) {
+        return mapper.insertIfAbsent(toEntity(Objects.requireNonNull(retention, "retention"))) == 1;
+    }
+
+    @Override
     public boolean compareAndSet(TaskArtifactRetention expected, TaskArtifactRetention next) {
         if (!expected.taskId().equals(next.taskId()) || next.version() != expected.version() + 1) {
             throw new IllegalArgumentException("Retention compare-and-set must advance one version for one task.");

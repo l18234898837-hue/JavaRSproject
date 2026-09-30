@@ -21,6 +21,8 @@ import com.htht.multisource.application.port.out.TaskIdGenerator;
 import com.htht.multisource.application.port.out.TaskArtifactStore;
 import com.htht.multisource.application.port.out.TaskArtifactPurgePort;
 import com.htht.multisource.application.port.out.TaskArtifactRetentionRepository;
+import com.htht.multisource.application.port.out.TaskArtifactAvailabilityProbe;
+import com.htht.multisource.application.port.out.TaskArtifactRetentionScanSource;
 import com.htht.multisource.application.port.out.TaskHistoryRepository;
 import com.htht.multisource.application.port.out.TaskStageRepository;
 import com.htht.multisource.application.usecase.AcceptWorkerEventUseCase;
@@ -35,6 +37,7 @@ import com.htht.multisource.application.usecase.TaskHistoryQueryUseCase;
 import com.htht.multisource.application.usecase.TaskArtifactAccessGuard;
 import com.htht.multisource.application.usecase.TaskArtifactPurgeUseCase;
 import com.htht.multisource.application.usecase.TaskArtifactRetentionUseCase;
+import com.htht.multisource.application.usecase.TaskArtifactRetentionScanUseCase;
 import com.htht.multisource.application.usecase.service.AcceptWorkerEventService;
 import com.htht.multisource.application.usecase.service.CancelProcessingTaskService;
 import com.htht.multisource.application.usecase.service.CreateProcessingBatchService;
@@ -48,6 +51,7 @@ import com.htht.multisource.application.usecase.service.TaskHistoryQueryService;
 import com.htht.multisource.application.usecase.service.DefaultTaskArtifactAccessGuard;
 import com.htht.multisource.application.usecase.service.TaskArtifactPurgeService;
 import com.htht.multisource.application.usecase.service.TaskArtifactRetentionService;
+import com.htht.multisource.application.usecase.service.TaskArtifactRetentionScanService;
 import com.htht.multisource.application.usecase.service.ArtifactRegistration;
 import com.htht.multisource.application.usecase.service.ArtifactRegistrationService;
 import com.htht.multisource.application.usecase.service.LegacyPlanArchiveService;
@@ -58,6 +62,7 @@ import com.htht.multisource.infrastructure.persistence.MyBatisProcessingBatchRep
 import com.htht.multisource.infrastructure.persistence.MyBatisProcessingTaskRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskStageRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskArtifactRetentionRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisTaskArtifactRetentionScanSource;
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskHistoryRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisLegacyPlanArchiveRepository;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierProcessingBatchIdGenerator;
@@ -72,6 +77,7 @@ import com.htht.multisource.infrastructure.persistence.mapper.TaskEventMyBatisMa
 import com.htht.multisource.infrastructure.persistence.mapper.TaskProductMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskStageMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskArtifactRetentionMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskArtifactRetentionScanMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskHistoryMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.LegacyPlanArchiveMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMapper;
@@ -89,6 +95,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.nio.file.Path;
 import java.time.Clock;
@@ -168,6 +175,34 @@ public class MultiSourceAdapterConfiguration {
         TaskArtifactRetentionMyBatisMapper mapper
     ) {
         return new MyBatisTaskArtifactRetentionRepository(mapper);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "multisource.task-artifact-retention.scan", name = "enabled", havingValue = "true")
+    public TaskArtifactRetentionScanSource taskArtifactRetentionScanSource(TaskArtifactRetentionScanMyBatisMapper mapper) {
+        return new MyBatisTaskArtifactRetentionScanSource(mapper);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "multisource.task-artifact-retention.scan", name = "enabled", havingValue = "true")
+    public TaskArtifactAvailabilityProbe taskArtifactAvailabilityProbe(MultiSourceWorkerProperties properties) {
+        return new LocalTaskArtifactAvailabilityProbe(properties.requireArtifactRoot());
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "multisource.task-artifact-retention.scan", name = "enabled", havingValue = "true")
+    public TaskArtifactRetentionScanUseCase taskArtifactRetentionScanUseCase(
+        TaskArtifactRetentionScanSource source,
+        TaskArtifactRetentionRepository retentionRepository,
+        TaskArtifactAvailabilityProbe availabilityProbe
+    ) {
+        return new TaskArtifactRetentionScanService(source, retentionRepository, availabilityProbe);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "multisource.task-artifact-retention.scan", name = "enabled", havingValue = "true")
+    public TaskArtifactRetentionScanRunner taskArtifactRetentionScanRunner(TaskArtifactRetentionScanUseCase scanUseCase) {
+        return new TaskArtifactRetentionScanRunner(scanUseCase);
     }
 
     @Bean
