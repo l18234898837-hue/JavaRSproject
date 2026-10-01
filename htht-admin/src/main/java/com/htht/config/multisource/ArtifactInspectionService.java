@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /** Issues a short-lived read grant for one registered artifact and delegates bounded inspection to the worker. */
-public final class ArtifactInspectionService {
+public final class ArtifactInspectionService implements RasterArtifactInspection {
     private final LocalProcessWorkerGateway workerGateway;
     private final CompositeLocalWorkerAssetResolver assetStorage;
 
@@ -35,6 +35,7 @@ public final class ArtifactInspectionService {
         ));
     }
 
+    @Override
     public JsonNode inspectRaster(TaskDetailView detail, AccessSubject subject, TaskArtifactView artifact, String format) {
         InputAsset input = artifactInput(detail, subject, artifact);
         return workerGateway.inspectRasterArtifact(new ArtifactRasterInspectionRequest(
@@ -42,6 +43,7 @@ public final class ArtifactInspectionService {
         ));
     }
 
+    @Override
     public JsonNode renderRasterTile(TaskDetailView detail, AccessSubject subject, TaskArtifactView artifact,
                                      String format, int z, int x, int y, Map<String, Object> style) {
         InputAsset input = artifactInput(detail, subject, artifact);

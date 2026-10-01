@@ -3,6 +3,7 @@ package com.htht.web.controller.multisource;
 import com.htht.common.core.domain.R;
 import com.htht.multisource.infrastructure.worker.WorkerFailurePresentation;
 import com.htht.multisource.infrastructure.worker.WorkerProtocolException;
+import com.htht.multisource.application.usecase.ArtifactAccessDeniedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -17,6 +18,13 @@ public final class MultisourceExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(MultisourceExceptionHandler.class);
     private static final String ARCHIVE_UPLOAD_PATH = "/api/multisource/archive-upload";
+
+    @ExceptionHandler(ArtifactAccessDeniedException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public R<Void> handleArtifactAccessDenied(ArtifactAccessDeniedException error, HttpServletRequest request) {
+        log.warn("请求地址'{}' 产物访问被拒绝 code={}", request.getRequestURI(), error.getCode());
+        return R.fail(error.getCode() + ": " + error.getMessage());
+    }
     @ExceptionHandler(WorkerProtocolException.class)
     public R<Void> handleWorkerProtocolException(WorkerProtocolException error, HttpServletRequest request) {
         if (WorkerFailurePresentation.GF6_OUTPUT_LIMIT_EXCEEDED.equals(error.code())) {

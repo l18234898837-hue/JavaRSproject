@@ -19,6 +19,11 @@ import com.htht.multisource.application.port.out.ProductInspector;
 import com.htht.multisource.application.port.out.StageIdGenerator;
 import com.htht.multisource.application.port.out.TaskIdGenerator;
 import com.htht.multisource.application.port.out.TaskArtifactStore;
+import com.htht.multisource.application.port.out.TaskArtifactPurgePort;
+import com.htht.multisource.application.port.out.TaskArtifactRetentionRepository;
+import com.htht.multisource.application.port.out.TaskArtifactAvailabilityProbe;
+import com.htht.multisource.application.port.out.TaskArtifactRetentionScanSource;
+import com.htht.multisource.application.port.out.TaskHistoryRepository;
 import com.htht.multisource.application.port.out.TaskStageRepository;
 import com.htht.multisource.application.usecase.AcceptWorkerEventUseCase;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
@@ -28,6 +33,11 @@ import com.htht.multisource.application.usecase.DispatchNextStageUseCase;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
 import com.htht.multisource.application.usecase.PreflightProductUseCase;
 import com.htht.multisource.application.usecase.RetryFailedStageUseCase;
+import com.htht.multisource.application.usecase.TaskHistoryQueryUseCase;
+import com.htht.multisource.application.usecase.TaskArtifactAccessGuard;
+import com.htht.multisource.application.usecase.TaskArtifactPurgeUseCase;
+import com.htht.multisource.application.usecase.TaskArtifactRetentionUseCase;
+import com.htht.multisource.application.usecase.TaskArtifactRetentionScanUseCase;
 import com.htht.multisource.application.usecase.service.AcceptWorkerEventService;
 import com.htht.multisource.application.usecase.service.CancelProcessingTaskService;
 import com.htht.multisource.application.usecase.service.CreateProcessingBatchService;
@@ -37,6 +47,11 @@ import com.htht.multisource.application.usecase.service.PreflightProductService;
 import com.htht.multisource.application.usecase.service.DispatchNextStageService;
 import com.htht.multisource.application.usecase.service.RetryFailedStageService;
 import com.htht.multisource.application.usecase.service.TaskCreationCoordinator;
+import com.htht.multisource.application.usecase.service.TaskHistoryQueryService;
+import com.htht.multisource.application.usecase.service.DefaultTaskArtifactAccessGuard;
+import com.htht.multisource.application.usecase.service.TaskArtifactPurgeService;
+import com.htht.multisource.application.usecase.service.TaskArtifactRetentionService;
+import com.htht.multisource.application.usecase.service.TaskArtifactRetentionScanService;
 import com.htht.multisource.application.usecase.service.ArtifactRegistration;
 import com.htht.multisource.application.usecase.service.ArtifactRegistrationService;
 import com.htht.multisource.application.usecase.service.LegacyPlanArchiveService;
@@ -46,6 +61,9 @@ import com.htht.multisource.infrastructure.persistence.MyBatisExecutionEventRepo
 import com.htht.multisource.infrastructure.persistence.MyBatisProcessingBatchRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisProcessingTaskRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskStageRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisTaskArtifactRetentionRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisTaskArtifactRetentionScanSource;
+import com.htht.multisource.infrastructure.persistence.MyBatisTaskHistoryRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisLegacyPlanArchiveRepository;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierProcessingBatchIdGenerator;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierStageIdGenerator;
@@ -58,6 +76,9 @@ import com.htht.multisource.infrastructure.persistence.mapper.TaskInputAssetMyBa
 import com.htht.multisource.infrastructure.persistence.mapper.TaskEventMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskProductMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskStageMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskArtifactRetentionMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskArtifactRetentionScanMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskHistoryMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.LegacyPlanArchiveMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMapper;
 import com.htht.multisource.infrastructure.session.InMemoryPreflightSessionStore;
@@ -74,6 +95,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.nio.file.Path;
 import java.time.Clock;
@@ -146,6 +168,68 @@ public class MultiSourceAdapterConfiguration {
     public ArtifactRepository multisourceArtifactRepository(ArtifactMyBatisMapper artifactMapper,
                                                              TaskPersistenceMapper persistenceMapper) {
         return new MyBatisArtifactRepository(artifactMapper, persistenceMapper);
+    }
+
+    @Bean
+    public TaskArtifactRetentionRepository multisourceTaskArtifactRetentionRepository(
+        TaskArtifactRetentionMyBatisMapper mapper
+    ) {
+        return new MyBatisTaskArtifactRetentionRepository(mapper);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "multisource.task-artifact-retention.scan", name = "enabled", havingValue = "true")
+    public TaskArtifactRetentionScanSource taskArtifactRetentionScanSource(TaskArtifactRetentionScanMyBatisMapper mapper) {
+        return new MyBatisTaskArtifactRetentionScanSource(mapper);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "multisource.task-artifact-retention.scan", name = "enabled", havingValue = "true")
+    public TaskArtifactAvailabilityProbe taskArtifactAvailabilityProbe(MultiSourceWorkerProperties properties) {
+        return new LocalTaskArtifactAvailabilityProbe(properties.requireArtifactRoot());
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "multisource.task-artifact-retention.scan", name = "enabled", havingValue = "true")
+    public TaskArtifactRetentionScanUseCase taskArtifactRetentionScanUseCase(
+        TaskArtifactRetentionScanSource source,
+        TaskArtifactRetentionRepository retentionRepository,
+        TaskArtifactAvailabilityProbe availabilityProbe
+    ) {
+        return new TaskArtifactRetentionScanService(source, retentionRepository, availabilityProbe);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "multisource.task-artifact-retention.scan", name = "enabled", havingValue = "true")
+    public TaskArtifactRetentionScanRunner taskArtifactRetentionScanRunner(TaskArtifactRetentionScanUseCase scanUseCase) {
+        return new TaskArtifactRetentionScanRunner(scanUseCase);
+    }
+
+    @Bean
+    public TaskHistoryRepository multisourceTaskHistoryRepository(TaskHistoryMyBatisMapper mapper) {
+        return new MyBatisTaskHistoryRepository(mapper);
+    }
+
+    @Bean
+    public TaskHistoryQueryUseCase taskHistoryQueryUseCase(TaskHistoryRepository repository) {
+        return new TaskHistoryQueryService(repository);
+    }
+
+    @Bean
+    public TaskArtifactRetentionUseCase taskArtifactRetentionUseCase(
+        ProcessingTaskRepository taskRepository,
+        TaskArtifactRetentionRepository retentionRepository,
+        ExecutionClock executionClock
+    ) {
+        return new TaskArtifactRetentionService(taskRepository, retentionRepository, executionClock::now);
+    }
+
+    @Bean
+    public TaskArtifactAccessGuard taskArtifactAccessGuard(
+        ProcessingTaskRepository taskRepository,
+        TaskArtifactRetentionRepository retentionRepository
+    ) {
+        return new DefaultTaskArtifactAccessGuard(taskRepository, retentionRepository);
     }
 
     @Bean
@@ -246,9 +330,16 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
-    public ArtifactRasterPreviewService artifactRasterPreviewService(ArtifactInspectionService inspectionService,
-                                                                     ObjectMapper objectMapper) {
+    public WorkerArtifactRasterPreviewService artifactRasterPreviewService(ArtifactInspectionService inspectionService,
+                                                                            ObjectMapper objectMapper) {
         return new WorkerArtifactRasterPreviewService(inspectionService, objectMapper);
+    }
+
+    @Bean
+    public TaskArtifactPurgePort taskArtifactPurgePort(MultiSourceWorkerProperties properties,
+                                                        WorkerArtifactRasterPreviewService rasterPreviewService) {
+        return new LocalTaskArtifactPurgeService(properties.toLocalProcessProperties().workRoot(),
+            properties.requireArtifactRoot(), rasterPreviewService::invalidateTask);
     }
 
     @Bean
@@ -295,6 +386,20 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
+    public TaskArtifactPurgeUseCase taskArtifactPurgeUseCase(
+        ProcessingTaskRepository taskRepository,
+        TaskArtifactRetentionRepository retentionRepository,
+        TaskHistoryRepository historyRepository,
+        GetTaskDetailUseCase taskDetailUseCase,
+        TaskArtifactPurgePort purgePort,
+        @Qualifier("multisourceArtifactPurgeExecutor") Executor purgeExecutor,
+        ExecutionClock executionClock
+    ) {
+        return new TaskArtifactPurgeService(taskRepository, retentionRepository, historyRepository,
+            taskDetailUseCase, purgePort, purgeExecutor, executionClock::now);
+    }
+
+    @Bean
     public AcceptWorkerEventUseCase acceptWorkerEventUseCase(TaskStageRepository stageRepository,
                                                              ExecutionEventRepository eventRepository,
                                                              ArtifactRegistration artifactRegistration,
@@ -307,6 +412,16 @@ public class MultiSourceAdapterConfiguration {
         AtomicInteger threadNumber = new AtomicInteger();
         return Executors.newFixedThreadPool(2, command -> {
             Thread thread = new Thread(command, "multisource-stage-" + threadNumber.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    @Bean(name = "multisourceArtifactPurgeExecutor", destroyMethod = "shutdown")
+    public ExecutorService multisourceArtifactPurgeExecutor() {
+        AtomicInteger threadNumber = new AtomicInteger();
+        return Executors.newSingleThreadExecutor(command -> {
+            Thread thread = new Thread(command, "multisource-artifact-purge-" + threadNumber.incrementAndGet());
             thread.setDaemon(true);
             return thread;
         });

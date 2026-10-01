@@ -9,6 +9,8 @@ import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.DispatchNextStageUseCase;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
 import com.htht.multisource.application.usecase.RetryFailedStageUseCase;
+import com.htht.multisource.application.usecase.ArtifactAccessDeniedException;
+import com.htht.multisource.application.usecase.TaskArtifactAccessGuard;
 import com.htht.multisource.application.usecase.model.TaskDetailView;
 import com.htht.multisource.application.usecase.model.TaskArtifactView;
 import com.htht.multisource.application.usecase.model.TaskStageView;
@@ -450,6 +452,51 @@ class ProcessingExecutionControllerTest {
             .andExpect(content().string("{\"valid\":true}"));
     }
 
+    @Test
+    void recycledArtifactsRejectProgressTicketIssuanceAndPreviouslyIssuedTickets() throws Exception {
+        GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+        when(details.get(TASK_ID, OWNER)).thenReturn(succeededDetailWithDeclaredArtifact());
+        TaskArtifactAccessGuard guard = (taskId, subject) -> {
+            throw new ArtifactAccessDeniedException("ARTIFACT_RECYCLED", "Task artifacts are not accessible: RECYCLE_BIN");
+        };
+        ResultDownloadTicketService resultTickets = new ResultDownloadTicketService();
+        ArtifactPreviewTicketService previewTickets = new ArtifactPreviewTicketService();
+        ProcessingExecutionController controller = securedController(details, resultTickets, previewTickets,
+            mock(ArtifactRasterPreviewService.class), guard);
+
+        assertArtifactRecycled(() -> controller.progress(101L));
+        assertArtifactRecycled(() -> controller.createResultDownloadTicket(101L,
+            new com.htht.web.controller.multisource.dto.ResultDownloadTicketRequest("task-101.zip")));
+
+        String zipTicket = resultTickets.issue(101L, OWNER, "task-101.zip").token();
+        assertArtifactRecycled(() -> controller.download(101L, zipTicket, mock(javax.servlet.http.HttpServletResponse.class)));
+
+        String imageTicket = previewTickets.issue(101L, OWNER, "PROCESSING_SUMMARY_JSON", "sha256:artifact").token();
+        assertArtifactRecycled(() -> controller.image(101L, "PROCESSING_SUMMARY_JSON", imageTicket,
+            mock(javax.servlet.http.HttpServletResponse.class)));
+
+        String tileTicket = previewTickets.issue(101L, OWNER, "STANDARD_COG", "sha256:cog").token();
+        assertArtifactRecycled(() -> controller.tile(101L, "STANDARD_COG", 0, 0, 0, tileTicket));
+    }
+
+    @Test
+    void purgedAndMissingArtifactsAlsoRejectProgress() {
+        for (String code : List.of("ARTIFACT_PURGED", "ARTIFACT_MISSING")) {
+            GetTaskDetailUseCase details = mock(GetTaskDetailUseCase.class);
+            when(details.get(TASK_ID, OWNER)).thenReturn(succeededDetailWithDeclaredArtifact());
+            TaskArtifactAccessGuard guard = (taskId, subject) -> {
+                throw new ArtifactAccessDeniedException(code, "Task artifacts are not accessible");
+            };
+            ProcessingExecutionController controller = securedController(details, new ResultDownloadTicketService(),
+                new ArtifactPreviewTicketService(), mock(ArtifactRasterPreviewService.class), guard);
+
+            assertThatThrownBy(() -> controller.progress(101L))
+                .isInstanceOf(ArtifactAccessDeniedException.class)
+                .extracting("code")
+                .isEqualTo(code);
+        }
+    }
+
     private ProcessingExecutionController controller(GetTaskDetailUseCase details, DispatchNextStageUseCase dispatch,
                                                      CancelProcessingTaskUseCase cancel, RetryFailedStageUseCase retry) {
         return new ProcessingExecutionController(() -> OWNER, details, dispatch, cancel, retry);
@@ -489,6 +536,30 @@ class ProcessingExecutionControllerTest {
             mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class),
             new LocalWorkerResultArchiveService(properties), new ResultDownloadTicketService(), null,
             tickets, rasterPreview);
+    }
+
+    private ProcessingExecutionController securedController(GetTaskDetailUseCase details,
+                                                            ResultDownloadTicketService resultTickets,
+                                                            ArtifactPreviewTicketService previewTickets,
+                                                            ArtifactRasterPreviewService rasterPreview,
+                                                            TaskArtifactAccessGuard guard) {
+        MultiSourceWorkerProperties properties = properties(temporaryDirectory.resolve("secure-worker"),
+            temporaryDirectory.resolve("secure-artifacts"));
+        return new ProcessingExecutionController(() -> OWNER, details, mock(DispatchNextStageUseCase.class),
+            mock(CancelProcessingTaskUseCase.class), mock(RetryFailedStageUseCase.class),
+            new LocalWorkerResultArchiveService(properties), resultTickets, null, previewTickets, rasterPreview, guard);
+    }
+
+    private void assertArtifactRecycled(ThrowingAction action) {
+        assertThatThrownBy(action::run)
+            .isInstanceOf(ArtifactAccessDeniedException.class)
+            .extracting("code")
+            .isEqualTo("ARTIFACT_RECYCLED");
+    }
+
+    @FunctionalInterface
+    private interface ThrowingAction {
+        void run() throws Exception;
     }
 
     private TaskDetailView detailWithArtifact(Path source, String executionId) throws Exception {

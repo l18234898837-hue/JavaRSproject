@@ -12,6 +12,7 @@ import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.DispatchNextStageUseCase;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
 import com.htht.multisource.application.usecase.RetryFailedStageUseCase;
+import com.htht.multisource.application.usecase.TaskArtifactAccessGuard;
 import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.domain.model.StageId;
 import com.htht.multisource.domain.model.TaskId;
@@ -57,6 +58,7 @@ public class ProcessingExecutionController {
     private final ArtifactPreviewTicketService artifactPreviewTicketService;
     private final ArtifactRasterPreviewService artifactRasterPreviewService;
     private final QualityReportBuilder qualityReportBuilder;
+    private final TaskArtifactAccessGuard artifactAccessGuard;
 
     public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
                                          DispatchNextStageUseCase dispatchUseCase,
@@ -77,10 +79,25 @@ public class ProcessingExecutionController {
                                          ResultDownloadTicketService downloadTicketService,
                                          ArtifactInspectionService artifactInspectionService,
                                          ArtifactPreviewTicketService artifactPreviewTicketService,
+                                         ArtifactRasterPreviewService artifactRasterPreviewService,
+                                         TaskArtifactAccessGuard artifactAccessGuard) {
+        this(currentSubject, detailUseCase, dispatchUseCase, cancelUseCase, retryUseCase,
+            resultArchiveService, downloadTicketService, artifactInspectionService,
+            artifactPreviewTicketService, artifactRasterPreviewService, new QualityReportBuilder(), artifactAccessGuard);
+    }
+
+    public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
+                                         DispatchNextStageUseCase dispatchUseCase,
+                                         CancelProcessingTaskUseCase cancelUseCase,
+                                         RetryFailedStageUseCase retryUseCase,
+                                         LocalWorkerResultArchiveService resultArchiveService,
+                                         ResultDownloadTicketService downloadTicketService,
+                                         ArtifactInspectionService artifactInspectionService,
+                                         ArtifactPreviewTicketService artifactPreviewTicketService,
                                          ArtifactRasterPreviewService artifactRasterPreviewService) {
         this(currentSubject, detailUseCase, dispatchUseCase, cancelUseCase, retryUseCase,
             resultArchiveService, downloadTicketService, artifactInspectionService,
-            artifactPreviewTicketService, artifactRasterPreviewService, new QualityReportBuilder());
+            artifactPreviewTicketService, artifactRasterPreviewService, new QualityReportBuilder(), null);
     }
 
     public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
@@ -93,6 +110,22 @@ public class ProcessingExecutionController {
                                          ArtifactPreviewTicketService artifactPreviewTicketService,
                                          ArtifactRasterPreviewService artifactRasterPreviewService,
                                          QualityReportBuilder qualityReportBuilder) {
+        this(currentSubject, detailUseCase, dispatchUseCase, cancelUseCase, retryUseCase,
+            resultArchiveService, downloadTicketService, artifactInspectionService,
+            artifactPreviewTicketService, artifactRasterPreviewService, qualityReportBuilder, null);
+    }
+
+    public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
+                                         DispatchNextStageUseCase dispatchUseCase,
+                                         CancelProcessingTaskUseCase cancelUseCase,
+                                         RetryFailedStageUseCase retryUseCase,
+                                         LocalWorkerResultArchiveService resultArchiveService,
+                                         ResultDownloadTicketService downloadTicketService,
+                                         ArtifactInspectionService artifactInspectionService,
+                                         ArtifactPreviewTicketService artifactPreviewTicketService,
+                                         ArtifactRasterPreviewService artifactRasterPreviewService,
+                                         QualityReportBuilder qualityReportBuilder,
+                                         TaskArtifactAccessGuard artifactAccessGuard) {
         this.currentSubject = Objects.requireNonNull(currentSubject, "currentSubject");
         this.detailUseCase = Objects.requireNonNull(detailUseCase, "detailUseCase");
         this.dispatchUseCase = Objects.requireNonNull(dispatchUseCase, "dispatchUseCase");
@@ -104,6 +137,7 @@ public class ProcessingExecutionController {
         this.artifactPreviewTicketService = artifactPreviewTicketService;
         this.artifactRasterPreviewService = artifactRasterPreviewService;
         this.qualityReportBuilder = Objects.requireNonNull(qualityReportBuilder, "qualityReportBuilder");
+        this.artifactAccessGuard = artifactAccessGuard;
     }
 
     public ProcessingExecutionController(Supplier<AccessSubject> currentSubject, GetTaskDetailUseCase detailUseCase,
@@ -121,6 +155,7 @@ public class ProcessingExecutionController {
         this.artifactPreviewTicketService = null;
         this.artifactRasterPreviewService = null;
         this.qualityReportBuilder = new QualityReportBuilder();
+        this.artifactAccessGuard = null;
     }
 
     @PostMapping("/processing-tasks/{taskId}/dispatch")
@@ -166,6 +201,7 @@ public class ProcessingExecutionController {
             }).toList(),
             detail.artifacts().stream().map(artifact -> {
                 String format = artifactFormat(artifact);
+                requireArtifactAccess(TaskId.of(taskId), currentSubject.get());
                 return new ExecutionProgressResponse.ArtifactProgressResponse(
                     artifact.stageId().value(), artifact.type(), artifact.uri().value(), artifact.checksum(), artifact.sizeBytes(),
                     artifact.retention(), true, mediaType(format), previewable(format), displayName(artifact),
@@ -562,6 +598,7 @@ public class ProcessingExecutionController {
         }
         AccessSubject subject = currentSubject.get();
         var detail = detailUseCase.get(TaskId.of(taskId), subject);
+        requireArtifactAccess(TaskId.of(taskId), subject);
         resultArchiveService.writeArtifact(detail, subject, type, response);
     }
 
@@ -572,6 +609,7 @@ public class ProcessingExecutionController {
                       javax.servlet.http.HttpServletResponse response) throws java.io.IOException {
         requireImagePreviewService();
         var grant = artifactPreviewTicketService.resolve(taskId, type, ticket);
+        requireArtifactAccess(TaskId.of(taskId), grant.subject());
         var detail = detailUseCase.get(TaskId.of(taskId), grant.subject());
         var artifact = artifactByType(detail, type);
         if (!grant.checksum().equals(artifact.checksum())) {
@@ -598,6 +636,7 @@ public class ProcessingExecutionController {
         }
         AccessSubject subject = currentSubject.get();
         var detail = detailUseCase.get(TaskId.of(taskId), subject);
+        requireArtifactAccess(TaskId.of(taskId), subject);
         var artifact = detail.artifacts().stream().filter(item -> type.equals(item.type())).reduce((first, second) -> {
             throw new IllegalArgumentException("Artifact type is ambiguous for this processing task.");
         }).orElseThrow(() -> new java.util.NoSuchElementException("Processing artifact not found."));
@@ -614,6 +653,7 @@ public class ProcessingExecutionController {
         requireRasterPreviewService();
         AccessSubject subject = currentSubject.get();
         var detail = detailUseCase.get(TaskId.of(taskId), subject);
+        requireArtifactAccess(TaskId.of(taskId), subject);
         var artifact = artifactByType(detail, type);
         String format = artifactFormat(artifact);
         requireRasterFormat(format);
@@ -638,6 +678,7 @@ public class ProcessingExecutionController {
         requireRasterPreviewService();
         validateTileCoordinate(z, x, y);
         var grant = artifactPreviewTicketService.resolve(taskId, type, ticket);
+        requireArtifactAccess(TaskId.of(taskId), grant.subject());
         var detail = detailUseCase.get(TaskId.of(taskId), grant.subject());
         var artifact = artifactByType(detail, type);
         if (!grant.checksum().equals(artifact.checksum())) {
@@ -688,6 +729,7 @@ public class ProcessingExecutionController {
         @PathVariable long taskId, @RequestBody ResultDownloadTicketRequest request) {
         AccessSubject subject = currentSubject.get();
         var detail = detailUseCase.get(TaskId.of(taskId), subject);
+        requireArtifactAccess(TaskId.of(taskId), subject);
         if (!"SUCCEEDED".equals(detail.lifecycleStatus().name())) {
             throw new IllegalStateException("Processing task has not completed successfully.");
         }
@@ -707,6 +749,7 @@ public class ProcessingExecutionController {
         }
         var grant = downloadTicketService.consume(taskId, ticket);
         AccessSubject subject = grant.subject();
+        requireArtifactAccess(TaskId.of(taskId), subject);
         var detail = detailUseCase.get(TaskId.of(taskId), subject);
         if (!"SUCCEEDED".equals(detail.lifecycleStatus().name())) {
             throw new IllegalStateException("Processing task has not completed successfully.");
@@ -724,6 +767,12 @@ public class ProcessingExecutionController {
                 return;
             }
             throw exception;
+        }
+    }
+
+    private void requireArtifactAccess(TaskId taskId, AccessSubject subject) {
+        if (artifactAccessGuard != null) {
+            artifactAccessGuard.requireAccessible(taskId, subject);
         }
     }
 }

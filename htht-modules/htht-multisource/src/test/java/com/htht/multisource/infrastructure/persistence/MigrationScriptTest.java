@@ -99,4 +99,18 @@ class MigrationScriptTest {
             "CHECK (plan_version IN ('plan-v1', 'plan-v2'))");
         assertThat(sql).doesNotContain("DROP TABLE", "DELETE FROM", "TRUNCATE");
     }
+
+    @Test
+    void artifactRetentionMigrationCreatesOnlyRetentionStateAndHistoryIndexes() throws IOException {
+        String sql = Files.readString(MIGRATIONS.resolve("V20260930_01__create_task_artifact_retention.sql"));
+
+        assertThat(sql).contains(
+            "CREATE TABLE rs_task_artifact_retention",
+            "PURGE_FAILED",
+            "idx_rs_processing_task_creator_updated",
+            "idx_rs_task_product_product_code",
+            "idx_rs_task_artifact_retention_status_cleanup"
+        );
+        assertThat(sql).doesNotContain("DELETE FROM", "DROP TABLE", "rs_legacy_plan_archive");
+    }
 }
