@@ -3,6 +3,7 @@ package com.htht.web.controller.multisource;
 import com.htht.common.core.domain.R;
 import com.htht.multisource.application.port.out.TaskArtifactRetentionRepository;
 import com.htht.multisource.application.port.out.TaskHistoryRepository;
+import com.htht.multisource.application.port.out.TaskInputReferenceRepository;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
 import com.htht.multisource.application.usecase.TaskArtifactPurgeUseCase;
 import com.htht.multisource.application.usecase.TaskArtifactRetentionUseCase;
@@ -57,6 +58,7 @@ public final class TaskHistoryController {
     private final TaskInputPurgeUseCase inputPurgeUseCase;
     private final ProcessingTaskRepository taskRepository;
     private final TaskHistoryRepository historyRepository;
+    private final TaskInputReferenceRepository inputReferenceRepository;
 
     public TaskHistoryController(
         Supplier<AccessSubject> currentSubject,
@@ -67,7 +69,7 @@ public final class TaskHistoryController {
         TaskArtifactPurgeUseCase purgeUseCase
     ) {
         this(currentSubject, historyQuery, detailUseCase, retentionRepository, retentionUseCase, purgeUseCase,
-            null, null, null, null);
+            null, null, null, null, null);
     }
 
     @Autowired
@@ -81,7 +83,8 @@ public final class TaskHistoryController {
         TaskInputRetentionUseCase inputRetentionUseCase,
         TaskInputPurgeUseCase inputPurgeUseCase,
         ProcessingTaskRepository taskRepository,
-        TaskHistoryRepository historyRepository
+        TaskHistoryRepository historyRepository,
+        TaskInputReferenceRepository inputReferenceRepository
     ) {
         this.currentSubject = Objects.requireNonNull(currentSubject, "currentSubject");
         this.historyQuery = Objects.requireNonNull(historyQuery, "historyQuery");
@@ -93,6 +96,7 @@ public final class TaskHistoryController {
         this.inputPurgeUseCase = inputPurgeUseCase;
         this.taskRepository = taskRepository;
         this.historyRepository = historyRepository;
+        this.inputReferenceRepository = inputReferenceRepository;
     }
 
     @GetMapping("/processing-tasks/history")
@@ -127,7 +131,10 @@ public final class TaskHistoryController {
         TaskArtifactRetention retention = retentionRepository.findOrCreate(detail.id());
         long totalBytes = detail.artifacts().stream().mapToLong(artifact -> Math.max(0L, artifact.sizeBytes())).sum();
         TaskInputRetention source = inputRetentionUseCase == null ? null : inputRetentionUseCase.find(detail.id()).orElse(null);
-        return ResponseEntity.ok(R.ok(new TaskHistoryDetailResponse(detail, retention, totalBytes, source)));
+        var sourceInputs = inputReferenceRepository == null ? new TaskInputReferenceRepository.SourceInputSummary(0L, 0L)
+            : inputReferenceRepository.summarizeActiveInputs(detail.id());
+        return ResponseEntity.ok(R.ok(new TaskHistoryDetailResponse(detail, retention, totalBytes, source,
+            sourceInputs.inputCount(), sourceInputs.sizeBytes())));
     }
 
     @PostMapping("/processing-tasks/{taskId}/input-retention")

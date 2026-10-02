@@ -2,9 +2,13 @@ package com.htht.web.controller.multisource;
 
 import com.htht.multisource.application.port.out.TaskArtifactRetentionRepository;
 import com.htht.multisource.application.port.out.TaskHistoryRepository;
+import com.htht.multisource.application.port.out.TaskInputReferenceRepository;
+import com.htht.multisource.application.port.out.TaskInputReferenceRepository.SourceInputSummary;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
 import com.htht.multisource.application.usecase.TaskArtifactPurgeUseCase;
 import com.htht.multisource.application.usecase.TaskArtifactRetentionUseCase;
+import com.htht.multisource.application.usecase.TaskInputPurgeUseCase;
+import com.htht.multisource.application.usecase.TaskInputRetentionUseCase;
 import com.htht.multisource.application.usecase.TaskHistoryQueryUseCase;
 import com.htht.multisource.application.usecase.model.ArtifactRetentionOperation;
 import com.htht.multisource.application.usecase.model.TaskArtifactView;
@@ -127,6 +131,38 @@ class TaskHistoryControllerTest {
         assertThat(response.getBody().getData().artifactSizeBytes()).isEqualTo(64L);
         verify(detailUseCase).get(TaskId.of(12L), OWNER);
         verify(retentionRepository).findOrCreate(TaskId.of(12L));
+    }
+
+    @Test
+    void includesActiveSourceInputMetricsSeparatelyFromArtifactMetrics() {
+        GetTaskDetailUseCase detailUseCase = mock(GetTaskDetailUseCase.class);
+        TaskArtifactRetentionRepository retentionRepository = mock(TaskArtifactRetentionRepository.class);
+        TaskInputReferenceRepository inputReferences = mock(TaskInputReferenceRepository.class);
+        TaskDetailView detail = detail(TaskId.of(12L));
+        when(detailUseCase.get(TaskId.of(12L), OWNER)).thenReturn(detail);
+        when(retentionRepository.findOrCreate(TaskId.of(12L))).thenReturn(TaskArtifactRetention.available(TaskId.of(12L)));
+        when(inputReferences.summarizeActiveInputs(TaskId.of(12L))).thenReturn(new SourceInputSummary(3L, 123L));
+        TaskHistoryController controller = new TaskHistoryController(
+            () -> OWNER,
+            mock(TaskHistoryQueryUseCase.class),
+            detailUseCase,
+            retentionRepository,
+            mock(TaskArtifactRetentionUseCase.class),
+            mock(TaskArtifactPurgeUseCase.class),
+            mock(TaskInputRetentionUseCase.class),
+            mock(TaskInputPurgeUseCase.class),
+            mock(com.htht.multisource.application.port.out.ProcessingTaskRepository.class),
+            mock(TaskHistoryRepository.class),
+            inputReferences
+        );
+
+        var response = controller.detail(12L);
+
+        assertThat(response.getBody().getData().artifactSizeBytes()).isEqualTo(64L);
+        assertThat(response.getBody().getData().sourceInputCount()).isEqualTo(3L);
+        assertThat(response.getBody().getData().sourceInputSizeBytes()).isEqualTo(123L);
+        verify(detailUseCase).get(TaskId.of(12L), OWNER);
+        verify(inputReferences).summarizeActiveInputs(TaskId.of(12L));
     }
 
     @Test

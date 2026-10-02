@@ -2,6 +2,7 @@ package com.htht.multisource.infrastructure.persistence.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.htht.multisource.infrastructure.persistence.entity.TaskInputReferenceEntity;
+import com.htht.multisource.infrastructure.persistence.entity.TaskInputSummaryRow;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -20,6 +21,11 @@ public interface TaskInputReferenceMyBatisMapper extends BaseMapper<TaskInputRef
 
     @Select("SELECT managed_file_id FROM rs_task_input_reference WHERE task_id=#{taskId} AND reference_status='ACTIVE'")
     List<Long> selectActiveManagedFileIds(@Param("taskId") long taskId);
+
+    @Select("SELECT COUNT(DISTINCT r.managed_file_id) inputCount,COALESCE(SUM(f.size_bytes),0) sizeBytes "
+        + "FROM rs_task_input_reference r JOIN rs_managed_input_file f ON f.managed_file_id=r.managed_file_id "
+        + "WHERE r.task_id=#{taskId} AND r.reference_status='ACTIVE'")
+    TaskInputSummaryRow selectActiveInputSummary(@Param("taskId") long taskId);
 
     @Update("UPDATE rs_task_input_reference SET reference_status='RELEASED', released_at=#{now}, version=version+1 "
         + "WHERE task_id=#{taskId} AND reference_status='ACTIVE'")

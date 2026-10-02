@@ -31,3 +31,14 @@
 - Storage categories are mutually exclusive: archive ZIP files are read from `workRoot/archives`; Worker bytes exclude that subtree.
 - Policy PATCH requires `expectedVersion`; absent and stale values are rejected, and stale races return HTTP 409.
 - Added focused controller/migration/service tests for category accounting, admin rejection, required/stale policy versions, independent source filter forwarding, durable service replacement, and the migration projection.
+
+## Source input metrics follow-up
+
+- `GET /processing-tasks/{taskId}/history-detail` now returns `sourceInputCount` and `sourceInputSizeBytes` independently from `artifactSizeBytes`.
+- Source metrics aggregate only `ACTIVE` task input references joined to managed input files; released references are excluded, so a completed source purge reports zero source inputs and zero source bytes.
+- The detail controller obtains the task through the existing owner-scoped detail use case before reading input metrics.
+
+## Follow-up verification
+
+- `git diff --check`: passed.
+- `mvn -pl htht-admin -Dtest=TaskHistoryControllerTest test`: blocked before test compilation because the restricted environment cannot download the absent `spring-boot-dependencies:2.7.13` and `hutool-bom:5.8.18` parent BOMs (`Permission denied: getsockopt`).
