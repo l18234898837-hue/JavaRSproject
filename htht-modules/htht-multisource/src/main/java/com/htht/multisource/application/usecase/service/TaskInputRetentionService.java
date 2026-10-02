@@ -31,9 +31,10 @@ public final class TaskInputRetentionService implements TaskInputRetentionUseCas
         String key = requireWorkspace(workspaceKey);
         Instant now = clock.get();
         Instant expiry = expiresAt == null ? now.plus(inputDays(key), java.time.temporal.ChronoUnit.DAYS) : expiresAt;
-        TaskInputRetention current = values.getOrDefault(taskId, TaskInputRetention.available(taskId, key, now));
-        TaskInputRetention next = current.schedule(expiry, operator, now);
-        values.put(taskId, next);
+        TaskInputRetention next = values.compute(taskId, (id, current) -> {
+            TaskInputRetention base = current == null ? TaskInputRetention.available(taskId, key, now) : current;
+            return base.schedule(expiry, operator, now);
+        });
         return next;
     }
 
@@ -42,11 +43,12 @@ public final class TaskInputRetentionService implements TaskInputRetentionUseCas
         Objects.requireNonNull(choice, "choice");
         String key = requireWorkspace(workspaceKey);
         Instant now = clock.get();
-        TaskInputRetention current = values.getOrDefault(taskId, TaskInputRetention.available(taskId, key, now));
-        TaskInputRetention next = choice == TaskInputRetention.PolicyChoice.PERMANENT
-            ? current.pin(operator, now)
-            : current.schedule(now.plus(inputDays(key), java.time.temporal.ChronoUnit.DAYS), operator, now);
-        values.put(taskId, next);
+        TaskInputRetention next = values.compute(taskId, (id, current) -> {
+            TaskInputRetention base = current == null ? TaskInputRetention.available(taskId, key, now) : current;
+            return choice == TaskInputRetention.PolicyChoice.PERMANENT
+                ? base.pin(operator, now)
+                : base.schedule(now.plus(inputDays(key), java.time.temporal.ChronoUnit.DAYS), operator, now);
+        });
         return next;
     }
 
@@ -68,6 +70,33 @@ public final class TaskInputRetentionService implements TaskInputRetentionUseCas
     }
 
     public Optional<TaskInputRetention> find(TaskId taskId) { return Optional.ofNullable(values.get(taskId)); }
+
+    public TaskInputRetention requestPurge(TaskId taskId, String workspaceKey, AccessSubject operator, Instant now) {
+        Objects.requireNonNull(now, "now");
+        TaskInputRetention current = values.getOrDefault(taskId, TaskInputRetention.available(taskId, requireWorkspace(workspaceKey), now));
+        if (current.status() == com.htht.multisource.domain.model.TaskInputRetentionStatus.PURGED) return current;
+        if (current.status() == com.htht.multisource.domain.model.TaskInputRetentionStatus.PURGE_FAILED)
+            return claim(taskId, current.version(), now);
+        TaskInputRetention scheduled = current.schedule(now, operator, now);
+        values.put(taskId, scheduled);
+        return claim(taskId, scheduled.version(), now);
+    }
+
+    public TaskInputRetention completePurge(TaskId taskId, AccessSubject operator, Instant now) {
+        TaskInputRetention current = values.get(taskId);
+        if (current == null || current.status() != com.htht.multisource.domain.model.TaskInputRetentionStatus.PURGING) return current;
+        TaskInputRetention next = current.purgeSucceeded(operator, now);
+        values.replace(taskId, current, next);
+        return next;
+    }
+
+    public TaskInputRetention failPurge(TaskId taskId, AccessSubject operator, Instant now, String reason) {
+        TaskInputRetention current = values.get(taskId);
+        if (current == null || current.status() != com.htht.multisource.domain.model.TaskInputRetentionStatus.PURGING) return current;
+        TaskInputRetention next = current.purgeFailed(operator, now, reason);
+        values.replace(taskId, current, next);
+        return next;
+    }
 
     private int inputDays(String workspaceKey) {
         // Until a multi-workspace request context is available, all tasks use the

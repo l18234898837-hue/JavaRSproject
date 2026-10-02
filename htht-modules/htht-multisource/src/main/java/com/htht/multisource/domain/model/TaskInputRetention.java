@@ -36,7 +36,8 @@ public record TaskInputRetention(TaskId taskId, String workspaceKey,
         if (status != TaskInputRetentionStatus.AVAILABLE && status != TaskInputRetentionStatus.MISSING
             && status != TaskInputRetentionStatus.SCHEDULED)
             throw illegal("schedule");
-        if (expiry != null && expiry.isBefore(now)) throw new IllegalArgumentException("Expiry must not be in the past.");
+        if (expiry == null) throw new IllegalArgumentException("Expiry is required for scheduled retention.");
+        if (expiry.isBefore(now)) throw new IllegalArgumentException("Expiry must not be in the past.");
         return copy(TaskInputRetentionStatus.SCHEDULED, expiry, now, null, null, now, operator.userId(), null);
     }
 

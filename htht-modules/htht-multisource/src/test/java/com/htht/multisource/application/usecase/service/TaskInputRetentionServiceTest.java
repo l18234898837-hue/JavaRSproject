@@ -37,6 +37,19 @@ class TaskInputRetentionServiceTest {
         assertThat(changed.expiresAt()).isEqualTo(NOW.plusSeconds(14 * 86400L));
     }
 
+    @Test void policyChangeCannotOverwritePurgingState() {
+        TaskInputRetentionService service = new TaskInputRetentionService(policies(), () -> NOW);
+        TaskInputRetention scheduled = service.schedule(TaskId.of(5), "default", NOW, OPERATOR);
+        service.claim(TaskId.of(5), scheduled.version(), NOW);
+
+        assertThatThrownBy(() -> service.changePolicy(TaskId.of(5), "default",
+            TaskInputRetention.PolicyChoice.DEFAULT, OPERATOR))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("PURGING");
+        assertThat(service.find(TaskId.of(5)).orElseThrow().status())
+            .isEqualTo(TaskInputRetentionStatus.PURGING);
+    }
+
     @Test void defaultAndCustomExpiryAreSupported() {
         assertThat(WorkspaceStoragePolicyRepository.Policy.defaults().autoCleanupEnabled()).isFalse();
         TaskInputRetentionService service = new TaskInputRetentionService(policies(), () -> NOW);
