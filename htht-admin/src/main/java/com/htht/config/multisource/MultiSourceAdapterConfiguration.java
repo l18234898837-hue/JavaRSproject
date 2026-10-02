@@ -204,9 +204,26 @@ public class MultiSourceAdapterConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "multisource.storage-cleanup", name = "enabled", havingValue = "true")
     public StorageCleanupScheduler storageCleanupScheduler(OrphanUploadCleanupService orphans,
+        WorkerDirectoryCleanupService workerDirectories,
         @Value("${multisource.storage-cleanup.source-enabled:false}") boolean sourceEnabled,
-        @Value("${multisource.storage-cleanup.orphan-enabled:false}") boolean orphanEnabled) {
-        return new StorageCleanupScheduler(orphans, sourceEnabled, orphanEnabled);
+        @Value("${multisource.storage-cleanup.orphan-enabled:false}") boolean orphanEnabled,
+        @Value("${multisource.storage-cleanup.worker-enabled:false}") boolean workerEnabled) {
+        return new StorageCleanupScheduler(orphans, workerDirectories, sourceEnabled, orphanEnabled, workerEnabled);
+    }
+
+    @Bean
+    public WorkerDirectoryCleanupService workerDirectoryCleanupService(MultiSourceWorkerProperties properties,
+        TaskStageMyBatisMapper stages, ProcessingTaskRepository tasks, WorkspaceStoragePolicyRepository policies,
+        LocalProcessWorkerGateway workerGateway) {
+        return new WorkerDirectoryCleanupService(properties.toLocalProcessProperties().workRoot(), directory -> {
+            String executionId = directory.getFileName().toString();
+            var stage = stages.selectByExecutionId(executionId);
+            if (stage == null) return Optional.empty();
+            return tasks.findById(com.htht.multisource.domain.model.TaskId.of(stage.getTaskId())).map(task ->
+                new WorkerDirectoryCleanupService.ExecutionOwnership(stage.getExecutionId(), "default",
+                    task.lifecycleStatus(), com.htht.multisource.domain.model.StageExecutionStatus.valueOf(stage.getExecutionStatus()),
+                    stage.getFinishedAt()));
+        }, (directory, ownership) -> workerGateway.isExecutionReserved(directory.getFileName().toString()), policies);
     }
 
     @Bean
