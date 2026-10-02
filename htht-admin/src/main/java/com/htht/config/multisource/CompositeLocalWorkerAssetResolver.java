@@ -92,6 +92,9 @@ public final class CompositeLocalWorkerAssetResolver implements AssetStorage, Lo
     @Override public com.htht.multisource.application.port.out.model.AssetMetadata resolve(AccessSubject subject, AssetReference reference) {
         return sysFiles.resolve(subject, reference);
     }
+    @Override public AssetStorage.ManagedInputFileMetadata managedInputFile(AccessSubject subject, AssetReference reference) {
+        return sysFiles.managedInputFile(subject, reference);
+    }
 
     private Path resolveWorkerOutput(String value) {
         String[] segments = value.split("/", 2);

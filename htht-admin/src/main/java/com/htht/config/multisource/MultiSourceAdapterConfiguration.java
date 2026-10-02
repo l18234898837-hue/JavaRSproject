@@ -25,6 +25,8 @@ import com.htht.multisource.application.port.out.TaskArtifactAvailabilityProbe;
 import com.htht.multisource.application.port.out.TaskArtifactRetentionScanSource;
 import com.htht.multisource.application.port.out.TaskHistoryRepository;
 import com.htht.multisource.application.port.out.TaskStageRepository;
+import com.htht.multisource.application.port.out.ManagedInputFileRepository;
+import com.htht.multisource.application.port.out.TaskInputReferenceRepository;
 import com.htht.multisource.application.usecase.AcceptWorkerEventUseCase;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.CreateProcessingBatchUseCase;
@@ -47,6 +49,7 @@ import com.htht.multisource.application.usecase.service.PreflightProductService;
 import com.htht.multisource.application.usecase.service.DispatchNextStageService;
 import com.htht.multisource.application.usecase.service.RetryFailedStageService;
 import com.htht.multisource.application.usecase.service.TaskCreationCoordinator;
+import com.htht.multisource.application.usecase.service.TaskInputReferenceService;
 import com.htht.multisource.application.usecase.service.TaskHistoryQueryService;
 import com.htht.multisource.application.usecase.service.DefaultTaskArtifactAccessGuard;
 import com.htht.multisource.application.usecase.service.TaskArtifactPurgeService;
@@ -65,6 +68,8 @@ import com.htht.multisource.infrastructure.persistence.MyBatisTaskArtifactRetent
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskArtifactRetentionScanSource;
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskHistoryRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisLegacyPlanArchiveRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisManagedInputFileRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisTaskInputReferenceRepository;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierProcessingBatchIdGenerator;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierStageIdGenerator;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierTaskIdGenerator;
@@ -80,6 +85,8 @@ import com.htht.multisource.infrastructure.persistence.mapper.TaskArtifactRetent
 import com.htht.multisource.infrastructure.persistence.mapper.TaskArtifactRetentionScanMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskHistoryMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.LegacyPlanArchiveMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.ManagedInputFileMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskInputReferenceMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMapper;
 import com.htht.multisource.infrastructure.session.InMemoryPreflightSessionStore;
 import com.htht.multisource.infrastructure.worker.LocalProcessWorkerGateway;
@@ -135,6 +142,23 @@ public class MultiSourceAdapterConfiguration {
     public SysFileAssetStorageAdapter multisourceAssetStorage(ISysFileService sysFileService,
                                                                @Value("${file.upload-path}") String uploadPath) {
         return new SysFileAssetStorageAdapter(sysFileService, resolveUploadRoot(uploadPath));
+    }
+
+    @Bean
+    public ManagedInputFileRepository managedInputFileRepository(ManagedInputFileMyBatisMapper mapper) {
+        return new MyBatisManagedInputFileRepository(mapper);
+    }
+
+    @Bean
+    public TaskInputReferenceRepository taskInputReferenceRepository(TaskInputReferenceMyBatisMapper mapper) {
+        return new MyBatisTaskInputReferenceRepository(mapper);
+    }
+
+    @Bean
+    public TaskInputReferenceService taskInputReferenceService(ManagedInputFileRepository files,
+                                                                TaskInputReferenceRepository references,
+                                                                CompositeLocalWorkerAssetResolver storage) {
+        return new TaskInputReferenceService(files, references, storage);
     }
 
     @Bean
@@ -359,9 +383,10 @@ public class MultiSourceAdapterConfiguration {
                                                                        LocalProcessWorkerGateway workerGateway,
                                                                        CompositeLocalWorkerAssetResolver assetStorage,
                                                                        TaskIdGenerator taskIdGenerator,
-                                                                       StageIdGenerator stageIdGenerator) {
+                                                                       StageIdGenerator stageIdGenerator,
+                                                                       TaskInputReferenceService inputReferenceService) {
         return new TaskCreationCoordinator(taskRepository, stageRepository, (ProcessingPlanner) workerGateway,
-            assetStorage, taskIdGenerator, stageIdGenerator, properties.requireProcessorVersion());
+            assetStorage, taskIdGenerator, stageIdGenerator, properties.requireProcessorVersion(), inputReferenceService);
     }
 
     @Bean
