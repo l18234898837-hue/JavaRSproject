@@ -33,7 +33,8 @@ public record TaskInputRetention(TaskId taskId, String workspaceKey,
     public TaskInputRetention schedule(Instant expiry, AccessSubject operator, Instant now) {
         require(operator, now);
         if (status == TaskInputRetentionStatus.PURGED) throw illegal("schedule");
-        if (status != TaskInputRetentionStatus.AVAILABLE && status != TaskInputRetentionStatus.MISSING)
+        if (status != TaskInputRetentionStatus.AVAILABLE && status != TaskInputRetentionStatus.MISSING
+            && status != TaskInputRetentionStatus.SCHEDULED)
             throw illegal("schedule");
         if (expiry != null && expiry.isBefore(now)) throw new IllegalArgumentException("Expiry must not be in the past.");
         return copy(TaskInputRetentionStatus.SCHEDULED, expiry, now, null, null, now, operator.userId(), null);

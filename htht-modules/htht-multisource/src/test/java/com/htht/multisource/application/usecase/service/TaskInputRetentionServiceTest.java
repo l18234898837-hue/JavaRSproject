@@ -14,6 +14,29 @@ class TaskInputRetentionServiceTest {
     private static final AccessSubject OPERATOR = new AccessSubject(7);
     private static WorkspaceStoragePolicyRepository policies() { return key -> Optional.empty(); }
 
+    @Test void usesDefaultPolicyUntilWorkspaceContextIsAvailable() {
+        WorkspaceStoragePolicyRepository repository = new WorkspaceStoragePolicyRepository() {
+            @Override public Optional<Policy> findByWorkspace(String workspaceKey) {
+                return Optional.of(new Policy(30, 24, 48, false));
+            }
+            @Override public Optional<Policy> findDefault() {
+                return Optional.of(Policy.defaults());
+            }
+        };
+        TaskInputRetention retention = new TaskInputRetentionService(repository, () -> NOW)
+            .schedule(TaskId.of(3), "workspace-a", null, OPERATOR);
+        assertThat(retention.expiresAt()).isEqualTo(NOW.plusSeconds(14 * 86400L));
+    }
+
+    @Test void defaultPolicyChangeReschedulesExistingSchedule() {
+        TaskInputRetentionService service = new TaskInputRetentionService(policies(), () -> NOW);
+        service.schedule(TaskId.of(4), "default", NOW.plusSeconds(3600), OPERATOR);
+        TaskInputRetention changed = service.changePolicy(TaskId.of(4), "default",
+            TaskInputRetention.PolicyChoice.DEFAULT, OPERATOR);
+        assertThat(changed.status()).isEqualTo(TaskInputRetentionStatus.SCHEDULED);
+        assertThat(changed.expiresAt()).isEqualTo(NOW.plusSeconds(14 * 86400L));
+    }
+
     @Test void defaultAndCustomExpiryAreSupported() {
         assertThat(WorkspaceStoragePolicyRepository.Policy.defaults().autoCleanupEnabled()).isFalse();
         TaskInputRetentionService service = new TaskInputRetentionService(policies(), () -> NOW);

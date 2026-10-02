@@ -70,7 +70,10 @@ public final class TaskInputRetentionService implements TaskInputRetentionUseCas
     public Optional<TaskInputRetention> find(TaskId taskId) { return Optional.ofNullable(values.get(taskId)); }
 
     private int inputDays(String workspaceKey) {
-        return policies.findByWorkspace(workspaceKey).orElseGet(() -> policies.findDefault().orElse(WorkspaceStoragePolicyRepository.Policy.defaults())).inputRetentionDays();
+        // Until a multi-workspace request context is available, all tasks use the
+        // default policy. Keep the workspace key on the aggregate for future
+        // routing without applying workspace-specific policy prematurely.
+        return policies.findDefault().orElse(WorkspaceStoragePolicyRepository.Policy.defaults()).inputRetentionDays();
     }
     private static String requireWorkspace(String key) { if (key == null || key.isBlank()) throw new IllegalArgumentException("Workspace key is required."); return key; }
 
