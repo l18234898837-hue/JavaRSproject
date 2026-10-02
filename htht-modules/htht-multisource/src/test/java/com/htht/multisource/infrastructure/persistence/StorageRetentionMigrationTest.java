@@ -15,6 +15,9 @@ class StorageRetentionMigrationTest {
     private static final Path MIGRATIONS = Path.of("..", "..", "script", "sql", "migrations");
     private static final Path MIGRATION = MIGRATIONS.resolve(
         "V20261002_01__create_storage_retention_policy.sql");
+    private static final Path INPUT_ASSET_MAPPER = Path.of(
+        "src", "main", "java", "com", "htht", "multisource", "infrastructure", "persistence", "mapper",
+        "TaskInputAssetMyBatisMapper.java");
 
     @Test
     void createsWorkspacePolicyAndManagedInputTablesWithSafeDefaults() throws IOException {
@@ -48,5 +51,17 @@ class StorageRetentionMigrationTest {
             "ON CONFLICT (workspace_key) DO NOTHING"
         );
         assertThat(sql).doesNotContain("DROP TABLE", "DELETE FROM", "TRUNCATE");
+    }
+
+    @Test
+    void workspaceScopedInputAssetQueryBindsWorkspaceKey() throws IOException {
+        String mapper = Files.readString(INPUT_ASSET_MAPPER);
+
+        assertThat(mapper).contains(
+            "rs_processing_task",
+            "workspace_key",
+            "{0}",
+            "selectByTaskIdAndWorkspace"
+        );
     }
 }

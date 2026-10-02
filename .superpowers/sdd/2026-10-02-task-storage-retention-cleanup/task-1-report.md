@@ -33,3 +33,13 @@
 
 - PostgreSQL execution of the new migration was not available in this environment because integration-test connection variables were unset; only the focused SQL assertions and Java compilation were executed.
 - The compatibility method in `TaskInputAssetMyBatisMapper` currently delegates to the existing task query. A later service/repository task should enforce workspace filtering at the persistence query boundary when it starts using this method.
+
+## Review fix
+
+The workspace-aware input-asset method was corrected after review. It now builds the existing MyBatis-Plus query with a bound `workspaceKey` predicate using an `EXISTS` join against `rs_processing_task.workspace_key`; the original task-only method remains unchanged.
+
+Verification after the fix:
+
+- `mvn -pl htht-modules/htht-multisource -Dtest=StorageRetentionMigrationTest test`: 3 passed, 0 failures.
+- Added `workspaceScopedInputAssetQueryBindsWorkspaceKey` to assert the mapper contains the workspace-bound query structure.
+- `git diff --check`: passed.
