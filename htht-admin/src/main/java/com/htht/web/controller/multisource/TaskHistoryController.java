@@ -110,6 +110,12 @@ public final class TaskHistoryController {
         return ResponseEntity.ok(R.ok(new TaskHistoryResponse(result.items(), result.total(), result.page(), result.pageSize())));
     }
 
+    /** Source-compatible overload for existing controller tests and integrations. */
+    public ResponseEntity<R<TaskHistoryResponse>> history(String productCode, String lifecycle,
+        String completedFrom, String completedTo, String retention, int page, int pageSize) {
+        return history(productCode, lifecycle, completedFrom, completedTo, retention, null, page, pageSize);
+    }
+
     @GetMapping("/processing-tasks/{taskId}/history-detail")
     public ResponseEntity<R<TaskHistoryDetailResponse>> detail(@PathVariable long taskId) {
         AccessSubject subject = currentSubject.get();
