@@ -42,6 +42,9 @@ public final class MyBatisManagedInputFileRepository implements ManagedInputFile
     @Override public void markPurged(long managedFileId, long expectedVersion) {
         if (mapper.markPurged(managedFileId, expectedVersion) == 0) throw new IllegalStateException("Managed input changed concurrently.");
     }
+    @Override public boolean claimPurge(long managedFileId, long expectedVersion) {
+        return mapper.claimPurge(managedFileId, expectedVersion) == 1;
+    }
     @Override public void markPurgeFailed(long managedFileId, long expectedVersion, String reason) {
         if (mapper.markPurgeFailed(managedFileId, expectedVersion, reason) == 0) throw new IllegalStateException("Managed input changed concurrently.");
     }

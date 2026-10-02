@@ -26,6 +26,10 @@ public interface ManagedInputFileMyBatisMapper extends BaseMapper<ManagedInputFi
         + "WHERE managed_file_id=#{id} AND version=#{version} AND status <> 'PURGED'")
     int markPurged(@Param("id") long id, @Param("version") long version);
 
+    @Update("UPDATE rs_managed_input_file SET status='PURGING', version=version+1, last_seen_at=CURRENT_TIMESTAMP "
+        + "WHERE managed_file_id=#{id} AND version=#{version} AND status IN ('MANAGED','PURGE_FAILED')")
+    int claimPurge(@Param("id") long id, @Param("version") long version);
+
     @Update("UPDATE rs_managed_input_file SET status='PURGE_FAILED', version=version+1, last_seen_at=CURRENT_TIMESTAMP "
         + "WHERE managed_file_id=#{id} AND version=#{version}")
     int markPurgeFailed(@Param("id") long id, @Param("version") long version, @Param("reason") String reason);

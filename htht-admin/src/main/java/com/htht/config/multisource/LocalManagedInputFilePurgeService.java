@@ -29,8 +29,11 @@ public final class LocalManagedInputFilePurgeService implements ManagedInputFile
             throw new IllegalArgumentException("Managed input path escapes the configured upload root.");
         if (!references.findActiveReferences(managedFile.id()).isEmpty()) return Result.PROTECTED;
         try {
+            if (!managedFiles.claimPurge(managedFile.id(), managedFile.version())) {
+                throw new IllegalStateException("Managed input cleanup was claimed by another worker.");
+            }
             if (!Files.exists(candidate, LinkOption.NOFOLLOW_LINKS)) {
-                managedFiles.markPurged(managedFile.id(), managedFile.version());
+                managedFiles.markPurged(managedFile.id(), managedFile.version() + 1);
                 return Result.MISSING;
             }
             Path realRoot = uploadRoot.toRealPath();
@@ -38,12 +41,16 @@ public final class LocalManagedInputFilePurgeService implements ManagedInputFile
             if (!realCandidate.startsWith(realRoot) || Files.isSymbolicLink(candidate))
                 throw new IllegalArgumentException("Managed input path escapes the configured upload root.");
             // Recheck after all filesystem validation and immediately before deletion.
-            if (!references.findActiveReferences(managedFile.id()).isEmpty()) return Result.PROTECTED;
+            if (!references.findActiveReferences(managedFile.id()).isEmpty()) {
+                managedFiles.markPurgeFailed(managedFile.id(), managedFile.version() + 1,
+                    "Managed input became referenced during cleanup.");
+                return Result.PROTECTED;
+            }
             Files.delete(realCandidate);
-            managedFiles.markPurged(managedFile.id(), managedFile.version());
+            managedFiles.markPurged(managedFile.id(), managedFile.version() + 1);
             return Result.PURGED;
         } catch (IOException exception) {
-            try { managedFiles.markPurgeFailed(managedFile.id(), managedFile.version(), exception.getMessage()); }
+            try { managedFiles.markPurgeFailed(managedFile.id(), managedFile.version() + 1, exception.getMessage()); }
             catch (RuntimeException ignored) { }
             throw new IllegalStateException("Managed input file deletion failed.", exception);
         }
