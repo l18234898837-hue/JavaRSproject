@@ -36,7 +36,12 @@ public final class OrphanUploadCleanupService {
                 try {
                     if (path.getFileName().toString().equals(".multisource-archive")) {
                         try (var sessions = Files.list(path)) {
-                            sessions.forEach(candidate -> { if (cleanupCandidate(candidate, now)) count[0]++; });
+                            var candidates = sessions.toList();
+                            if (candidates.isEmpty()) {
+                                if (cleanupCandidate(path, now)) count[0]++;
+                            } else {
+                                candidates.forEach(candidate -> { if (cleanupCandidate(candidate, now)) count[0]++; });
+                            }
                         }
                     } else if (cleanupCandidate(path, now)) count[0]++;
                 } catch (IOException ignored) { /* A later scheduled scan retries safely. */ }
