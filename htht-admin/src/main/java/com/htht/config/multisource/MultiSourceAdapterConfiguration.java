@@ -234,8 +234,10 @@ public class MultiSourceAdapterConfiguration {
         WorkerDirectoryCleanupService workerDirectories,
         @Value("${multisource.storage-cleanup.source-enabled:false}") boolean sourceEnabled,
         @Value("${multisource.storage-cleanup.orphan-enabled:false}") boolean orphanEnabled,
-        @Value("${multisource.storage-cleanup.worker-enabled:false}") boolean workerEnabled) {
-        return new StorageCleanupScheduler(orphans, workerDirectories, sourceEnabled, orphanEnabled, workerEnabled);
+        @Value("${multisource.storage-cleanup.worker-enabled:false}") boolean workerEnabled,
+        @Value("${multisource.storage-cleanup.dry-run:true}") boolean dryRun) {
+        return new StorageCleanupScheduler(orphans, workerDirectories, sourceEnabled, orphanEnabled, workerEnabled, dryRun,
+            summary -> { });
     }
 
     @Bean

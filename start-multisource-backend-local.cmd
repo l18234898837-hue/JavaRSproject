@@ -12,6 +12,9 @@ set "MULTISOURCE_ARTIFACT_ROOT=%RUNTIME_ROOT%\multisource-artifacts"
 set "MULTISOURCE_WORKER_COMMAND=%BACKEND_ROOT%\rs-algorithm-worker\.venv\Scripts\python.exe,-m,rs_algorithm_worker.cli"
 set "MULTISOURCE_WORKER_TIMEOUT=30m"
 set "MULTISOURCE_WORKER_PROCESSOR_VERSION=local-dev"
+rem Storage cleanup remains disabled and dry-run by default during rollout review.
+set "MULTISOURCE_STORAGE_CLEANUP_ENABLED=false"
+set "MULTISOURCE_STORAGE_CLEANUP_DRY_RUN=true"
 
 rem Prefer the checked-out worker source over any stale wheel in site-packages.
 rem This keeps local restarts aligned with the current repository code.

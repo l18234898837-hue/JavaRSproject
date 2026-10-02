@@ -8,6 +8,9 @@ import java.nio.file.attribute.FileTime;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Predicate;
 
@@ -28,35 +31,46 @@ public final class OrphanUploadCleanupService {
     }
 
     public int scanAndCleanup(Instant now) {
-        Objects.requireNonNull(now, "now");
-        if (!Files.isDirectory(uploadRoot)) return 0;
         int[] count = {0};
+        scan(now).candidates().forEach(path -> { try { deleteTree(path); count[0]++; } catch (IOException ignored) { } });
+        return count[0];
+    }
+
+    public ScanResult scan(Instant now) {
+        Objects.requireNonNull(now, "now");
+        if (!Files.isDirectory(uploadRoot)) return new ScanResult(List.of(), 0L, 0, Map.of(), 0);
+        List<Path> candidates = new java.util.ArrayList<>(); Map<String, Integer> skipped = new LinkedHashMap<>();
+        long[] bytes = {0L}; int[] failures = {0};
         try (var children = Files.list(uploadRoot)) {
             children.filter(this::isTransientUpload).forEach(path -> {
                 try {
                     if (path.getFileName().toString().equals(".multisource-archive")) {
                         try (var sessions = Files.list(path)) {
-                            var candidates = sessions.toList();
-                            if (candidates.isEmpty()) {
-                                if (cleanupCandidate(path, now)) count[0]++;
-                            } else {
-                                candidates.forEach(candidate -> { if (cleanupCandidate(candidate, now)) count[0]++; });
-                            }
+                            List<Path> entries = sessions.toList();
+                            if (entries.isEmpty()) classify(path, now, candidates, skipped, bytes, failures);
+                            else entries.forEach(entry -> classify(entry, now, candidates, skipped, bytes, failures));
                         }
-                    } else if (cleanupCandidate(path, now)) count[0]++;
-                } catch (IOException ignored) { /* A later scheduled scan retries safely. */ }
+                    } else classify(path, now, candidates, skipped, bytes, failures);
+                } catch (IOException ignored) { failures[0]++; }
             });
-        } catch (IOException ignored) { }
-        return count[0];
+        } catch (IOException ignored) { failures[0]++; }
+        return new ScanResult(List.copyOf(candidates), bytes[0], 0, Map.copyOf(skipped), failures[0]);
     }
 
-    private boolean cleanupCandidate(Path path, Instant now) {
+    private void classify(Path path, Instant now, List<Path> candidates, Map<String, Integer> skipped,
+                          long[] bytes, int[] failures) {
         try {
             Path canonical = path.toAbsolutePath().normalize();
-            if (!canonical.startsWith(uploadRoot) || activeUploadPath.test(canonical)
-                || managedFiles.findByPath(canonical).isPresent() || !isExpired(canonical, now)) return false;
-            deleteTree(canonical); return true;
-        } catch (IOException ignored) { return false; }
+            if (!canonical.startsWith(uploadRoot)) { skipped.merge("outside-managed-upload-root", 1, Integer::sum); return; }
+            if (activeUploadPath.test(canonical)) { skipped.merge("active-upload-session", 1, Integer::sum); return; }
+            if (managedFiles.findByPath(canonical).isPresent()) { skipped.merge("registered-managed-file", 1, Integer::sum); return; }
+            if (!isExpired(canonical, now)) { skipped.merge("within-orphan-ttl", 1, Integer::sum); return; }
+            candidates.add(canonical); bytes[0] += treeBytes(canonical);
+        } catch (IOException ignored) { failures[0]++; }
+    }
+
+    private static long treeBytes(Path root) throws IOException {
+        try (var files = Files.walk(root)) { return files.filter(Files::isRegularFile).mapToLong(path -> { try { return Files.size(path); } catch (IOException ignored) { return 0L; } }).sum(); }
     }
 
     private boolean isTransientUpload(Path path) {
@@ -76,4 +90,5 @@ public final class OrphanUploadCleanupService {
         } catch (DeleteFailure failure) { throw (IOException) failure.getCause(); }
     }
     private static final class DeleteFailure extends RuntimeException { DeleteFailure(IOException cause) { super(cause); } }
+    public record ScanResult(List<Path> candidates, long candidateBytes, int protectedCount, Map<String, Integer> skipped, int failureCount) { }
 }
