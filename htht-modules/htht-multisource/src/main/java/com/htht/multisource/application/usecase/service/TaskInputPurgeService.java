@@ -62,7 +62,12 @@ public final class TaskInputPurgeService implements TaskInputPurgeUseCase {
             List<Long> managedIds = references.findActiveManagedFiles(taskId);
             references.releaseForTask(taskId, subject.userId(), clock.get());
             for (Long managedId : managedIds) {
-                if (managedId != null) files.findById(managedId).ifPresent(purgePort::purge);
+                if (managedId != null) files.findById(managedId).ifPresent(file -> {
+                    ManagedInputFilePurgePort.Result result = purgePort.purge(file);
+                    if (result == ManagedInputFilePurgePort.Result.PROTECTED) {
+                        throw new IllegalStateException("Managed input is still referenced by another task.");
+                    }
+                });
             }
             retentions.complete(taskId, subject, clock.get());
         } catch (RuntimeException failure) {
