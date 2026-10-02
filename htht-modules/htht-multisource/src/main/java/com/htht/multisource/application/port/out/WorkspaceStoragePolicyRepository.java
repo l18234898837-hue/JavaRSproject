@@ -6,7 +6,17 @@ import java.util.Optional;
 public interface WorkspaceStoragePolicyRepository {
     Optional<Policy> findByWorkspace(String workspaceKey);
 
+    default Optional<VersionedPolicy> findVersioned(String workspaceKey) {
+        return findByWorkspace(workspaceKey).map(policy -> new VersionedPolicy(policy, 0L));
+    }
+
+    default VersionedPolicy update(String workspaceKey, Policy policy, long expectedVersion) {
+        throw new UnsupportedOperationException("Workspace storage policy updates are not configured.");
+    }
+
     default Optional<Policy> findDefault() { return findByWorkspace("default"); }
+
+    record VersionedPolicy(Policy policy, long version) { }
 
     record Policy(int inputRetentionDays, int orphanUploadTtlHours,
                   int workerDirectoryTtlHours, boolean autoCleanupEnabled) {

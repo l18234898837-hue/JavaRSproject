@@ -172,9 +172,37 @@ public class MultiSourceAdapterConfiguration {
 
     @Bean
     public WorkspaceStoragePolicyRepository workspaceStoragePolicyRepository(WorkspaceStoragePolicyMyBatisMapper mapper) {
-        return workspaceKey -> Optional.ofNullable(mapper.selectById(workspaceKey)).map(entity ->
-            new WorkspaceStoragePolicyRepository.Policy(entity.getInputRetentionDays(), entity.getOrphanUploadTtlHours(),
-                entity.getWorkerDirectoryTtlHours(), Boolean.TRUE.equals(entity.getAutoCleanupEnabled())));
+        return new WorkspaceStoragePolicyRepository() {
+            @Override public Optional<Policy> findByWorkspace(String workspaceKey) {
+                return Optional.ofNullable(mapper.selectById(workspaceKey)).map(this::toPolicy);
+            }
+            @Override public Optional<VersionedPolicy> findVersioned(String workspaceKey) {
+                return Optional.ofNullable(mapper.selectById(workspaceKey)).map(entity ->
+                    new VersionedPolicy(toPolicy(entity), entity.getVersion() == null ? 0L : entity.getVersion()));
+            }
+            @Override public VersionedPolicy update(String workspaceKey, Policy policy, long expectedVersion) {
+                if (mapper.updateIfVersion(workspaceKey, policy.inputRetentionDays(), policy.orphanUploadTtlHours(),
+                    policy.workerDirectoryTtlHours(), policy.autoCleanupEnabled(), expectedVersion) != 1) {
+                    throw new IllegalStateException("Workspace storage policy changed concurrently.");
+                }
+                return findVersioned(workspaceKey).orElseThrow(() -> new IllegalStateException("Workspace storage policy was not found."));
+            }
+            private Policy toPolicy(com.htht.multisource.infrastructure.persistence.entity.WorkspaceStoragePolicyEntity entity) {
+                return new Policy(entity.getInputRetentionDays(), entity.getOrphanUploadTtlHours(),
+                    entity.getWorkerDirectoryTtlHours(), Boolean.TRUE.equals(entity.getAutoCleanupEnabled()));
+            }
+        };
+    }
+
+    @Bean
+    public com.htht.web.controller.multisource.ProcessingStorageController processingStorageController(
+        Supplier<AccessSubject> currentSubject, TaskHistoryRepository history,
+        WorkspaceStoragePolicyRepository policies,
+        @Value("${file.upload-path}") String uploadPath,
+        MultiSourceWorkerProperties workerProperties) {
+        return new com.htht.web.controller.multisource.ProcessingStorageController(currentSubject, history, policies,
+            resolveUploadRoot(uploadPath), workerProperties.requireArtifactRoot(),
+            workerProperties.toLocalProcessProperties().workRoot());
     }
 
     @Bean
@@ -300,8 +328,9 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
-    public TaskHistoryQueryUseCase taskHistoryQueryUseCase(TaskHistoryRepository repository) {
-        return new TaskHistoryQueryService(repository);
+    public TaskHistoryQueryUseCase taskHistoryQueryUseCase(TaskHistoryRepository repository,
+                                                           TaskInputRetentionUseCase inputRetention) {
+        return new TaskHistoryQueryService(repository, inputRetention);
     }
 
     @Bean
