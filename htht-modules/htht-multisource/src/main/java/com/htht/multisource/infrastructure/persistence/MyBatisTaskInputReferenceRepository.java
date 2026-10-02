@@ -14,5 +14,6 @@ public final class MyBatisTaskInputReferenceRepository implements TaskInputRefer
         mapper.insertActive(taskId.value(), managedFileId, sourceType, sourceId, checksum);
     }
     @Override public List<Long> findActiveReferences(long managedFileId) { return mapper.selectActiveTaskIds(managedFileId); }
+    @Override public List<Long> findActiveManagedFiles(TaskId taskId) { return mapper.selectActiveManagedFileIds(taskId.value()); }
     @Override public void releaseForTask(TaskId taskId, long operatorId, Instant now) { mapper.releaseForTask(taskId.value(), operatorId, now); }
 }

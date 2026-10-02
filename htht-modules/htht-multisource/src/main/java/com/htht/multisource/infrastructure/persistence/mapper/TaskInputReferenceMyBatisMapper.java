@@ -18,6 +18,9 @@ public interface TaskInputReferenceMyBatisMapper extends BaseMapper<TaskInputRef
     @Select("SELECT task_id FROM rs_task_input_reference WHERE managed_file_id=#{managedFileId} AND reference_status='ACTIVE'")
     List<Long> selectActiveTaskIds(@Param("managedFileId") long managedFileId);
 
+    @Select("SELECT managed_file_id FROM rs_task_input_reference WHERE task_id=#{taskId} AND reference_status='ACTIVE'")
+    List<Long> selectActiveManagedFileIds(@Param("taskId") long taskId);
+
     @Update("UPDATE rs_task_input_reference SET reference_status='RELEASED', released_at=#{now}, version=version+1 "
         + "WHERE task_id=#{taskId} AND reference_status='ACTIVE'")
     int releaseForTask(@Param("taskId") long taskId, @Param("operatorId") long operatorId, @Param("now") Instant now);

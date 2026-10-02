@@ -10,6 +10,12 @@ htht:
   cacheLazy: false
 
 multisource:
+  storage-cleanup:
+    enabled: false
+    source-enabled: false
+    orphan-enabled: false
+    dry-run: true
+    interval: 1h
   archive-upload:
     max-size-bytes: 21474836480
     max-entry-count: 100000

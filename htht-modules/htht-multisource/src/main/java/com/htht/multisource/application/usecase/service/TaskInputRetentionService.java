@@ -69,7 +69,27 @@ public final class TaskInputRetentionService implements TaskInputRetentionUseCas
         return next;
     }
 
-    public Optional<TaskInputRetention> find(TaskId taskId) { return Optional.ofNullable(values.get(taskId)); }
+    @Override public Optional<TaskInputRetention> find(TaskId taskId) { return Optional.ofNullable(values.get(taskId)); }
+
+    @Override public TaskInputRetention complete(TaskId taskId, AccessSubject operator, Instant now) {
+        return transition(taskId, operator, now, true, null);
+    }
+
+    @Override public TaskInputRetention fail(TaskId taskId, AccessSubject operator, Instant now, String reason) {
+        return transition(taskId, operator, now, false, reason);
+    }
+
+    private TaskInputRetention transition(TaskId taskId, AccessSubject operator, Instant now, boolean success, String reason) {
+        Objects.requireNonNull(taskId, "taskId"); Objects.requireNonNull(operator, "operator"); Objects.requireNonNull(now, "now");
+        TaskInputRetention current = values.get(taskId);
+        if (current == null) throw new IllegalStateException("Input retention not found.");
+        TaskInputRetention next = success ? current.purgeSucceeded(operator, now) : current.purgeFailed(operator, now, reason);
+        if (!values.replace(taskId, current, next)) {
+            long actualVersion = values.getOrDefault(taskId, current).version();
+            throw new OptimisticLockConflictException(taskId, current.version(), actualVersion);
+        }
+        return next;
+    }
 
     public TaskInputRetention requestPurge(TaskId taskId, String workspaceKey, AccessSubject operator, Instant now) {
         Objects.requireNonNull(now, "now");
