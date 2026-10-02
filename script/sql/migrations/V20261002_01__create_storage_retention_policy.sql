@@ -31,6 +31,7 @@ CREATE TABLE rs_managed_input_file (
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version bigint NOT NULL DEFAULT 0,
+    CONSTRAINT uq_rs_managed_input_file_workspace_sys UNIQUE (workspace_key, sys_file_id),
     CONSTRAINT fk_rs_managed_input_file_workspace
         FOREIGN KEY (workspace_key) REFERENCES rs_workspace_storage_policy(workspace_key),
     CONSTRAINT ck_rs_managed_input_file_size CHECK (size_bytes IS NULL OR size_bytes >= 0),

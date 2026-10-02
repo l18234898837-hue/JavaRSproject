@@ -34,6 +34,7 @@ class StorageRetentionMigrationTest {
             "worker_directory_ttl_hours integer NOT NULL DEFAULT 48",
             "auto_cleanup_enabled boolean NOT NULL DEFAULT false",
             "version bigint NOT NULL DEFAULT 0",
+            "UNIQUE (workspace_key, sys_file_id)",
             "UNIQUE (task_id, managed_file_id)",
             "idx_rs_processing_task_workspace",
             "idx_rs_managed_input_file_status",

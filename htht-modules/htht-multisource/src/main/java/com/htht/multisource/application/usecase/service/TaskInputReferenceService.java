@@ -31,11 +31,11 @@ public final class TaskInputReferenceService {
                 if (!"SYS_FILE".equals(ref.sourceType())) continue;
                 if (!ref.sourceId().matches("[1-9][0-9]*")) throw new IllegalArgumentException("Only positive SYS_FILE references are supported.");
                 AssetStorage.ManagedInputFileMetadata metadata = assetStorage.managedInputFile(task.creator(), ref);
-                long managedId = managedFiles.findOrRegister(workspaceKey, Long.parseLong(ref.sourceId()),
-                    metadata.path(), metadata.checksum(), metadata.sizeBytes());
                 if (!metadata.checksum().equals(input.checksum())) {
                     throw new IllegalArgumentException("Sys file checksum does not match the task snapshot.");
                 }
+                long managedId = managedFiles.findOrRegister(workspaceKey, Long.parseLong(ref.sourceId()),
+                    metadata.path(), metadata.checksum(), metadata.sizeBytes());
                 references.findOrRegister(task.id(), managedId, ref.sourceType(), ref.sourceId(), input.checksum());
             }
         }

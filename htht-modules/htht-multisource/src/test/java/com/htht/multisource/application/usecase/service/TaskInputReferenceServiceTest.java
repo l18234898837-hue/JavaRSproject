@@ -28,6 +28,7 @@ class TaskInputReferenceServiceTest {
         Fakes f = new Fakes(); f.storage.checksum = "sha256:other";
         assertThatThrownBy(() -> new TaskInputReferenceService(f.files, f.refs, f.storage).register(task(1), "default"))
             .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("checksum");
+        assertThat(f.files.calls).isZero();
     }
 
     private static ProcessingTask task(long id) {
