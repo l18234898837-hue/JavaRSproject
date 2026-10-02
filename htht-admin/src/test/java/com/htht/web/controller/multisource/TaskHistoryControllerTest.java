@@ -21,6 +21,7 @@ import com.htht.multisource.domain.model.TaskArtifactRetention;
 import com.htht.multisource.domain.model.TaskArtifactRetentionStatus;
 import com.htht.multisource.domain.model.TaskId;
 import com.htht.multisource.domain.model.TaskLifecycleStatus;
+import com.htht.multisource.domain.model.TaskInputRetentionStatus;
 import com.htht.web.controller.multisource.dto.ArtifactPurgeRequest;
 import com.htht.web.controller.multisource.dto.ArtifactRetentionRequest;
 import org.junit.jupiter.api.Tag;
@@ -83,6 +84,19 @@ class TaskHistoryControllerTest {
         verify(historyQuery).query(new TaskHistoryQuery(OWNER, "GF-6-WFV-L1A", TaskLifecycleStatus.SUCCEEDED,
             Instant.parse("2026-09-01T00:00:00Z"), Instant.parse("2026-09-30T00:00:00Z"),
             TaskArtifactRetentionStatus.PINNED, 2, 50));
+    }
+
+    @Test
+    void forwardsSourceRetentionFilterSeparatelyFromArtifactRetention() {
+        TaskHistoryQueryUseCase historyQuery = mock(TaskHistoryQueryUseCase.class);
+        when(historyQuery.query(org.mockito.ArgumentMatchers.any(TaskHistoryQuery.class)))
+            .thenReturn(new TaskHistoryPage(List.of(), 0L, 1, 10));
+        TaskHistoryController controller = controller(historyQuery);
+
+        controller.history(null, null, null, null, "RECYCLE_BIN", "PURGED", 1, 10);
+
+        verify(historyQuery).query(new TaskHistoryQuery(OWNER, null, null, null, null,
+            TaskArtifactRetentionStatus.RECYCLE_BIN, 1, 10, TaskInputRetentionStatus.PURGED));
     }
 
     @Test

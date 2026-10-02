@@ -7,4 +7,8 @@ import com.htht.multisource.domain.model.TaskInputRetention;
 /** Explicit, confirmed cleanup of the original source inputs for one task. */
 public interface TaskInputPurgeUseCase {
     TaskInputRetention request(TaskId taskId, AccessSubject subject, String confirmationTaskNo);
+    default TaskInputRetention request(TaskId taskId, AccessSubject subject, String confirmationTaskNo,
+                                       String workspaceKey) {
+        return request(taskId, subject, confirmationTaskNo);
+    }
 }

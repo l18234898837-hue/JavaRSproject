@@ -1,6 +1,7 @@
 package com.htht.multisource.application.usecase.service;
 
 import com.htht.multisource.application.port.out.WorkspaceStoragePolicyRepository;
+import com.htht.multisource.application.port.out.TaskInputRetentionRepository;
 import com.htht.multisource.domain.model.*;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
@@ -14,18 +15,15 @@ class TaskInputRetentionServiceTest {
     private static final AccessSubject OPERATOR = new AccessSubject(7);
     private static WorkspaceStoragePolicyRepository policies() { return key -> Optional.empty(); }
 
-    @Test void usesDefaultPolicyUntilWorkspaceContextIsAvailable() {
+    @Test void usesTheRequestedWorkspacePolicy() {
         WorkspaceStoragePolicyRepository repository = new WorkspaceStoragePolicyRepository() {
             @Override public Optional<Policy> findByWorkspace(String workspaceKey) {
                 return Optional.of(new Policy(30, 24, 48, false));
             }
-            @Override public Optional<Policy> findDefault() {
-                return Optional.of(Policy.defaults());
-            }
         };
         TaskInputRetention retention = new TaskInputRetentionService(repository, () -> NOW)
             .schedule(TaskId.of(3), "workspace-a", null, OPERATOR);
-        assertThat(retention.expiresAt()).isEqualTo(NOW.plusSeconds(14 * 86400L));
+        assertThat(retention.expiresAt()).isEqualTo(NOW.plusSeconds(30 * 86400L));
     }
 
     @Test void defaultPolicyChangeReschedulesExistingSchedule() {
@@ -75,5 +73,26 @@ class TaskInputRetentionServiceTest {
         TaskInputRetention pinned = service.changePolicy(TaskId.of(1), "default", TaskInputRetention.PolicyChoice.PERMANENT, OPERATOR);
         assertThat(pinned.status()).isEqualTo(TaskInputRetentionStatus.AVAILABLE);
         assertThatThrownBy(() -> service.claim(TaskId.of(1), pinned.version(), NOW)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test void readsRetentionStateThroughTheDurableRepositoryAfterServiceReplacement() {
+        Retentions repository = new Retentions();
+        TaskInputRetentionService first = new TaskInputRetentionService(policies(), repository, () -> NOW);
+        first.schedule(TaskId.of(9), "default", NOW.plusSeconds(3600), OPERATOR);
+
+        TaskInputRetention persisted = new TaskInputRetentionService(policies(), repository, () -> NOW)
+            .find(TaskId.of(9)).orElseThrow();
+
+        assertThat(persisted.status()).isEqualTo(TaskInputRetentionStatus.SCHEDULED);
+        assertThat(persisted.expiresAt()).isEqualTo(NOW.plusSeconds(3600));
+    }
+
+    private static final class Retentions implements TaskInputRetentionRepository {
+        private final java.util.Map<TaskId, TaskInputRetention> values = new java.util.HashMap<>();
+        @Override public Optional<TaskInputRetention> find(TaskId id) { return Optional.ofNullable(values.get(id)); }
+        @Override public boolean createIfAbsent(TaskInputRetention value) { if (values.containsKey(value.taskId())) return false; values.put(value.taskId(), value); return true; }
+        @Override public boolean compareAndSet(TaskInputRetention expected, TaskInputRetention next) {
+            if (!expected.equals(values.get(expected.taskId()))) return false; values.put(next.taskId(), next); return true;
+        }
     }
 }

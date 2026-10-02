@@ -11,7 +11,14 @@ import java.util.Optional;
 public interface TaskHistoryRepository {
     TaskHistoryPage findPage(TaskHistoryQuery query);
     StorageSummary summarize(AccessSubject subject);
+    /** Administrator-only aggregate; do not expose this through user-scoped history APIs. */
+    default StorageSummary summarizeAll() {
+        throw new UnsupportedOperationException("Global storage summary is not configured.");
+    }
     default Optional<String> findTaskNo(TaskId taskId, AccessSubject subject) {
+        return Optional.empty();
+    }
+    default Optional<String> findWorkspace(TaskId taskId, AccessSubject subject) {
         return Optional.empty();
     }
 

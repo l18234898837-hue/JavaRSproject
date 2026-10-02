@@ -21,3 +21,13 @@
 
 - Existing source-retention state is still provided by the Task 3 application service; the history SQL fallback is `AVAILABLE` until a persisted source-retention projection is introduced.
 - Existing unrelated worker changes and the implementation plan file were left untouched.
+
+## Review fixes
+
+- Added a durable `rs_task_input_retention` projection, MyBatis repository, and CAS persistence wiring. The production source-retention service now reads/writes that repository; its in-memory implementation is retained only by test-only compatibility constructors.
+- History list/count SQL now joins and filters the persisted source projection before pagination. Missing legacy rows intentionally read as `AVAILABLE`.
+- Source retention operations resolve the workspace from the owned processing task instead of accepting a client-selected workspace. Source purge receives that same trusted workspace.
+- Global storage statistics and policy endpoints now require `LoginHelper.isAdmin()`. The endpoint uses a global database aggregate consistently with its configured-root filesystem scan.
+- Storage categories are mutually exclusive: archive ZIP files are read from `workRoot/archives`; Worker bytes exclude that subtree.
+- Policy PATCH requires `expectedVersion`; absent and stale values are rejected, and stale races return HTTP 409.
+- Added focused controller/migration/service tests for category accounting, admin rejection, required/stale policy versions, independent source filter forwarding, durable service replacement, and the migration projection.

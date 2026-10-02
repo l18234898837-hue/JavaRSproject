@@ -17,12 +17,16 @@ public final class MyBatisTaskHistoryRepository implements TaskHistoryRepository
         return new TaskHistoryPage(items, mapper.countPage(q.subject().userId(), q.productCode(), name(q.lifecycle()), q.completedFrom(), q.completedTo(), name(q.retention()), name(q.inputRetention())), q.page(), q.pageSize());
     }
     @Override public StorageSummary summarize(AccessSubject subject) {
-        ProcessingStorageSummaryRow row = mapper.selectStorageSummary(subject.userId());
-        return new StorageSummary(row == null || row.getAvailableArtifactCount() == null ? 0 : row.getAvailableArtifactCount(), row == null || row.getRecycleBinBytes() == null ? 0 : row.getRecycleBinBytes(), row == null || row.getTotalArtifactBytes() == null ? 0 : row.getTotalArtifactBytes());
+        return toSummary(mapper.selectStorageSummary(subject.userId()));
     }
+    @Override public StorageSummary summarizeAll() { return toSummary(mapper.selectGlobalStorageSummary()); }
     @Override public java.util.Optional<String> findTaskNo(TaskId taskId, AccessSubject subject) {
         return java.util.Optional.ofNullable(mapper.selectTaskNo(taskId.value(), subject.userId()));
     }
+    @Override public java.util.Optional<String> findWorkspace(TaskId taskId, AccessSubject subject) {
+        return java.util.Optional.ofNullable(mapper.selectWorkspace(taskId.value(), subject.userId()));
+    }
     private TaskHistoryItem toItem(TaskHistoryRow r) { return new TaskHistoryItem(TaskId.of(r.getTaskId()), r.getTaskNo(), r.getTaskName(), r.getProductCodes().isBlank() ? List.of() : List.of(r.getProductCodes().split(",")), r.getCompletedAt(), TaskLifecycleStatus.valueOf(r.getLifecycleStatus()), r.getArtifactCount().intValue(), r.getArtifactSizeBytes(), TaskArtifactRetentionStatus.valueOf(r.getRetentionStatus()), com.htht.multisource.domain.model.TaskInputRetentionStatus.valueOf(r.getSourceRetentionStatus() == null ? "AVAILABLE" : r.getSourceRetentionStatus())); }
     private static String name(Enum<?> value) { return value == null ? null : value.name(); }
+    private static StorageSummary toSummary(ProcessingStorageSummaryRow row) { return new StorageSummary(row == null || row.getAvailableArtifactCount() == null ? 0 : row.getAvailableArtifactCount(), row == null || row.getRecycleBinBytes() == null ? 0 : row.getRecycleBinBytes(), row == null || row.getTotalArtifactBytes() == null ? 0 : row.getTotalArtifactBytes()); }
 }

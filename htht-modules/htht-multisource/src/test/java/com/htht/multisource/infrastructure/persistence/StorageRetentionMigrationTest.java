@@ -18,6 +18,11 @@ class StorageRetentionMigrationTest {
     private static final Path INPUT_ASSET_MAPPER = Path.of(
         "src", "main", "java", "com", "htht", "multisource", "infrastructure", "persistence", "mapper",
         "TaskInputAssetMyBatisMapper.java");
+    private static final Path HISTORY_MAPPER = Path.of(
+        "src", "main", "java", "com", "htht", "multisource", "infrastructure", "persistence", "mapper",
+        "TaskHistoryMyBatisMapper.java");
+    private static final Path INPUT_RETENTION_MIGRATION = MIGRATIONS.resolve(
+        "V20261003_01__create_task_input_retention.sql");
 
     @Test
     void createsWorkspacePolicyAndManagedInputTablesWithSafeDefaults() throws IOException {
@@ -64,5 +69,25 @@ class StorageRetentionMigrationTest {
             "{0}",
             "selectByTaskIdAndWorkspace"
         );
+    }
+
+    @Test
+    void createsDurableTaskInputRetentionProjectionWithoutRemovingHistory() throws IOException {
+        String sql = Files.readString(INPUT_RETENTION_MIGRATION);
+
+        assertThat(sql).contains("CREATE TABLE rs_task_input_retention", "retention_status", "expires_at",
+            "purge_started_at", "purged_at", "updated_at", "version bigint NOT NULL DEFAULT 0",
+            "idx_rs_task_input_retention_status");
+        assertThat(sql).doesNotContain("DROP TABLE", "DELETE FROM", "TRUNCATE");
+    }
+
+    @Test
+    void filtersSourceRetentionBeforeBothPagingAndCounting() throws IOException {
+        String mapper = Files.readString(HISTORY_MAPPER);
+
+        assertThat(mapper).contains("LEFT JOIN rs_task_input_retention i ON i.task_id=t.task_id");
+        assertThat(mapper).contains("COALESCE(i.retention_status,'AVAILABLE')=#{inputRetention}");
+        assertThat(mapper.split("COALESCE\\(i\\.retention_status,'AVAILABLE'\\)=#\\{inputRetention}").length)
+            .isGreaterThanOrEqualTo(3);
     }
 }

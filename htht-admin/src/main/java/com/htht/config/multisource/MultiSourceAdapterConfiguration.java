@@ -28,6 +28,7 @@ import com.htht.multisource.application.port.out.TaskStageRepository;
 import com.htht.multisource.application.port.out.ManagedInputFileRepository;
 import com.htht.multisource.application.port.out.ManagedInputFilePurgePort;
 import com.htht.multisource.application.port.out.TaskInputReferenceRepository;
+import com.htht.multisource.application.port.out.TaskInputRetentionRepository;
 import com.htht.multisource.application.port.out.WorkspaceStoragePolicyRepository;
 import com.htht.multisource.application.usecase.AcceptWorkerEventUseCase;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
@@ -76,6 +77,7 @@ import com.htht.multisource.infrastructure.persistence.MyBatisTaskHistoryReposit
 import com.htht.multisource.infrastructure.persistence.MyBatisLegacyPlanArchiveRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisManagedInputFileRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskInputReferenceRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisTaskInputRetentionRepository;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierProcessingBatchIdGenerator;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierStageIdGenerator;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierTaskIdGenerator;
@@ -93,6 +95,7 @@ import com.htht.multisource.infrastructure.persistence.mapper.TaskHistoryMyBatis
 import com.htht.multisource.infrastructure.persistence.mapper.LegacyPlanArchiveMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.ManagedInputFileMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskInputReferenceMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskInputRetentionMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.WorkspaceStoragePolicyMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMapper;
 import com.htht.multisource.infrastructure.session.InMemoryPreflightSessionStore;
@@ -164,6 +167,11 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
+    public TaskInputRetentionRepository taskInputRetentionRepository(TaskInputRetentionMyBatisMapper mapper) {
+        return new MyBatisTaskInputRetentionRepository(mapper);
+    }
+
+    @Bean
     public TaskInputReferenceService taskInputReferenceService(ManagedInputFileRepository files,
                                                                 TaskInputReferenceRepository references,
                                                                 CompositeLocalWorkerAssetResolver storage) {
@@ -195,19 +203,10 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
-    public com.htht.web.controller.multisource.ProcessingStorageController processingStorageController(
-        Supplier<AccessSubject> currentSubject, TaskHistoryRepository history,
-        WorkspaceStoragePolicyRepository policies,
-        @Value("${file.upload-path}") String uploadPath,
-        MultiSourceWorkerProperties workerProperties) {
-        return new com.htht.web.controller.multisource.ProcessingStorageController(currentSubject, history, policies,
-            resolveUploadRoot(uploadPath), workerProperties.requireArtifactRoot(),
-            workerProperties.toLocalProcessProperties().workRoot());
-    }
-
     @Bean
-    public TaskInputRetentionUseCase taskInputRetentionUseCase(WorkspaceStoragePolicyRepository policies) {
-        return new TaskInputRetentionService(policies);
+    public TaskInputRetentionUseCase taskInputRetentionUseCase(WorkspaceStoragePolicyRepository policies,
+                                                                TaskInputRetentionRepository repository) {
+        return new TaskInputRetentionService(policies, repository);
     }
 
     @Bean
@@ -328,9 +327,8 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
-    public TaskHistoryQueryUseCase taskHistoryQueryUseCase(TaskHistoryRepository repository,
-                                                           TaskInputRetentionUseCase inputRetention) {
-        return new TaskHistoryQueryService(repository, inputRetention);
+    public TaskHistoryQueryUseCase taskHistoryQueryUseCase(TaskHistoryRepository repository) {
+        return new TaskHistoryQueryService(repository);
     }
 
     @Bean

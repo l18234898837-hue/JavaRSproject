@@ -2,6 +2,7 @@ package com.htht.web.controller.multisource;
 
 import com.htht.common.core.domain.R;
 import com.htht.multisource.application.port.out.TaskArtifactRetentionRepository;
+import com.htht.multisource.application.port.out.TaskHistoryRepository;
 import com.htht.multisource.application.usecase.GetTaskDetailUseCase;
 import com.htht.multisource.application.usecase.TaskArtifactPurgeUseCase;
 import com.htht.multisource.application.usecase.TaskArtifactRetentionUseCase;
@@ -55,6 +56,7 @@ public final class TaskHistoryController {
     private final TaskInputRetentionUseCase inputRetentionUseCase;
     private final TaskInputPurgeUseCase inputPurgeUseCase;
     private final ProcessingTaskRepository taskRepository;
+    private final TaskHistoryRepository historyRepository;
 
     public TaskHistoryController(
         Supplier<AccessSubject> currentSubject,
@@ -65,7 +67,7 @@ public final class TaskHistoryController {
         TaskArtifactPurgeUseCase purgeUseCase
     ) {
         this(currentSubject, historyQuery, detailUseCase, retentionRepository, retentionUseCase, purgeUseCase,
-            null, null, null);
+            null, null, null, null);
     }
 
     @Autowired
@@ -78,7 +80,8 @@ public final class TaskHistoryController {
         TaskArtifactPurgeUseCase purgeUseCase,
         TaskInputRetentionUseCase inputRetentionUseCase,
         TaskInputPurgeUseCase inputPurgeUseCase,
-        ProcessingTaskRepository taskRepository
+        ProcessingTaskRepository taskRepository,
+        TaskHistoryRepository historyRepository
     ) {
         this.currentSubject = Objects.requireNonNull(currentSubject, "currentSubject");
         this.historyQuery = Objects.requireNonNull(historyQuery, "historyQuery");
@@ -89,6 +92,7 @@ public final class TaskHistoryController {
         this.inputRetentionUseCase = inputRetentionUseCase;
         this.inputPurgeUseCase = inputPurgeUseCase;
         this.taskRepository = taskRepository;
+        this.historyRepository = historyRepository;
     }
 
     @GetMapping("/processing-tasks/history")
@@ -132,18 +136,17 @@ public final class TaskHistoryController {
         requireInputRetentionConfigured();
         String operation = blankToNull(request == null ? null : request.operation());
         if (operation == null) throw new IllegalArgumentException("operation is required.");
-        String workspace = blankToNull(request.workspaceKey());
-        if (workspace == null) workspace = "default";
         TaskId id = TaskId.of(taskId);
         AccessSubject subject = currentSubject.get();
         ensureOwned(id, subject);
+        String workspace = workspaceFor(id, subject);
         TaskInputRetention value;
         switch (operation.toUpperCase(Locale.ROOT)) {
             case "PIN" -> value = inputRetentionUseCase.changePolicy(id, workspace, TaskInputRetention.PolicyChoice.PERMANENT, subject);
             case "SET_EXPIRY" -> value = inputRetentionUseCase.schedule(id, workspace, parseInstant(request.expiresAt(), "expiresAt"), subject);
             case "PURGE" -> {
                 if (inputPurgeUseCase == null) throw new IllegalStateException("Input purge service is not configured.");
-                value = inputPurgeUseCase.request(id, subject, request.taskNo());
+                value = inputPurgeUseCase.request(id, subject, request.taskNo(), workspace);
             }
             default -> throw new IllegalArgumentException("operation is invalid.");
         }
@@ -174,17 +177,16 @@ public final class TaskHistoryController {
         if (request == null || request.taskIds().isEmpty()) throw new IllegalArgumentException("taskIds are required.");
         String operation = blankToNull(request.operation());
         if (operation == null) throw new IllegalArgumentException("operation is required.");
-        String workspace = blankToNull(request.workspaceKey());
-        if (workspace == null) workspace = "default";
         var results = new java.util.ArrayList<BatchTaskRetentionResponse.TaskResult>();
         for (Long rawId : request.taskIds()) {
             if (rawId == null) continue;
             try {
                 TaskId id = TaskId.of(rawId); ensureOwned(id, currentSubject.get());
+                String workspace = workspaceFor(id, currentSubject.get());
                 if ("PURGE".equalsIgnoreCase(operation)) {
                     if (inputPurgeUseCase == null) throw new IllegalStateException("Input purge service is not configured.");
                     String confirmation = request.confirmations().get(String.valueOf(rawId));
-                    inputPurgeUseCase.request(id, currentSubject.get(), confirmation);
+                    inputPurgeUseCase.request(id, currentSubject.get(), confirmation, workspace);
                 } else if ("PIN".equalsIgnoreCase(operation)) {
                     inputRetentionUseCase.changePolicy(id, workspace, TaskInputRetention.PolicyChoice.PERMANENT, currentSubject.get());
                 } else if ("SET_EXPIRY".equalsIgnoreCase(operation)) {
@@ -199,6 +201,12 @@ public final class TaskHistoryController {
     private void ensureOwned(TaskId taskId, AccessSubject subject) {
         if (taskRepository != null && taskRepository.findById(taskId).filter(task -> task.creator().equals(subject)).isEmpty())
             throw new java.util.NoSuchElementException("Processing task not found.");
+    }
+
+    private String workspaceFor(TaskId taskId, AccessSubject subject) {
+        if (historyRepository == null) return "default";
+        return historyRepository.findWorkspace(taskId, subject).orElseThrow(() ->
+            new java.util.NoSuchElementException("Processing task not found."));
     }
 
     private void requireInputRetentionConfigured() {
@@ -229,7 +237,7 @@ public final class TaskHistoryController {
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(R.ok(retention));
     }
 
-    @GetMapping("/processing-storage/summary")
+    /** Compatibility method; the mapped endpoint now lives in ProcessingStorageController. */
     public ResponseEntity<R<ProcessingStorageSummaryResponse>> storageSummary() {
         var summary = historyQuery.storageSummary(currentSubject.get());
         return ResponseEntity.ok(R.ok(new ProcessingStorageSummaryResponse(summary.availableArtifactCount(),

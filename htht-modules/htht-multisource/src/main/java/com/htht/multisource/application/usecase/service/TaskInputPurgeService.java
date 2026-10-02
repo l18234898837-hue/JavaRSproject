@@ -40,6 +40,11 @@ public final class TaskInputPurgeService implements TaskInputPurgeUseCase {
     }
 
     @Override public TaskInputRetention request(TaskId taskId, AccessSubject subject, String confirmationTaskNo) {
+        return request(taskId, subject, confirmationTaskNo, "default");
+    }
+
+    @Override public TaskInputRetention request(TaskId taskId, AccessSubject subject, String confirmationTaskNo,
+                                                String workspaceKey) {
         var task = tasks.findById(taskId).filter(value -> value.creator().equals(subject))
             .orElseThrow(() -> new java.util.NoSuchElementException("Processing task not found."));
         requireTerminal(task.lifecycleStatus());
@@ -47,11 +52,11 @@ public final class TaskInputPurgeService implements TaskInputPurgeUseCase {
         if (confirmationTaskNo == null || !taskNo.equals(confirmationTaskNo.trim()))
             throw new IllegalArgumentException("Task number confirmation does not match.");
         Instant now = clock.get();
-        TaskInputRetention current = retentions.find(taskId).orElseGet(() -> retentions.schedule(taskId, "default", now, subject));
+        TaskInputRetention current = retentions.find(taskId).orElseGet(() -> retentions.schedule(taskId, workspaceKey, now, subject));
         if (current.status() == TaskInputRetentionStatus.PURGED) return current;
         if (current.status() == TaskInputRetentionStatus.PURGING) return current;
         if (current.status() != TaskInputRetentionStatus.PURGE_FAILED)
-            current = retentions.schedule(taskId, "default", now, subject);
+            current = retentions.schedule(taskId, workspaceKey, now, subject);
         TaskInputRetention claimed = retentions.claim(taskId, current.version(), now);
         executor.execute(() -> complete(taskId, subject));
         return claimed;
