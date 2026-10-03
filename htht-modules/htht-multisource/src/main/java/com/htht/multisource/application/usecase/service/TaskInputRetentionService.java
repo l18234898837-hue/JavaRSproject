@@ -85,6 +85,7 @@ public final class TaskInputRetentionService implements TaskInputRetentionUseCas
         return next;
     }
 
+    @Override
     public TaskInputRetention requestPurge(TaskId taskId, String workspaceKey, AccessSubject operator, Instant now) {
         Objects.requireNonNull(now, "now");
         String key = requireWorkspace(workspaceKey);
@@ -94,7 +95,9 @@ public final class TaskInputRetentionService implements TaskInputRetentionUseCas
             return claim(taskId, current.version(), now);
         TaskInputRetention scheduled = current.schedule(now, operator, now);
         if (!repository.compareAndSet(current, scheduled)) throw conflict(taskId, current.version());
-        return claim(taskId, scheduled.version(), now);
+        // PostgreSQL stores timestamps with microsecond precision and may round
+        // an immediate expiry fractionally ahead of the original clock value.
+        return claim(taskId, scheduled.version(), now.plusMillis(1));
     }
 
     public TaskInputRetention completePurge(TaskId taskId, AccessSubject operator, Instant now) {

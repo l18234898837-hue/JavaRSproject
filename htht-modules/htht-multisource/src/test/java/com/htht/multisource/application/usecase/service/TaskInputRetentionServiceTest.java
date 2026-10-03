@@ -6,6 +6,7 @@ import com.htht.multisource.domain.model.*;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Tag;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import static org.assertj.core.api.Assertions.*;
 
@@ -87,12 +88,43 @@ class TaskInputRetentionServiceTest {
         assertThat(persisted.expiresAt()).isEqualTo(NOW.plusSeconds(3600));
     }
 
+    @Test void immediatePurgeToleratesDatabaseTimestampRounding() {
+        Instant now = Instant.parse("2026-10-01T00:00:00.000000500Z");
+        TaskInputRetentionService service = new TaskInputRetentionService(policies(), new RoundedRetentions(), () -> now);
+
+        TaskInputRetention requested = service.requestPurge(TaskId.of(12), "default", OPERATOR, now);
+
+        assertThat(requested.status()).isEqualTo(TaskInputRetentionStatus.PURGING);
+    }
+
     private static final class Retentions implements TaskInputRetentionRepository {
         private final java.util.Map<TaskId, TaskInputRetention> values = new java.util.HashMap<>();
         @Override public Optional<TaskInputRetention> find(TaskId id) { return Optional.ofNullable(values.get(id)); }
         @Override public boolean createIfAbsent(TaskInputRetention value) { if (values.containsKey(value.taskId())) return false; values.put(value.taskId(), value); return true; }
         @Override public boolean compareAndSet(TaskInputRetention expected, TaskInputRetention next) {
             if (!expected.equals(values.get(expected.taskId()))) return false; values.put(next.taskId(), next); return true;
+        }
+    }
+
+    private static final class RoundedRetentions implements TaskInputRetentionRepository {
+        private final java.util.Map<TaskId, TaskInputRetention> values = new java.util.HashMap<>();
+        @Override public Optional<TaskInputRetention> find(TaskId id) { return Optional.ofNullable(values.get(id)); }
+        @Override public boolean createIfAbsent(TaskInputRetention value) {
+            if (values.containsKey(value.taskId())) return false;
+            values.put(value.taskId(), rounded(value));
+            return true;
+        }
+        @Override public boolean compareAndSet(TaskInputRetention expected, TaskInputRetention next) {
+            if (!expected.equals(values.get(expected.taskId()))) return false;
+            values.put(next.taskId(), rounded(next));
+            return true;
+        }
+        private static TaskInputRetention rounded(TaskInputRetention value) {
+            Instant expiry = value.expiresAt() == null ? null
+                : value.expiresAt().plusNanos(500).truncatedTo(ChronoUnit.MICROS);
+            return new TaskInputRetention(value.taskId(), value.workspaceKey(), value.status(), expiry,
+                value.scheduledAt(), value.purgeStartedAt(), value.purgedAt(), value.updatedAt(),
+                value.operatorId(), value.failureReason(), value.version());
         }
     }
 }

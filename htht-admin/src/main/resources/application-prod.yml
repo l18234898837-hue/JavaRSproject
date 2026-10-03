@@ -185,7 +185,8 @@ sms:
 
 --- #文件上传路径
 file:
-  upload-path: /htht/server/filestorage
+  # Keep business data on the mounted storage volume, outside the release directory.
+  upload-path: ${FILE_UPLOAD_PATH:${multisource.storage.root}/source/files}
 
 --- # 实时切片配置
 tile:

@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -38,6 +39,7 @@ public final class ProcessingStorageController {
     private final Path workerRoot;
     private final BooleanSupplier administrator;
 
+    @Autowired
     public ProcessingStorageController(Supplier<AccessSubject> currentSubject, TaskHistoryRepository history,
                                        WorkspaceStoragePolicyRepository policies,
                                        @Value("${file.upload-path}") String uploadPath,

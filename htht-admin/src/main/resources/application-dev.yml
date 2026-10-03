@@ -202,8 +202,8 @@ sms:
 
 --- #文件上传路径
 file:
-  # Windows 本地开发使用绝对路径，统一使用正斜杠，避免被解析为 Undertow 临时目录下的相对路径
-  upload-path: "${FILE_UPLOAD_PATH}"
+  # Source files live below the external multisource storage root.
+  upload-path: "${FILE_UPLOAD_PATH:${multisource.storage.root}/source/files}"
 
 
 --- # 实时切片配置

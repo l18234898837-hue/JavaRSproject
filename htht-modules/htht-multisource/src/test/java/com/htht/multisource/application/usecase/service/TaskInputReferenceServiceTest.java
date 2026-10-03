@@ -31,8 +31,25 @@ class TaskInputReferenceServiceTest {
         assertThat(f.files.calls).isZero();
     }
 
+    @Test void registersLocalFileWhenSnapshotUsesManagedSysFileUri() {
+        Fakes f = new Fakes();
+        ProcessingTask task = taskWithInput(3,
+            new AssetReference("LOCAL_FILE", "63db632833844296a774efe39db374c6.gz"),
+            new StorageUri("rs://sys-file/42"));
+
+        new TaskInputReferenceService(f.files, f.refs, f.storage).register(task, "default");
+
+        assertThat(f.files.calls).isEqualTo(1);
+        assertThat(f.refs.rows).hasSize(1);
+        assertThat(f.refs.rows.get(0).managedId).isEqualTo(9);
+    }
+
     private static ProcessingTask task(long id) {
-        InputAsset input = new InputAsset("MAIN", 0, new AssetReference("SYS_FILE", "42"), new StorageUri("rs://sys-file/42"), "sha256:ok", true);
+        return taskWithInput(id, new AssetReference("SYS_FILE", "42"), new StorageUri("rs://sys-file/42"));
+    }
+
+    private static ProcessingTask taskWithInput(long id, AssetReference reference, StorageUri storageUri) {
+        InputAsset input = new InputAsset("MAIN", 0, reference, storageUri, "sha256:ok", true);
         ProductProfileKey key = new ProductProfileKey("P", "1");
         ProductCandidate c = new ProductCandidate("pkg" + id, key, ProductDataShape.RASTER_GRID, ProductSupportStatus.SUPPORTED, List.of(input), 1.0);
         ProcessingStage stage = new ProcessingStage("S", "S", List.of(), List.of(), List.of(), "{}");

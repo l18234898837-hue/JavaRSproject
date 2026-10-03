@@ -52,12 +52,10 @@ public final class TaskInputPurgeService implements TaskInputPurgeUseCase {
         if (confirmationTaskNo == null || !taskNo.equals(confirmationTaskNo.trim()))
             throw new IllegalArgumentException("Task number confirmation does not match.");
         Instant now = clock.get();
-        TaskInputRetention current = retentions.find(taskId).orElseGet(() -> retentions.schedule(taskId, workspaceKey, now, subject));
-        if (current.status() == TaskInputRetentionStatus.PURGED) return current;
-        if (current.status() == TaskInputRetentionStatus.PURGING) return current;
-        if (current.status() != TaskInputRetentionStatus.PURGE_FAILED)
-            current = retentions.schedule(taskId, workspaceKey, now, subject);
-        TaskInputRetention claimed = retentions.claim(taskId, current.version(), now);
+        TaskInputRetention current = retentions.find(taskId).orElse(null);
+        if (current != null && current.status() == TaskInputRetentionStatus.PURGED) return current;
+        if (current != null && current.status() == TaskInputRetentionStatus.PURGING) return current;
+        TaskInputRetention claimed = retentions.requestPurge(taskId, workspaceKey, subject, now);
         executor.execute(() -> complete(taskId, subject));
         return claimed;
     }
@@ -65,6 +63,9 @@ public final class TaskInputPurgeService implements TaskInputPurgeUseCase {
     private void complete(TaskId taskId, AccessSubject subject) {
         try {
             List<Long> managedIds = references.findActiveManagedFiles(taskId);
+            if (managedIds.isEmpty()) {
+                throw new IllegalStateException("No managed source inputs are registered; source cleanup was aborted.");
+            }
             references.releaseForTask(taskId, subject.userId(), clock.get());
             for (Long managedId : managedIds) {
                 if (managedId != null) files.findById(managedId).ifPresent(file -> {

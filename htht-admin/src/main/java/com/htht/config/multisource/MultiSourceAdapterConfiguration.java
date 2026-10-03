@@ -203,7 +203,6 @@ public class MultiSourceAdapterConfiguration {
     }
 
     @Bean
-    @Bean
     public TaskInputRetentionUseCase taskInputRetentionUseCase(WorkspaceStoragePolicyRepository policies,
                                                                 TaskInputRetentionRepository repository) {
         return new TaskInputRetentionService(policies, repository);
