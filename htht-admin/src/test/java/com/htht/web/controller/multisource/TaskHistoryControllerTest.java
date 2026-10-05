@@ -104,6 +104,19 @@ class TaskHistoryControllerTest {
     }
 
     @Test
+    void forwardsTrimmedHistoryKeywordForFuzzySearch() {
+        TaskHistoryQueryUseCase historyQuery = mock(TaskHistoryQueryUseCase.class);
+        when(historyQuery.query(org.mockito.ArgumentMatchers.any(TaskHistoryQuery.class)))
+            .thenReturn(new TaskHistoryPage(List.of(), 0L, 1, 10));
+        TaskHistoryController controller = controller(historyQuery);
+
+        controller.history(null, "  H2D_OPER  ", null, null, null, null, null, 1, 10);
+
+        verify(historyQuery).query(new TaskHistoryQuery(OWNER, null, "H2D_OPER", null, null,
+            null, null, 1, 10, null));
+    }
+
+    @Test
     void rejectsMissingPurgeTaskNumberWithoutCallingPurgeUseCase() {
         TaskArtifactPurgeUseCase purgeUseCase = mock(TaskArtifactPurgeUseCase.class);
         TaskHistoryController controller = controller(purgeUseCase);

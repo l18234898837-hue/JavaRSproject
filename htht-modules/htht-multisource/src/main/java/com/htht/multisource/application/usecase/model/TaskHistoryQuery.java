@@ -8,7 +8,7 @@ import com.htht.multisource.domain.model.TaskInputRetentionStatus;
 import java.time.Instant;
 import java.util.Objects;
 
-public record TaskHistoryQuery(AccessSubject subject, String productCode, TaskLifecycleStatus lifecycle,
+public record TaskHistoryQuery(AccessSubject subject, String productCode, String keyword, TaskLifecycleStatus lifecycle,
                                Instant completedFrom, Instant completedTo, TaskArtifactRetentionStatus retention,
                                int page, int pageSize, TaskInputRetentionStatus inputRetention) {
     public TaskHistoryQuery {
@@ -23,7 +23,13 @@ public record TaskHistoryQuery(AccessSubject subject, String productCode, TaskLi
 
     public TaskHistoryQuery(AccessSubject subject, String productCode, TaskLifecycleStatus lifecycle,
                             Instant completedFrom, Instant completedTo, TaskArtifactRetentionStatus retention,
+                            int page, int pageSize, TaskInputRetentionStatus inputRetention) {
+        this(subject, productCode, null, lifecycle, completedFrom, completedTo, retention, page, pageSize, inputRetention);
+    }
+
+    public TaskHistoryQuery(AccessSubject subject, String productCode, TaskLifecycleStatus lifecycle,
+                            Instant completedFrom, Instant completedTo, TaskArtifactRetentionStatus retention,
                             int page, int pageSize) {
-        this(subject, productCode, lifecycle, completedFrom, completedTo, retention, page, pageSize, null);
+        this(subject, productCode, null, lifecycle, completedFrom, completedTo, retention, page, pageSize, null);
     }
 }

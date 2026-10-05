@@ -23,7 +23,8 @@ public final class MyBatisTaskInputRetentionRepository implements TaskInputReten
     private TaskInputRetention toDomain(TaskInputRetentionEntity value) {
         return new TaskInputRetention(TaskId.of(value.getTaskId()), value.getWorkspaceKey(),
             TaskInputRetentionStatus.valueOf(value.getRetentionStatus()), value.getExpiresAt(), value.getScheduledAt(),
-            value.getPurgeStartedAt(), value.getPurgedAt(), value.getUpdatedAt(), value.getOperatorId(),
+            value.getPurgeStartedAt(), value.getPurgedAt(), value.getRecycledAt(), value.getRecycleExpiresAt(),
+            value.getUpdatedAt(), value.getOperatorId(),
             value.getFailureReason(), value.getVersion() == null ? 0L : value.getVersion());
     }
     private static TaskInputRetentionEntity toEntity(TaskInputRetention value) {
@@ -31,7 +32,8 @@ public final class MyBatisTaskInputRetentionRepository implements TaskInputReten
         entity.setTaskId(value.taskId().value()); entity.setWorkspaceKey(value.workspaceKey());
         entity.setRetentionStatus(value.status().name()); entity.setExpiresAt(value.expiresAt());
         entity.setScheduledAt(value.scheduledAt()); entity.setPurgeStartedAt(value.purgeStartedAt());
-        entity.setPurgedAt(value.purgedAt()); entity.setUpdatedAt(value.updatedAt()); entity.setOperatorId(value.operatorId());
+        entity.setPurgedAt(value.purgedAt()); entity.setRecycledAt(value.recycledAt());
+        entity.setRecycleExpiresAt(value.recycleExpiresAt()); entity.setUpdatedAt(value.updatedAt()); entity.setOperatorId(value.operatorId());
         entity.setFailureReason(value.failureReason()); entity.setVersion(value.version());
         return entity;
     }

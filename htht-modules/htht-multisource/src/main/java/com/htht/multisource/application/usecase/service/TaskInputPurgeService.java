@@ -55,7 +55,10 @@ public final class TaskInputPurgeService implements TaskInputPurgeUseCase {
         TaskInputRetention current = retentions.find(taskId).orElse(null);
         if (current != null && current.status() == TaskInputRetentionStatus.PURGED) return current;
         if (current != null && current.status() == TaskInputRetentionStatus.PURGING) return current;
-        TaskInputRetention claimed = retentions.requestPurge(taskId, workspaceKey, subject, now);
+        TaskInputRetention claimed = current != null && (current.status() == TaskInputRetentionStatus.RECYCLE_BIN
+            || current.status() == TaskInputRetentionStatus.PURGE_FAILED)
+            ? retentions.beginPurge(taskId, subject, now)
+            : retentions.requestPurge(taskId, workspaceKey, subject, now);
         executor.execute(() -> complete(taskId, subject));
         return claimed;
     }

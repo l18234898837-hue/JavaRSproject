@@ -102,6 +102,7 @@ public final class TaskHistoryController {
     @GetMapping("/processing-tasks/history")
     public ResponseEntity<R<TaskHistoryResponse>> history(
         @RequestParam(required = false) String productCode,
+        @RequestParam(required = false) String keyword,
         @RequestParam(required = false) String lifecycle,
         @RequestParam(required = false) String completedFrom,
         @RequestParam(required = false) String completedTo,
@@ -111,7 +112,7 @@ public final class TaskHistoryController {
         @RequestParam(defaultValue = "20") int pageSize
     ) {
         AccessSubject subject = currentSubject.get();
-        var result = historyQuery.query(new TaskHistoryQuery(subject, blankToNull(productCode),
+        var result = historyQuery.query(new TaskHistoryQuery(subject, blankToNull(productCode), blankToNull(keyword),
             enumValue(lifecycle, TaskLifecycleStatus.class, "lifecycle"), parseInstant(completedFrom, "completedFrom"),
             parseInstant(completedTo, "completedTo"), enumValue(retention, TaskArtifactRetentionStatus.class, "retention"), page, pageSize,
             enumValue(inputRetention, TaskInputRetentionStatus.class, "inputRetention")));
@@ -119,6 +120,12 @@ public final class TaskHistoryController {
     }
 
     /** Source-compatible overload for existing controller tests and integrations. */
+    public ResponseEntity<R<TaskHistoryResponse>> history(String productCode, String lifecycle,
+        String completedFrom, String completedTo, String retention, String inputRetention, int page, int pageSize) {
+        return history(productCode, null, lifecycle, completedFrom, completedTo, retention, inputRetention, page, pageSize);
+    }
+
+    /** Source-compatible overload for integrations without source-input filtering. */
     public ResponseEntity<R<TaskHistoryResponse>> history(String productCode, String lifecycle,
         String completedFrom, String completedTo, String retention, int page, int pageSize) {
         return history(productCode, lifecycle, completedFrom, completedTo, retention, null, page, pageSize);
@@ -151,10 +158,12 @@ public final class TaskHistoryController {
         switch (operation.toUpperCase(Locale.ROOT)) {
             case "PIN" -> value = inputRetentionUseCase.changePolicy(id, workspace, TaskInputRetention.PolicyChoice.PERMANENT, subject);
             case "SET_EXPIRY" -> value = inputRetentionUseCase.schedule(id, workspace, parseInstant(request.expiresAt(), "expiresAt"), subject);
+            case "RECYCLE" -> value = inputRetentionUseCase.recycle(id, workspace, subject, Instant.now());
             case "PURGE" -> {
                 if (inputPurgeUseCase == null) throw new IllegalStateException("Input purge service is not configured.");
                 value = inputPurgeUseCase.request(id, subject, request.taskNo(), workspace);
             }
+            case "RESTORE" -> value = inputRetentionUseCase.restore(id, subject, Instant.now());
             default -> throw new IllegalArgumentException("operation is invalid.");
         }
         return ResponseEntity.ok(R.ok(value));
@@ -190,10 +199,14 @@ public final class TaskHistoryController {
             try {
                 TaskId id = TaskId.of(rawId); ensureOwned(id, currentSubject.get());
                 String workspace = workspaceFor(id, currentSubject.get());
-                if ("PURGE".equalsIgnoreCase(operation)) {
+                if ("RECYCLE".equalsIgnoreCase(operation)) {
+                    inputRetentionUseCase.recycle(id, workspace, currentSubject.get(), Instant.now());
+                } else if ("PURGE".equalsIgnoreCase(operation)) {
                     if (inputPurgeUseCase == null) throw new IllegalStateException("Input purge service is not configured.");
                     String confirmation = request.confirmations().get(String.valueOf(rawId));
                     inputPurgeUseCase.request(id, currentSubject.get(), confirmation, workspace);
+                } else if ("RESTORE".equalsIgnoreCase(operation)) {
+                    inputRetentionUseCase.restore(id, currentSubject.get(), Instant.now());
                 } else if ("PIN".equalsIgnoreCase(operation)) {
                     inputRetentionUseCase.changePolicy(id, workspace, TaskInputRetention.PolicyChoice.PERMANENT, currentSubject.get());
                 } else if ("SET_EXPIRY".equalsIgnoreCase(operation)) {

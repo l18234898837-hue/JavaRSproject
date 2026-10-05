@@ -11,6 +11,7 @@ public class TaskArtifactRetentionEntity {
     private String retentionStatus;
     private Boolean pinned;
     private Instant recycledAt;
+    private Instant recycleExpiresAt;
     private Instant purgeStartedAt;
     private Instant purgedAt;
     private Long operatorId;
@@ -25,6 +26,8 @@ public class TaskArtifactRetentionEntity {
     public void setPinned(Boolean value) { pinned = value; }
     public Instant getRecycledAt() { return recycledAt; }
     public void setRecycledAt(Instant value) { recycledAt = value; }
+    public Instant getRecycleExpiresAt() { return recycleExpiresAt; }
+    public void setRecycleExpiresAt(Instant value) { recycleExpiresAt = value; }
     public Instant getPurgeStartedAt() { return purgeStartedAt; }
     public void setPurgeStartedAt(Instant value) { purgeStartedAt = value; }
     public Instant getPurgedAt() { return purgedAt; }

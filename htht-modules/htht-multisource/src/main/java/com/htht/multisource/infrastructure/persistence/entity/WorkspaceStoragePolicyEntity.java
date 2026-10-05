@@ -12,6 +12,8 @@ public class WorkspaceStoragePolicyEntity {
     private Integer orphanUploadTtlHours;
     private Integer workerDirectoryTtlHours;
     private Boolean autoCleanupEnabled;
+    private Integer sourceRecycleBinRetentionDays;
+    private Integer artifactRecycleBinRetentionDays;
     private Long version;
     private Instant updatedAt;
 
@@ -25,6 +27,10 @@ public class WorkspaceStoragePolicyEntity {
     public void setWorkerDirectoryTtlHours(Integer value) { workerDirectoryTtlHours = value; }
     public Boolean getAutoCleanupEnabled() { return autoCleanupEnabled; }
     public void setAutoCleanupEnabled(Boolean value) { autoCleanupEnabled = value; }
+    public Integer getSourceRecycleBinRetentionDays() { return sourceRecycleBinRetentionDays; }
+    public void setSourceRecycleBinRetentionDays(Integer value) { sourceRecycleBinRetentionDays = value; }
+    public Integer getArtifactRecycleBinRetentionDays() { return artifactRecycleBinRetentionDays; }
+    public void setArtifactRecycleBinRetentionDays(Integer value) { artifactRecycleBinRetentionDays = value; }
     public Long getVersion() { return version; }
     public void setVersion(Long value) { version = value; }
     public Instant getUpdatedAt() { return updatedAt; }

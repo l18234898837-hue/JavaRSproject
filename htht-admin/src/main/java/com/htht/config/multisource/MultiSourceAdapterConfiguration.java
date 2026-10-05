@@ -190,14 +190,17 @@ public class MultiSourceAdapterConfiguration {
             }
             @Override public VersionedPolicy update(String workspaceKey, Policy policy, long expectedVersion) {
                 if (mapper.updateIfVersion(workspaceKey, policy.inputRetentionDays(), policy.orphanUploadTtlHours(),
-                    policy.workerDirectoryTtlHours(), policy.autoCleanupEnabled(), expectedVersion) != 1) {
+                    policy.workerDirectoryTtlHours(), policy.autoCleanupEnabled(), policy.sourceRecycleBinRetentionDays(),
+                    policy.artifactRecycleBinRetentionDays(), expectedVersion) != 1) {
                     throw new IllegalStateException("Workspace storage policy changed concurrently.");
                 }
                 return findVersioned(workspaceKey).orElseThrow(() -> new IllegalStateException("Workspace storage policy was not found."));
             }
             private Policy toPolicy(com.htht.multisource.infrastructure.persistence.entity.WorkspaceStoragePolicyEntity entity) {
                 return new Policy(entity.getInputRetentionDays(), entity.getOrphanUploadTtlHours(),
-                    entity.getWorkerDirectoryTtlHours(), Boolean.TRUE.equals(entity.getAutoCleanupEnabled()));
+                    entity.getWorkerDirectoryTtlHours(), Boolean.TRUE.equals(entity.getAutoCleanupEnabled()),
+                    entity.getSourceRecycleBinRetentionDays() == null ? 14 : entity.getSourceRecycleBinRetentionDays(),
+                    entity.getArtifactRecycleBinRetentionDays() == null ? 14 : entity.getArtifactRecycleBinRetentionDays());
             }
         };
     }
@@ -336,9 +339,10 @@ public class MultiSourceAdapterConfiguration {
     public TaskArtifactRetentionUseCase taskArtifactRetentionUseCase(
         ProcessingTaskRepository taskRepository,
         TaskArtifactRetentionRepository retentionRepository,
+        WorkspaceStoragePolicyRepository policies,
         ExecutionClock executionClock
     ) {
-        return new TaskArtifactRetentionService(taskRepository, retentionRepository, executionClock::now);
+        return new TaskArtifactRetentionService(taskRepository, retentionRepository, policies, executionClock::now);
     }
 
     @Bean

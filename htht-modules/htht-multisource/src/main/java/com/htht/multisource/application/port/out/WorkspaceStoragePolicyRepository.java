@@ -19,7 +19,14 @@ public interface WorkspaceStoragePolicyRepository {
     record VersionedPolicy(Policy policy, long version) { }
 
     record Policy(int inputRetentionDays, int orphanUploadTtlHours,
-                  int workerDirectoryTtlHours, boolean autoCleanupEnabled) {
+                  int workerDirectoryTtlHours, boolean autoCleanupEnabled,
+                  int sourceRecycleBinRetentionDays,
+                  int artifactRecycleBinRetentionDays) {
+        public Policy(int inputRetentionDays, int orphanUploadTtlHours,
+                      int workerDirectoryTtlHours, boolean autoCleanupEnabled) {
+            this(inputRetentionDays, orphanUploadTtlHours, workerDirectoryTtlHours,
+                autoCleanupEnabled, 14, 14);
+        }
         public Policy {
             if (inputRetentionDays < 0 || inputRetentionDays > 3650)
                 throw new IllegalArgumentException("Input retention days must be between 0 and 3650.");
@@ -27,7 +34,11 @@ public interface WorkspaceStoragePolicyRepository {
                 throw new IllegalArgumentException("Orphan upload TTL must be at least 24 hours.");
             if (workerDirectoryTtlHours < 1)
                 throw new IllegalArgumentException("Worker directory TTL must be at least 1 hour.");
+            if (sourceRecycleBinRetentionDays < 1 || sourceRecycleBinRetentionDays > 3650)
+                throw new IllegalArgumentException("Source recycle-bin retention days must be between 1 and 3650.");
+            if (artifactRecycleBinRetentionDays < 1 || artifactRecycleBinRetentionDays > 3650)
+                throw new IllegalArgumentException("Artifact recycle-bin retention days must be between 1 and 3650.");
         }
-        public static Policy defaults() { return new Policy(14, 24, 48, false); }
+        public static Policy defaults() { return new Policy(14, 24, 48, false, 14, 14); }
     }
 }

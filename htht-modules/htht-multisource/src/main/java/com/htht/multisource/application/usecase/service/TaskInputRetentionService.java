@@ -69,6 +69,29 @@ public final class TaskInputRetentionService implements TaskInputRetentionUseCas
 
     @Override public Optional<TaskInputRetention> find(TaskId taskId) { return repository.find(taskId); }
 
+    @Override
+    public TaskInputRetention recycle(TaskId taskId, String workspaceKey, AccessSubject operator, Instant now) {
+        String key = requireWorkspace(workspaceKey);
+        return transition(taskId, key, now, current -> current.recycle(operator, now,
+            now.plus(inputRecycleDays(key), java.time.temporal.ChronoUnit.DAYS)));
+    }
+
+    @Override
+    public TaskInputRetention restore(TaskId taskId, AccessSubject operator, Instant now) {
+        TaskInputRetention current = repository.find(taskId).orElseThrow(() -> new IllegalStateException("Input retention not found."));
+        TaskInputRetention next = current.restore(operator, now);
+        if (next == current || repository.compareAndSet(current, next)) return next;
+        throw conflict(taskId, current.version());
+    }
+
+    @Override
+    public TaskInputRetention beginPurge(TaskId taskId, AccessSubject operator, Instant now) {
+        TaskInputRetention current = repository.find(taskId).orElseThrow(() -> new IllegalStateException("Input retention not found."));
+        TaskInputRetention next = current.beginPurge(operator, now);
+        if (next == current || repository.compareAndSet(current, next)) return next;
+        throw conflict(taskId, current.version());
+    }
+
     @Override public TaskInputRetention complete(TaskId taskId, AccessSubject operator, Instant now) {
         return transition(taskId, operator, now, true, null);
     }
@@ -118,6 +141,9 @@ public final class TaskInputRetentionService implements TaskInputRetentionUseCas
 
     private int inputDays(String workspaceKey) {
         return policies.findByWorkspace(workspaceKey).orElseGet(WorkspaceStoragePolicyRepository.Policy::defaults).inputRetentionDays();
+    }
+    private int inputRecycleDays(String workspaceKey) {
+        return policies.findByWorkspace(workspaceKey).orElseGet(WorkspaceStoragePolicyRepository.Policy::defaults).sourceRecycleBinRetentionDays();
     }
     private static String requireWorkspace(String key) { if (key == null || key.isBlank()) throw new IllegalArgumentException("Workspace key is required."); return key; }
 

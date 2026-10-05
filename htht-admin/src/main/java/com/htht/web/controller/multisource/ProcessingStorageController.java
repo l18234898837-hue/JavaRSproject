@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -130,7 +131,7 @@ public final class ProcessingStorageController {
             return stream.filter(Files::isRegularFile).mapToLong(file -> {
                 try { return Files.size(file); } catch (IOException ignored) { return 0L; }
             }).sum();
-        } catch (IOException ignored) { return 0L; }
+        } catch (IOException | UncheckedIOException ignored) { return 0L; }
     }
 
     private static long directorySizeExcluding(Path root, Path excludedRoot) {
@@ -141,6 +142,6 @@ public final class ProcessingStorageController {
                 .mapToLong(file -> {
                     try { return Files.size(file); } catch (IOException ignored) { return 0L; }
                 }).sum();
-        } catch (IOException ignored) { return 0L; }
+        } catch (IOException | UncheckedIOException ignored) { return 0L; }
     }
 }

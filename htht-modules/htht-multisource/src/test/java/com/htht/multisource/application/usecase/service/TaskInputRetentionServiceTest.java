@@ -76,6 +76,18 @@ class TaskInputRetentionServiceTest {
         assertThatThrownBy(() -> service.claim(TaskId.of(1), pinned.version(), NOW)).isInstanceOf(IllegalStateException.class);
     }
 
+    @Test void sourceRecycleBinTransitionUsesIndependentExpiryAndCanRestore() {
+        TaskInputRetentionService service = new TaskInputRetentionService(policies(), () -> NOW);
+
+        TaskInputRetention recycled = service.recycle(TaskId.of(21), "default", OPERATOR, NOW);
+
+        assertThat(recycled.status()).isEqualTo(TaskInputRetentionStatus.RECYCLE_BIN);
+        assertThat(recycled.recycledAt()).isEqualTo(NOW);
+        assertThat(recycled.recycleExpiresAt()).isEqualTo(NOW.plusSeconds(14 * 86400L));
+        assertThat(service.restore(TaskId.of(21), OPERATOR, NOW).status())
+            .isEqualTo(TaskInputRetentionStatus.AVAILABLE);
+    }
+
     @Test void readsRetentionStateThroughTheDurableRepositoryAfterServiceReplacement() {
         Retentions repository = new Retentions();
         TaskInputRetentionService first = new TaskInputRetentionService(policies(), repository, () -> NOW);

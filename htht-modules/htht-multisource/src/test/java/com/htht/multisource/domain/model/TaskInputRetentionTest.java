@@ -26,4 +26,14 @@ class TaskInputRetentionTest {
             .purgeSucceeded(OPERATOR, NOW);
         assertThatIllegalStateException().isThrownBy(() -> purged.claim(NOW.plusSeconds(1)));
     }
+
+    @Test void recycleBinRetentionCanBeClaimedForConfirmedPhysicalPurge() {
+        TaskInputRetention recycled = TaskInputRetention.available(TaskId.of(2), "default", NOW)
+            .recycle(OPERATOR, NOW, NOW.plusSeconds(14 * 86400L));
+
+        TaskInputRetention purging = recycled.beginPurge(OPERATOR, NOW.plusSeconds(1));
+
+        assertThat(purging.status()).isEqualTo(TaskInputRetentionStatus.PURGING);
+        assertThat(purging.purgeStartedAt()).isEqualTo(NOW.plusSeconds(1));
+    }
 }

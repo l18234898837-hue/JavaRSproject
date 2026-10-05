@@ -13,8 +13,8 @@ public final class MyBatisTaskHistoryRepository implements TaskHistoryRepository
     public MyBatisTaskHistoryRepository(TaskHistoryMyBatisMapper mapper) { this.mapper = Objects.requireNonNull(mapper); }
     @Override public TaskHistoryPage findPage(TaskHistoryQuery q) {
         int offset = (q.page() - 1) * q.pageSize();
-        List<TaskHistoryItem> items = mapper.selectPage(q.subject().userId(), q.productCode(), name(q.lifecycle()), q.completedFrom(), q.completedTo(), name(q.retention()), name(q.inputRetention()), q.pageSize(), offset).stream().map(this::toItem).toList();
-        return new TaskHistoryPage(items, mapper.countPage(q.subject().userId(), q.productCode(), name(q.lifecycle()), q.completedFrom(), q.completedTo(), name(q.retention()), name(q.inputRetention())), q.page(), q.pageSize());
+        List<TaskHistoryItem> items = mapper.selectPage(q.subject().userId(), q.productCode(), q.keyword(), name(q.lifecycle()), q.completedFrom(), q.completedTo(), name(q.retention()), name(q.inputRetention()), q.pageSize(), offset).stream().map(this::toItem).toList();
+        return new TaskHistoryPage(items, mapper.countPage(q.subject().userId(), q.productCode(), q.keyword(), name(q.lifecycle()), q.completedFrom(), q.completedTo(), name(q.retention()), name(q.inputRetention())), q.page(), q.pageSize());
     }
     @Override public StorageSummary summarize(AccessSubject subject) {
         return toSummary(mapper.selectStorageSummary(subject.userId()));

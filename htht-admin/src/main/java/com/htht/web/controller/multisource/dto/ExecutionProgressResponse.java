@@ -27,10 +27,17 @@ public record ExecutionProgressResponse(
     public record StageProgressResponse(
         long stageId, String stageKey, String status, int attempt, String errorCode, String errorMessage,
         String executionId, Instant startedAt, Instant finishedAt, Long durationMs, String description,
-        List<String> declaredOutputs
+        List<String> declaredOutputs, String parameterSnapshot
     ) {
+        public StageProgressResponse(long stageId, String stageKey, String status, int attempt, String errorCode,
+                                     String errorMessage, String executionId, Instant startedAt, Instant finishedAt,
+                                     Long durationMs, String description, List<String> declaredOutputs) {
+            this(stageId, stageKey, status, attempt, errorCode, errorMessage, executionId, startedAt, finishedAt,
+                durationMs, description, declaredOutputs, null);
+        }
+
         public StageProgressResponse(long stageId, String stageKey, String status, int attempt) {
-            this(stageId, stageKey, status, attempt, null, null, null, null, null, null, null, List.of());
+            this(stageId, stageKey, status, attempt, null, null, null, null, null, null, null, List.of(), null);
         }
     }
 

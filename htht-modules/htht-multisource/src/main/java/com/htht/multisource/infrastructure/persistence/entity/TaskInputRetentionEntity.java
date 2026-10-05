@@ -14,6 +14,8 @@ public class TaskInputRetentionEntity {
     private Instant scheduledAt;
     private Instant purgeStartedAt;
     private Instant purgedAt;
+    private Instant recycledAt;
+    private Instant recycleExpiresAt;
     private Instant updatedAt;
     private Long operatorId;
     private String failureReason;
@@ -26,6 +28,8 @@ public class TaskInputRetentionEntity {
     public Instant getScheduledAt() { return scheduledAt; } public void setScheduledAt(Instant value) { scheduledAt = value; }
     public Instant getPurgeStartedAt() { return purgeStartedAt; } public void setPurgeStartedAt(Instant value) { purgeStartedAt = value; }
     public Instant getPurgedAt() { return purgedAt; } public void setPurgedAt(Instant value) { purgedAt = value; }
+    public Instant getRecycledAt() { return recycledAt; } public void setRecycledAt(Instant value) { recycledAt = value; }
+    public Instant getRecycleExpiresAt() { return recycleExpiresAt; } public void setRecycleExpiresAt(Instant value) { recycleExpiresAt = value; }
     public Instant getUpdatedAt() { return updatedAt; } public void setUpdatedAt(Instant value) { updatedAt = value; }
     public Long getOperatorId() { return operatorId; } public void setOperatorId(Long value) { operatorId = value; }
     public String getFailureReason() { return failureReason; } public void setFailureReason(String value) { failureReason = value; }

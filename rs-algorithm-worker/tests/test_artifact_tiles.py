@@ -94,6 +94,57 @@ def test_inspect_raster_reports_safe_reasons_for_missing_or_unsupported_crs(tmp_
     assert 30 < south < north < 33
 
 
+def test_inspect_raster_accepts_a_geographic_extent_crossing_the_date_line(tmp_path):
+    path = tmp_path / "date-line.tif"
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=80,
+        height=20,
+        count=1,
+        dtype="uint8",
+        crs="EPSG:4326",
+        transform=from_origin(170, 10, 0.25, 1),
+        nodata=0,
+    ) as target:
+        target.write(np.ones((1, 20, 80), dtype=np.uint8))
+
+    result = inspect_raster_artifact(path, "COG", "TRACK_GRID_COG")
+
+    assert result["renderable"] is True
+    assert result["bounds"] == [170.0, -10.0, -170.0, 10.0]
+    assert result["minZoom"] == 1
+
+
+def test_render_raster_tile_wraps_date_line_source_data_to_the_western_hemisphere(tmp_path):
+    path = tmp_path / "date-line.tif"
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=80,
+        height=20,
+        count=1,
+        dtype="uint8",
+        crs="EPSG:4326",
+        transform=from_origin(170, 10, 0.25, 1),
+        nodata=0,
+    ) as target:
+        target.write(np.ones((1, 20, 80), dtype=np.uint8))
+
+    tile = render_raster_tile(
+        path,
+        z=2,
+        x=0,
+        y=1,
+        style={"kind": "grayscale"},
+    )
+
+    image = Image.open(io.BytesIO(tile))
+    assert image.getchannel("A").getextrema()[1] == 255
+
+
 def test_inspect_raster_assigns_mask_and_score_styles(tmp_path):
     mask = inspect_raster_artifact(
         write_raster(tmp_path / "mask.tif", count=1), "GEOTIFF", "SALIENCY_MASK_COG"
