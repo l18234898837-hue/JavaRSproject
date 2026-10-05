@@ -143,6 +143,18 @@ public class ArchiveUploadService {
 
     public ArchiveUploadProgress status(long subjectId, String id) { return session(subjectId, id).snapshot(); }
 
+    /** Used by the storage cleaner to avoid removing a live archive upload session. */
+    public boolean isActiveSessionPath(Path path) {
+        if (path == null) return false;
+        Path normalized = path.toAbsolutePath().normalize();
+        return sessions.values().stream().anyMatch(session -> {
+            Path directory = session.directory.toAbsolutePath().normalize();
+            return normalized.startsWith(directory)
+                && (session.status == ArchiveUploadStatus.UPLOADING || session.status == ArchiveUploadStatus.MERGING
+                || session.status == ArchiveUploadStatus.PARSING);
+        });
+    }
+
     public void cancel(long subjectId, String id) {
         ArchiveUploadSession s = session(subjectId, id);
         synchronized (s) {

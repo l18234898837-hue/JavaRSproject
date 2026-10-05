@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from affine import Affine
 
 
 def _configure_geospatial_environment() -> None:
@@ -85,7 +86,8 @@ def inspect_raster_artifact(
         except Exception:
             quality["boundsValid"] = False
             return _disabled("TIFF 地理范围无效", quality)
-        if not _valid_wgs84_bounds(bounds):
+        normalized_bounds = _normalize_wgs84_bounds(bounds)
+        if normalized_bounds is None:
             quality["boundsValid"] = False
             return _disabled("TIFF 地理范围无效", quality)
         style, legend = _style_for(dataset.count, artifact_type)
@@ -94,8 +96,11 @@ def inspect_raster_artifact(
             "renderable": True,
             "reason": None,
             "crs": f"EPSG:{authority}",
-            "bounds": [float(value) for value in bounds],
-            "minZoom": 0,
+            "bounds": [float(value) for value in normalized_bounds],
+            # At zoom 0 a single world tile crosses the date line and would
+            # require two source windows. Start date-line rasters at zoom 1,
+            # where every Web Mercator tile has one continuous source span.
+            "minZoom": 1 if normalized_bounds[2] < normalized_bounds[0] else 0,
             "maxZoom": 16,
             "style": style,
             "legend": legend,
@@ -212,13 +217,32 @@ def _style_for(count: int, artifact_type: str) -> tuple[dict[str, Any], dict[str
     return {"kind": "grayscale"}, None
 
 
-def _valid_wgs84_bounds(bounds: tuple[float, float, float, float]) -> bool:
+def _normalize_wgs84_bounds(
+    bounds: tuple[float, float, float, float],
+) -> tuple[float, float, float, float] | None:
     west, south, east, north = bounds
-    return (
-        all(math.isfinite(value) for value in bounds)
-        and -180 <= west < east <= 180
-        and -90 <= south < north <= 90
-    )
+    if (
+        not all(math.isfinite(value) for value in bounds)
+        or west >= east
+        or east - west > 360
+        or south < -90
+        or north > 90
+        or south >= north
+    ):
+        return None
+    if -180 <= west and east <= 180:
+        return west, south, east, north
+    if math.isclose(east - west, 360, rel_tol=0.0, abs_tol=1e-9):
+        return -180.0, south, 180.0, north
+    normalized_west = _wrap_longitude(west)
+    normalized_east = _wrap_longitude(east)
+    if math.isclose(normalized_west, normalized_east, rel_tol=0.0, abs_tol=1e-12):
+        return None
+    return normalized_west, south, normalized_east, north
+
+
+def _wrap_longitude(value: float) -> float:
+    return (value + 180.0) % 360.0 - 180.0
 
 
 def _require_tile_coordinate(z: int, x: int, y: int) -> None:
@@ -299,11 +323,14 @@ def _render_band(
     # source for every 256px web tile makes low zoom requests unnecessarily
     # expensive and can leave Cesium with an apparently empty layer. Restrict
     # the source read to the part that intersects this Web Mercator tile.
-    source_window = _source_window_for_tile(dataset, west, south, east, north)
-    if source_window is None:
+    source_selection = _source_window_for_tile(dataset, west, south, east, north)
+    if source_selection is None:
         return destination
+    source_window, longitude_offset = source_selection
     source = dataset.read(band, window=source_window, out_dtype="float32")
     source_transform = dataset.window_transform(source_window)
+    if longitude_offset:
+        source_transform = Affine.translation(longitude_offset, 0) @ source_transform
     reproject(
         source=source,
         destination=destination,
@@ -324,20 +351,31 @@ def _source_window_for_tile(
     south: float,
     east: float,
     north: float,
-) -> Window | None:
+) -> tuple[Window, float] | None:
     """Return the clipped source pixel window intersecting a 3857 tile."""
     try:
         source_bounds = transform_bounds(
             "EPSG:3857", dataset.crs, west, south, east, north, densify_pts=21
         )
-        requested = window_from_bounds(*source_bounds, transform=dataset.transform)
         full = Window(0, 0, dataset.width, dataset.height)
-        clipped = requested.intersection(full)
+        longitude_offsets = (0.0, 360.0, -360.0) if dataset.crs.is_geographic else (0.0,)
+        for offset in longitude_offsets:
+            requested = window_from_bounds(
+                source_bounds[0] + offset,
+                source_bounds[1],
+                source_bounds[2] + offset,
+                source_bounds[3],
+                transform=dataset.transform,
+            )
+            try:
+                clipped = requested.intersection(full)
+            except (ValueError, rasterio.errors.RasterioError):
+                continue
+            if clipped.width > 0 and clipped.height > 0:
+                return clipped, -offset
     except (ValueError, TypeError, rasterio.errors.RasterioError):
         return None
-    if clipped.width <= 0 or clipped.height <= 0:
-        return None
-    return clipped
+    return None
 
 
 def _mercator_tile_bounds(z: int, x: int, y: int) -> tuple[float, float, float, float]:

@@ -196,7 +196,8 @@ public class ProcessingExecutionController {
                     stage.errorCode() == null && stage.errorMessage() == null ? null : safeFailure.code(),
                     stage.errorCode() == null && stage.errorMessage() == null ? null : safeFailure.message(),
                     stage.executionId(), stage.startedAt(), stage.finishedAt(), durationMs(stage.startedAt(), stage.finishedAt()),
-                    stage.stageKey(), declaredOutputs(detail.plan().stages(), stage.stageKey())
+                    stage.stageKey(), declaredOutputs(detail.plan().stages(), stage.stageKey()),
+                    stageParameterSnapshot(detail.plan().stages(), stage.stageKey())
                 );
             }).toList(),
             detail.artifacts().stream().map(artifact -> {
@@ -213,6 +214,12 @@ public class ProcessingExecutionController {
                 report.overallStatus(), report.summary().totalChecks(), report.summary().passedChecks(),
                 report.summary().warningChecks(), report.summary().failedChecks())
         )));
+    }
+
+    private static String stageParameterSnapshot(List<com.htht.multisource.domain.model.ProcessingStage> stages,
+                                                 String stageKey) {
+        return stages.stream().filter(stage -> stage.stageKey().equals(stageKey)).findFirst()
+            .map(com.htht.multisource.domain.model.ProcessingStage::parameterSnapshot).orElse(null);
     }
 
     @GetMapping("/processing-tasks/{taskId}/quality-report")

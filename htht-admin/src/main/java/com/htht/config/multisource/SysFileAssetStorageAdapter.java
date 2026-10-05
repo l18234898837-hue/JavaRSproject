@@ -50,6 +50,16 @@ public final class SysFileAssetStorageAdapter implements AssetStorage, LocalWork
     }
 
     @Override
+    public AssetStorage.ManagedInputFileMetadata managedInputFile(AccessSubject subject, AssetReference reference) {
+        Path path = resolveReference(reference);
+        try {
+            return new AssetStorage.ManagedInputFileMetadata(path.toString(), Files.size(path), checksum(path));
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Unable to inspect sys file asset.", exception);
+        }
+    }
+
+    @Override
     public Path resolve(String grantReference, StorageUri storageUri) {
         return resolveSysFile(authorizedSysFile(grantReference, storageUri));
     }

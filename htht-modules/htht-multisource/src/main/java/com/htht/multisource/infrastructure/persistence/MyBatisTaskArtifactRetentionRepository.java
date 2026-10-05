@@ -46,7 +46,7 @@ public final class MyBatisTaskArtifactRetentionRepository implements TaskArtifac
     private TaskArtifactRetention toDomain(TaskArtifactRetentionEntity entity) {
         return new TaskArtifactRetention(TaskId.of(entity.getTaskId()),
             TaskArtifactRetentionStatus.valueOf(entity.getRetentionStatus()), Boolean.TRUE.equals(entity.getPinned()),
-            entity.getRecycledAt(), entity.getPurgeStartedAt(), entity.getPurgedAt(), entity.getOperatorId(),
+            entity.getRecycledAt(), entity.getRecycleExpiresAt(), entity.getPurgeStartedAt(), entity.getPurgedAt(), entity.getOperatorId(),
             entity.getFailureReason(), entity.getVersion());
     }
 
@@ -56,6 +56,7 @@ public final class MyBatisTaskArtifactRetentionRepository implements TaskArtifac
         entity.setRetentionStatus(retention.status().name());
         entity.setPinned(retention.pinned());
         entity.setRecycledAt(retention.recycledAt());
+        entity.setRecycleExpiresAt(retention.recycleExpiresAt());
         entity.setPurgeStartedAt(retention.purgeStartedAt());
         entity.setPurgedAt(retention.purgedAt());
         entity.setOperatorId(retention.operatorId());

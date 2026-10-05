@@ -25,6 +25,11 @@ import com.htht.multisource.application.port.out.TaskArtifactAvailabilityProbe;
 import com.htht.multisource.application.port.out.TaskArtifactRetentionScanSource;
 import com.htht.multisource.application.port.out.TaskHistoryRepository;
 import com.htht.multisource.application.port.out.TaskStageRepository;
+import com.htht.multisource.application.port.out.ManagedInputFileRepository;
+import com.htht.multisource.application.port.out.ManagedInputFilePurgePort;
+import com.htht.multisource.application.port.out.TaskInputReferenceRepository;
+import com.htht.multisource.application.port.out.TaskInputRetentionRepository;
+import com.htht.multisource.application.port.out.WorkspaceStoragePolicyRepository;
 import com.htht.multisource.application.usecase.AcceptWorkerEventUseCase;
 import com.htht.multisource.application.usecase.CancelProcessingTaskUseCase;
 import com.htht.multisource.application.usecase.CreateProcessingBatchUseCase;
@@ -38,6 +43,8 @@ import com.htht.multisource.application.usecase.TaskArtifactAccessGuard;
 import com.htht.multisource.application.usecase.TaskArtifactPurgeUseCase;
 import com.htht.multisource.application.usecase.TaskArtifactRetentionUseCase;
 import com.htht.multisource.application.usecase.TaskArtifactRetentionScanUseCase;
+import com.htht.multisource.application.usecase.TaskInputPurgeUseCase;
+import com.htht.multisource.application.usecase.TaskInputRetentionUseCase;
 import com.htht.multisource.application.usecase.service.AcceptWorkerEventService;
 import com.htht.multisource.application.usecase.service.CancelProcessingTaskService;
 import com.htht.multisource.application.usecase.service.CreateProcessingBatchService;
@@ -47,6 +54,9 @@ import com.htht.multisource.application.usecase.service.PreflightProductService;
 import com.htht.multisource.application.usecase.service.DispatchNextStageService;
 import com.htht.multisource.application.usecase.service.RetryFailedStageService;
 import com.htht.multisource.application.usecase.service.TaskCreationCoordinator;
+import com.htht.multisource.application.usecase.service.TaskInputReferenceService;
+import com.htht.multisource.application.usecase.service.TaskInputPurgeService;
+import com.htht.multisource.application.usecase.service.TaskInputRetentionService;
 import com.htht.multisource.application.usecase.service.TaskHistoryQueryService;
 import com.htht.multisource.application.usecase.service.DefaultTaskArtifactAccessGuard;
 import com.htht.multisource.application.usecase.service.TaskArtifactPurgeService;
@@ -65,6 +75,9 @@ import com.htht.multisource.infrastructure.persistence.MyBatisTaskArtifactRetent
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskArtifactRetentionScanSource;
 import com.htht.multisource.infrastructure.persistence.MyBatisTaskHistoryRepository;
 import com.htht.multisource.infrastructure.persistence.MyBatisLegacyPlanArchiveRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisManagedInputFileRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisTaskInputReferenceRepository;
+import com.htht.multisource.infrastructure.persistence.MyBatisTaskInputRetentionRepository;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierProcessingBatchIdGenerator;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierStageIdGenerator;
 import com.htht.multisource.infrastructure.persistence.id.LongSupplierTaskIdGenerator;
@@ -80,6 +93,10 @@ import com.htht.multisource.infrastructure.persistence.mapper.TaskArtifactRetent
 import com.htht.multisource.infrastructure.persistence.mapper.TaskArtifactRetentionScanMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.TaskHistoryMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapper.LegacyPlanArchiveMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.ManagedInputFileMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskInputReferenceMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.TaskInputRetentionMyBatisMapper;
+import com.htht.multisource.infrastructure.persistence.mapper.WorkspaceStoragePolicyMyBatisMapper;
 import com.htht.multisource.infrastructure.persistence.mapping.TaskPersistenceMapper;
 import com.htht.multisource.infrastructure.session.InMemoryPreflightSessionStore;
 import com.htht.multisource.infrastructure.worker.LocalProcessWorkerGateway;
@@ -89,6 +106,7 @@ import com.htht.multisource.infrastructure.worker.LocalWorkerProcessLauncher;
 import com.htht.multisource.infrastructure.worker.WorkerContractCodec;
 import com.htht.multisource.infrastructure.worker.WorkerResultTranslator;
 import com.htht.system.service.ISysFileService;
+import com.htht.config.multisource.archive.ArchiveUploadService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -102,6 +120,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -135,6 +154,107 @@ public class MultiSourceAdapterConfiguration {
     public SysFileAssetStorageAdapter multisourceAssetStorage(ISysFileService sysFileService,
                                                                @Value("${file.upload-path}") String uploadPath) {
         return new SysFileAssetStorageAdapter(sysFileService, resolveUploadRoot(uploadPath));
+    }
+
+    @Bean
+    public ManagedInputFileRepository managedInputFileRepository(ManagedInputFileMyBatisMapper mapper) {
+        return new MyBatisManagedInputFileRepository(mapper);
+    }
+
+    @Bean
+    public TaskInputReferenceRepository taskInputReferenceRepository(TaskInputReferenceMyBatisMapper mapper) {
+        return new MyBatisTaskInputReferenceRepository(mapper);
+    }
+
+    @Bean
+    public TaskInputRetentionRepository taskInputRetentionRepository(TaskInputRetentionMyBatisMapper mapper) {
+        return new MyBatisTaskInputRetentionRepository(mapper);
+    }
+
+    @Bean
+    public TaskInputReferenceService taskInputReferenceService(ManagedInputFileRepository files,
+                                                                TaskInputReferenceRepository references,
+                                                                CompositeLocalWorkerAssetResolver storage) {
+        return new TaskInputReferenceService(files, references, storage);
+    }
+
+    @Bean
+    public WorkspaceStoragePolicyRepository workspaceStoragePolicyRepository(WorkspaceStoragePolicyMyBatisMapper mapper) {
+        return new WorkspaceStoragePolicyRepository() {
+            @Override public Optional<Policy> findByWorkspace(String workspaceKey) {
+                return Optional.ofNullable(mapper.selectById(workspaceKey)).map(this::toPolicy);
+            }
+            @Override public Optional<VersionedPolicy> findVersioned(String workspaceKey) {
+                return Optional.ofNullable(mapper.selectById(workspaceKey)).map(entity ->
+                    new VersionedPolicy(toPolicy(entity), entity.getVersion() == null ? 0L : entity.getVersion()));
+            }
+            @Override public VersionedPolicy update(String workspaceKey, Policy policy, long expectedVersion) {
+                if (mapper.updateIfVersion(workspaceKey, policy.inputRetentionDays(), policy.orphanUploadTtlHours(),
+                    policy.workerDirectoryTtlHours(), policy.autoCleanupEnabled(), policy.sourceRecycleBinRetentionDays(),
+                    policy.artifactRecycleBinRetentionDays(), expectedVersion) != 1) {
+                    throw new IllegalStateException("Workspace storage policy changed concurrently.");
+                }
+                return findVersioned(workspaceKey).orElseThrow(() -> new IllegalStateException("Workspace storage policy was not found."));
+            }
+            private Policy toPolicy(com.htht.multisource.infrastructure.persistence.entity.WorkspaceStoragePolicyEntity entity) {
+                return new Policy(entity.getInputRetentionDays(), entity.getOrphanUploadTtlHours(),
+                    entity.getWorkerDirectoryTtlHours(), Boolean.TRUE.equals(entity.getAutoCleanupEnabled()),
+                    entity.getSourceRecycleBinRetentionDays() == null ? 14 : entity.getSourceRecycleBinRetentionDays(),
+                    entity.getArtifactRecycleBinRetentionDays() == null ? 14 : entity.getArtifactRecycleBinRetentionDays());
+            }
+        };
+    }
+
+    @Bean
+    public TaskInputRetentionUseCase taskInputRetentionUseCase(WorkspaceStoragePolicyRepository policies,
+                                                                TaskInputRetentionRepository repository) {
+        return new TaskInputRetentionService(policies, repository);
+    }
+
+    @Bean
+    public ManagedInputFilePurgePort managedInputFilePurgePort(@Value("${file.upload-path}") String uploadPath,
+        ManagedInputFileRepository files, TaskInputReferenceRepository references) {
+        return new LocalManagedInputFilePurgeService(resolveUploadRoot(uploadPath), files, references);
+    }
+
+    @Bean
+    public TaskInputPurgeUseCase taskInputPurgeUseCase(ProcessingTaskRepository tasks, TaskHistoryRepository history,
+        TaskInputRetentionUseCase retentions, TaskInputReferenceRepository references, ManagedInputFileRepository files,
+        ManagedInputFilePurgePort purgePort, @Qualifier("multisourceInputPurgeExecutor") Executor executor, ExecutionClock clock) {
+        return new TaskInputPurgeService(tasks, history, retentions, references, files, purgePort, executor, clock::now);
+    }
+
+    @Bean
+    public OrphanUploadCleanupService orphanUploadCleanupService(@Value("${file.upload-path}") String uploadPath,
+        ManagedInputFileRepository files, ArchiveUploadService archives) {
+        return new OrphanUploadCleanupService(resolveUploadRoot(uploadPath), files, archives::isActiveSessionPath, Duration.ofHours(24));
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "multisource.storage-cleanup", name = "enabled", havingValue = "true")
+    public StorageCleanupScheduler storageCleanupScheduler(OrphanUploadCleanupService orphans,
+        WorkerDirectoryCleanupService workerDirectories,
+        @Value("${multisource.storage-cleanup.source-enabled:false}") boolean sourceEnabled,
+        @Value("${multisource.storage-cleanup.orphan-enabled:false}") boolean orphanEnabled,
+        @Value("${multisource.storage-cleanup.worker-enabled:false}") boolean workerEnabled,
+        @Value("${multisource.storage-cleanup.dry-run:true}") boolean dryRun) {
+        return new StorageCleanupScheduler(orphans, workerDirectories, sourceEnabled, orphanEnabled, workerEnabled, dryRun,
+            summary -> { });
+    }
+
+    @Bean
+    public WorkerDirectoryCleanupService workerDirectoryCleanupService(MultiSourceWorkerProperties properties,
+        TaskStageMyBatisMapper stages, ProcessingTaskRepository tasks, WorkspaceStoragePolicyRepository policies,
+        LocalProcessWorkerGateway workerGateway) {
+        return new WorkerDirectoryCleanupService(properties.toLocalProcessProperties().workRoot(), directory -> {
+            String executionId = directory.getFileName().toString();
+            var stage = stages.selectByExecutionId(executionId);
+            if (stage == null) return Optional.empty();
+            return tasks.findById(com.htht.multisource.domain.model.TaskId.of(stage.getTaskId())).map(task ->
+                new WorkerDirectoryCleanupService.ExecutionOwnership(stage.getExecutionId(), "default",
+                    task.lifecycleStatus(), com.htht.multisource.domain.model.StageExecutionStatus.valueOf(stage.getExecutionStatus()),
+                    stage.getFinishedAt()));
+        }, (directory, ownership) -> workerGateway.isExecutionReserved(directory.getFileName().toString()), policies);
     }
 
     @Bean
@@ -219,9 +339,10 @@ public class MultiSourceAdapterConfiguration {
     public TaskArtifactRetentionUseCase taskArtifactRetentionUseCase(
         ProcessingTaskRepository taskRepository,
         TaskArtifactRetentionRepository retentionRepository,
+        WorkspaceStoragePolicyRepository policies,
         ExecutionClock executionClock
     ) {
-        return new TaskArtifactRetentionService(taskRepository, retentionRepository, executionClock::now);
+        return new TaskArtifactRetentionService(taskRepository, retentionRepository, policies, executionClock::now);
     }
 
     @Bean
@@ -359,9 +480,10 @@ public class MultiSourceAdapterConfiguration {
                                                                        LocalProcessWorkerGateway workerGateway,
                                                                        CompositeLocalWorkerAssetResolver assetStorage,
                                                                        TaskIdGenerator taskIdGenerator,
-                                                                       StageIdGenerator stageIdGenerator) {
+                                                                       StageIdGenerator stageIdGenerator,
+                                                                       TaskInputReferenceService inputReferenceService) {
         return new TaskCreationCoordinator(taskRepository, stageRepository, (ProcessingPlanner) workerGateway,
-            assetStorage, taskIdGenerator, stageIdGenerator, properties.requireProcessorVersion());
+            assetStorage, taskIdGenerator, stageIdGenerator, properties.requireProcessorVersion(), inputReferenceService);
     }
 
     @Bean
@@ -422,6 +544,16 @@ public class MultiSourceAdapterConfiguration {
         AtomicInteger threadNumber = new AtomicInteger();
         return Executors.newSingleThreadExecutor(command -> {
             Thread thread = new Thread(command, "multisource-artifact-purge-" + threadNumber.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    @Bean(name = "multisourceInputPurgeExecutor", destroyMethod = "shutdown")
+    public ExecutorService multisourceInputPurgeExecutor() {
+        AtomicInteger threadNumber = new AtomicInteger();
+        return Executors.newSingleThreadExecutor(command -> {
+            Thread thread = new Thread(command, "multisource-input-purge-" + threadNumber.incrementAndGet());
             thread.setDaemon(true);
             return thread;
         });

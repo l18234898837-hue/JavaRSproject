@@ -14,6 +14,19 @@ import java.util.List;
 
 public interface AssetStorage {
 
+    /** Canonical metadata used when registering a managed source input. */
+    default ManagedInputFileMetadata managedInputFile(AccessSubject subject, AssetReference reference) {
+        throw new UnsupportedOperationException("Managed input metadata is not supported by this storage.");
+    }
+
+    record ManagedInputFileMetadata(String path, long sizeBytes, String checksum) {
+        public ManagedInputFileMetadata {
+            if (path == null || path.isBlank() || sizeBytes < 0 || checksum == null || checksum.isBlank()) {
+                throw new IllegalArgumentException("Managed input metadata is invalid.");
+            }
+        }
+    }
+
     AssetAccessGrant grantRead(AccessSubject subject, List<InputAsset> inputs);
 
     default ExecutionGrant grant(ExecutionGrantRequest request) {

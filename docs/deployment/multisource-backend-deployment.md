@@ -391,6 +391,38 @@ D:\htht-rs\multisource\worker-work
 - SHA-256 校验值；
 - 逻辑输出 URI；
 - 任务和阶段归属。
+8.6 多源统一存储根目录
+多源运行数据必须放在代码目录之外。部署时只配置一个存储根目录：
+
+```bash
+MULTISOURCE_STORAGE_ROOT=/srv/rsimageprocess-data
+```
+
+应用会自动使用以下子目录：
+
+```text
+/srv/rsimageprocess-data/source/files       原始上传文件
+/srv/rsimageprocess-data/source/incoming    ZIP 分片和解压临时目录
+/srv/rsimageprocess-data/tasks/work         Worker 执行临时目录
+/srv/rsimageprocess-data/tasks/artifacts    任务产物目录
+/srv/rsimageprocess-data/system-tmp         Java 临时目录
+```
+
+Ubuntu 部署前创建目录并授权给服务用户：
+
+```bash
+sudo install -d -o htht-rs -g htht-rs \
+  /srv/rsimageprocess-data/source/files \
+  /srv/rsimageprocess-data/source/incoming \
+  /srv/rsimageprocess-data/tasks/work \
+  /srv/rsimageprocess-data/tasks/artifacts \
+  /srv/rsimageprocess-data/system-tmp
+```
+
+不需要再分别配置 `FILE_UPLOAD_PATH`、`MULTISOURCE_WORK_ROOT` 或
+`MULTISOURCE_ARTIFACT_ROOT`；只有在需要覆盖默认布局时才单独设置这些变量。
+存储根目录应使用独立磁盘或挂载卷，不能放在 `/opt/JavaRSproject` 代码目录中。
+
 9. Python Worker 安装
 进入 Worker 目录：
 cd rs-algorithm-worker

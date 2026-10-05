@@ -35,6 +35,7 @@ public final class TaskCreationCoordinator {
     private final TaskIdGenerator taskIdGenerator;
     private final StageIdGenerator stageIdGenerator;
     private final String processorVersion;
+    private final TaskInputReferenceService inputReferenceService;
 
     public TaskCreationCoordinator(
         ProcessingTaskRepository taskRepository,
@@ -45,6 +46,13 @@ public final class TaskCreationCoordinator {
         StageIdGenerator stageIdGenerator,
         String processorVersion
     ) {
+        this(taskRepository, taskStageRepository, planner, assetStorage, taskIdGenerator, stageIdGenerator, processorVersion, null);
+    }
+
+    public TaskCreationCoordinator(ProcessingTaskRepository taskRepository, TaskStageRepository taskStageRepository,
+                                   ProcessingPlanner planner, AssetStorage assetStorage, TaskIdGenerator taskIdGenerator,
+                                   StageIdGenerator stageIdGenerator, String processorVersion,
+                                   TaskInputReferenceService inputReferenceService) {
         this.taskRepository = Objects.requireNonNull(taskRepository, "taskRepository");
         this.taskStageRepository = Objects.requireNonNull(taskStageRepository, "taskStageRepository");
         this.planner = Objects.requireNonNull(planner, "planner");
@@ -55,6 +63,7 @@ public final class TaskCreationCoordinator {
             throw new IllegalArgumentException("Processor version must not be blank.");
         }
         this.processorVersion = processorVersion;
+        this.inputReferenceService = inputReferenceService;
     }
 
     public TaskId create(
@@ -86,6 +95,7 @@ public final class TaskCreationCoordinator {
             parameterSnapshot, outputUri, plan, batch, List.of(candidate)
         );
         taskRepository.save(task);
+        if (inputReferenceService != null) inputReferenceService.register(task, "default");
         for (ProcessingStage stage : plan.stages()) {
             taskStageRepository.save(new TaskStage(
                 stageIdGenerator.nextId(), taskId, stage.stageKey(), StageExecutionStatus.PENDING, 1

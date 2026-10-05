@@ -3,13 +3,14 @@ package com.htht.multisource.application.usecase.model;
 import com.htht.multisource.domain.model.AccessSubject;
 import com.htht.multisource.domain.model.TaskArtifactRetentionStatus;
 import com.htht.multisource.domain.model.TaskLifecycleStatus;
+import com.htht.multisource.domain.model.TaskInputRetentionStatus;
 
 import java.time.Instant;
 import java.util.Objects;
 
-public record TaskHistoryQuery(AccessSubject subject, String productCode, TaskLifecycleStatus lifecycle,
+public record TaskHistoryQuery(AccessSubject subject, String productCode, String keyword, TaskLifecycleStatus lifecycle,
                                Instant completedFrom, Instant completedTo, TaskArtifactRetentionStatus retention,
-                               int page, int pageSize) {
+                               int page, int pageSize, TaskInputRetentionStatus inputRetention) {
     public TaskHistoryQuery {
         Objects.requireNonNull(subject, "subject");
         if (page < 1 || pageSize < 1 || pageSize > 100) {
@@ -18,5 +19,17 @@ public record TaskHistoryQuery(AccessSubject subject, String productCode, TaskLi
         if (completedFrom != null && completedTo != null && completedFrom.isAfter(completedTo)) {
             throw new IllegalArgumentException("History completion range is invalid.");
         }
+    }
+
+    public TaskHistoryQuery(AccessSubject subject, String productCode, TaskLifecycleStatus lifecycle,
+                            Instant completedFrom, Instant completedTo, TaskArtifactRetentionStatus retention,
+                            int page, int pageSize, TaskInputRetentionStatus inputRetention) {
+        this(subject, productCode, null, lifecycle, completedFrom, completedTo, retention, page, pageSize, inputRetention);
+    }
+
+    public TaskHistoryQuery(AccessSubject subject, String productCode, TaskLifecycleStatus lifecycle,
+                            Instant completedFrom, Instant completedTo, TaskArtifactRetentionStatus retention,
+                            int page, int pageSize) {
+        this(subject, productCode, null, lifecycle, completedFrom, completedTo, retention, page, pageSize, null);
     }
 }

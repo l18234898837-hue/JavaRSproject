@@ -10,7 +10,19 @@ htht:
   cacheLazy: false
 
 multisource:
+  storage:
+    # Keep runtime data outside the application checkout. Override this single
+    # root with MULTISOURCE_STORAGE_ROOT on each deployment host.
+    root: ${MULTISOURCE_STORAGE_ROOT:/srv/rsimageprocess-data}
+  storage-cleanup:
+    enabled: false
+    source-enabled: false
+    orphan-enabled: false
+    worker-enabled: false
+    dry-run: true
+    interval: 1h
   archive-upload:
+    root-directory: ${MULTISOURCE_ARCHIVE_ROOT:${multisource.storage.root}/source/incoming}
     max-size-bytes: 21474836480
     max-entry-count: 100000
     max-expanded-size-bytes: 42949672960
@@ -21,8 +33,8 @@ multisource:
     cleanup-interval-ms: 3600000
   worker:
     command: ${MULTISOURCE_WORKER_COMMAND}
-    work-root: ${MULTISOURCE_WORK_ROOT}
-    artifact-root: ${MULTISOURCE_ARTIFACT_ROOT}
+    work-root: ${MULTISOURCE_WORK_ROOT:${multisource.storage.root}/tasks/work}
+    artifact-root: ${MULTISOURCE_ARTIFACT_ROOT:${multisource.storage.root}/tasks/artifacts}
     timeout: ${MULTISOURCE_WORKER_TIMEOUT}
     stage-timeout: ${MULTISOURCE_WORKER_STAGE_TIMEOUT:24h}
     processor-version: ${MULTISOURCE_WORKER_PROCESSOR_VERSION}

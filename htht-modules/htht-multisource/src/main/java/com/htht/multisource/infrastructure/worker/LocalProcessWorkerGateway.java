@@ -147,6 +147,19 @@ public final class LocalProcessWorkerGateway implements ProductInspector, Proces
         }
     }
 
+    /**
+     * Exposes the gateway's reservation as a cleanup safety signal. A reserved
+     * execution can still be starting or have a worker process in flight.
+     */
+    public boolean isExecutionReserved(String executionId) {
+        if (executionId == null || executionId.isBlank()) {
+            return false;
+        }
+        synchronized (executionMonitor) {
+            return executionRequests.keySet().stream().anyMatch(id -> id.value().equals(executionId));
+        }
+    }
+
     private DispatchRequest requestForDispatch(ExecutionId executionId) {
         synchronized (executionMonitor) {
             ReservedRequest request = executionRequests.get(executionId);

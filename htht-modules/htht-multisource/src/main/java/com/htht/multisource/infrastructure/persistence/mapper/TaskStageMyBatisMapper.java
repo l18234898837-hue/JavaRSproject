@@ -26,6 +26,12 @@ public interface TaskStageMyBatisMapper extends BaseMapper<TaskStageEntity> {
             .orderByAsc(TaskStageEntity::getLeaseExpireAt));
     }
 
+    /** Exact persisted execution-id lookup used by worker-directory cleanup. */
+    default TaskStageEntity selectByExecutionId(String executionId) {
+        return selectOne(new LambdaQueryWrapper<TaskStageEntity>()
+            .eq(TaskStageEntity::getExecutionId, executionId));
+    }
+
     @InterceptorIgnore(dataPermission = "true")
     @Select("WITH candidate AS ("
         + " SELECT s.stage_id FROM rs_task_stage s"
