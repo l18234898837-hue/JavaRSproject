@@ -21,6 +21,18 @@ class WorkerFailurePresentationTest {
     }
 
     @Test
+    void mapsMemoryLimitToAFixedActionableMessage() {
+        WorkerFailurePresentation.SafeFailure failure = WorkerFailurePresentation.forClient(
+            WorkerFailurePresentation.MEMORY_LIMIT_EXCEEDED,
+            "numpy allocation failed at C:\\private\\scene.h5"
+        );
+
+        assertThat(failure.code()).isEqualTo(WorkerFailurePresentation.MEMORY_LIMIT_EXCEEDED);
+        assertThat(failure.message()).isEqualTo(WorkerFailurePresentation.MEMORY_LIMIT_MESSAGE);
+        assertThat(failure.message()).doesNotContain("C:\\private");
+    }
+
+    @Test
     void continuesToHideUnknownWorkerFailures() {
         WorkerFailurePresentation.SafeFailure failure = WorkerFailurePresentation.forClient(
             "UNKNOWN_FAILURE", "failed to read C:\\secret\\worker-output.tif"

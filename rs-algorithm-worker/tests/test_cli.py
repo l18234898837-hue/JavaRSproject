@@ -76,6 +76,34 @@ def test_cli_preserves_actionable_validation_message(tmp_path, monkeypatch):
     assert response["error"]["message"] == "L2A ROI bounds are invalid"
 
 
+def test_cli_returns_a_structured_memory_limit_error(tmp_path, monkeypatch):
+    request_file = tmp_path / "request.json"
+    manifest_file = tmp_path / "asset-manifest.json"
+    response_file = tmp_path / "response.json"
+    request_file.write_text(json.dumps({
+        "schemaVersion": "1.0",
+        "operation": "execute-stage",
+        "requestId": "req-memory-limit",
+        "payload": {},
+    }), encoding="utf-8")
+    manifest_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(cli, "validate_invocation", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "dispatch", lambda *_args, **_kwargs: (_ for _ in ()).throw(MemoryError()))
+
+    assert cli.main([
+        "--request", str(request_file),
+        "--asset-manifest", str(manifest_file),
+        "--response", str(response_file),
+    ]) == 2
+
+    response = json.loads(response_file.read_text(encoding="utf-8"))
+    assert response["error"] == {
+        "code": "MEMORY_LIMIT_EXCEEDED",
+        "message": "影像处理内存不足，请缩小 ROI、减少波段或使用分块处理配置",
+        "retryable": False,
+    }
+
+
 def test_cli_preserves_the_authoritative_gf6_output_limit_error_code(tmp_path, monkeypatch):
     request_file = tmp_path / "request.json"
     manifest_file = tmp_path / "asset-manifest.json"

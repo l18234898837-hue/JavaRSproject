@@ -214,16 +214,13 @@ def build_l2a_staged_plan(candidate: dict[str, Any], parameter_snapshot: dict[st
         _stage("VALIDATE_SOURCE", [], [main, metadata, browse],
                [_output("HY1C_INPUT_VALIDATION_JSON", "validation/source.json", "INTERMEDIATE")], snapshot),
         _stage("DECODE_SCALE_AND_NODATA", ["VALIDATE_SOURCE"], [main],
-               [_output("DECODED_CZI_RASTER", "decoded/czi.npz", "INTERMEDIATE")], snapshot),
-        _stage("APPLY_L2_FLAGS", ["DECODE_SCALE_AND_NODATA"], [
-            _input("decoded", "UPSTREAM_ARTIFACT", "DECODED_CZI_RASTER"), main,
-        ], [
-            _output("QUALITY_MASKED_CZI_RASTER", "quality/czi.npz", "INTERMEDIATE"),
-            _output("VALID_MASK", "quality/valid-mask.npz", "INTERMEDIATE"),
+               [_output("DECODED_CZI_SUMMARY_JSON", "decoded/summary.json", "INTERMEDIATE")], snapshot),
+        _stage("APPLY_L2_FLAGS", ["DECODE_SCALE_AND_NODATA"], [main], [
+            _output("QUALITY_MASK_SUMMARY_JSON", "quality/summary.json", "INTERMEDIATE"),
         ], snapshot),
-        _stage("GEOLOCATE_AND_GRID", ["APPLY_L2_FLAGS"], [
-            _input("quality", "UPSTREAM_ARTIFACT", "QUALITY_MASKED_CZI_RASTER"), main,
-        ], [_output("GEOLOCATED_CZI_RASTER", "grid/czi.npz", "INTERMEDIATE")], snapshot),
+        # 网格化阶段会从原始 HDF5 按窗口同时完成解码和质量筛选，因此不传递整景数组中间件。
+        _stage("GEOLOCATE_AND_GRID", ["APPLY_L2_FLAGS"], [main],
+               [_output("GEOLOCATED_CZI_RASTER", "grid/czi.npz", "INTERMEDIATE")], snapshot),
         _stage("CROP_CZI", ["GEOLOCATE_AND_GRID"], [
             _input("grid", "UPSTREAM_ARTIFACT", "GEOLOCATED_CZI_RASTER"),
         ], [_output("CROPPED_CZI", "crop/czi.npz", "INTERMEDIATE")], snapshot),

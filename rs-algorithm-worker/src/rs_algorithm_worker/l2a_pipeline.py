@@ -101,6 +101,61 @@ def _h5_input(inputs: Sequence[Any]) -> Path:
     return paths[0]
 
 
+def _decode_summary(path: Path, mapping: ReviewedL2AMapping) -> dict[str, Any]:
+    """按行块验证比例解码规则，避免为仅供阶段展示的结果创建整景数组。"""
+    summaries: list[dict[str, Any]] = []
+    with h5py.File(path, "r") as handle:
+        for band in mapping.bands:
+            dataset = handle[band.path]
+            if len(dataset.shape) != 2:
+                raise ValueError(f"L2A band {band.band_id} must be two-dimensional")
+            valid_count = 0
+            total_count = int(dataset.size)
+            for start in range(0, dataset.shape[0], WINDOW_ROWS):
+                raw = np.asarray(dataset[start:min(start + WINDOW_ROWS, dataset.shape[0]), :], dtype=np.float32)
+                decoded = raw * float(dataset.attrs[band.scale_attribute]) + float(dataset.attrs[band.offset_attribute])
+                valid = np.isfinite(decoded)
+                valid &= decoded >= float(dataset.attrs[band.valid_min_attribute])
+                valid &= decoded <= float(dataset.attrs[band.valid_max_attribute])
+                fill = float(dataset.attrs[band.fill_value_attribute])
+                if np.isfinite(fill):
+                    valid &= raw != fill
+                valid_count += int(valid.sum())
+            summaries.append({
+                "band": band.band_id,
+                "totalPixelCount": total_count,
+                "validPixelCount": valid_count,
+                "invalidPixelCount": total_count - valid_count,
+            })
+    return {
+        "version": "hy1c-czi-l2a-decode-summary-v1",
+        "processing": "按窗口执行比例解码和有效范围校验；实际像元值由后续网格化阶段再次按窗口读取。",
+        "bands": summaries,
+    }
+
+
+def _quality_flag_summary(path: Path, mapping: ReviewedL2AMapping) -> dict[str, Any]:
+    """按行块汇总 L2 质量位，避免为阶段展示保存整景有效掩膜。"""
+    bad_bits = sum(1 << bit for name, bit in mapping.flag_bits if name in mapping.default_bad_flag_names)
+    with h5py.File(path, "r") as handle:
+        flags = handle[mapping.quality_flags_path]
+        if len(flags.shape) != 2:
+            raise ValueError("L2A quality flags must be two-dimensional")
+        total_count = int(flags.size)
+        valid_count = 0
+        for start in range(0, flags.shape[0], WINDOW_ROWS):
+            values = np.asarray(flags[start:min(start + WINDOW_ROWS, flags.shape[0]), :])
+            valid_count += int(((values & np.uint32(bad_bits)) == 0).sum())
+    return {
+        "version": "hy1c-czi-l2a-quality-summary-v1",
+        "processing": "按窗口汇总默认坏质量位；实际像元筛选由后续网格化阶段再次按窗口执行。",
+        "badFlagBits": int(bad_bits),
+        "totalPixelCount": total_count,
+        "validPixelCount": valid_count,
+        "invalidPixelCount": total_count - valid_count,
+    }
+
+
 def execute_l2a_product(
     manifest: dict[str, Any], parameter_snapshot: dict[str, Any], output_uri: str
 ) -> list[dict[str, Any]]:
@@ -189,23 +244,19 @@ def execute_l2a_staged_stage(
         return {"workerId": "worker-local", "status": "SUCCEEDED",
                 "artifacts": [_file_artifact(output_uri, output_dir, "HY1C_INPUT_VALIDATION_JSON", path)]}
     if stage_key == "DECODE_SCALE_AND_NODATA":
-        raster = _decode(_h5_input(list(inputs.values())), load_reviewed_mapping())
-        path = output_dir / "decoded" / "czi.npz"
-        _write_raster_intermediate(path, raster, None, stage_key)
-        return {"workerId": "worker-local", "status": "SUCCEEDED",
-                "artifacts": [_file_artifact(output_uri, output_dir, "DECODED_CZI_RASTER", path)]}
+        summary = _decode_summary(_h5_input(list(inputs.values())), load_reviewed_mapping())
+        artifacts = _write_stage_summaries(
+            payload, output_uri, output_dir, summary,
+            (("DECODED_CZI_SUMMARY_JSON", "decoded/summary.json"),),
+        )
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": artifacts}
     if stage_key == "APPLY_L2_FLAGS":
-        decoded = _read_raster_intermediate(_required_input(inputs, "decoded"), "DECODED_CZI_RASTER")
-        result = _apply_flags(decoded[0], _h5_input([_required_input(inputs, "main")]), load_reviewed_mapping())
-        quality_path = output_dir / "quality" / "czi.npz"
-        mask_path = output_dir / "quality" / "valid-mask.npz"
-        _write_raster_intermediate(quality_path, result.raster, result.valid_mask, stage_key)
-        mask_path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(mask_path, values=np.asarray(result.valid_mask, dtype=np.uint8), producerStage=stage_key)
-        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": [
-            _file_artifact(output_uri, output_dir, "QUALITY_MASKED_CZI_RASTER", quality_path),
-            _file_artifact(output_uri, output_dir, "VALID_MASK", mask_path),
-        ]}
+        summary = _quality_flag_summary(_h5_input(list(inputs.values())), load_reviewed_mapping())
+        artifacts = _write_stage_summaries(
+            payload, output_uri, output_dir, summary,
+            (("QUALITY_MASK_SUMMARY_JSON", "quality/summary.json"),),
+        )
+        return {"workerId": "worker-local", "status": "SUCCEEDED", "artifacts": artifacts}
     if stage_key == "GEOLOCATE_AND_GRID":
         main = _required_input(inputs, "main")
         parameters = _parameters_from_main_input(payload, main)
@@ -303,6 +354,38 @@ def _parameter_snapshot_value(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(value, str):
         return json.loads(value)
     raise ValueError("HY-1C parameter snapshot is invalid")
+
+
+def _write_stage_summaries(
+    payload: dict[str, Any], output_uri: str, output_dir: Path, summary: dict[str, Any],
+    defaults: tuple[tuple[str, str], ...],
+) -> list[dict[str, Any]]:
+    """兼容已入库的旧计划输出合同，同时让新计划只保留轻量摘要文件。"""
+    declared = payload.get("outputs")
+    specifications = defaults
+    if isinstance(declared, list) and declared:
+        parsed: list[tuple[str, str]] = []
+        for item in declared:
+            if not isinstance(item, dict):
+                raise ValueError("L2A stage output declaration is invalid")
+            artifact_type = item.get("artifactType")
+            relative_path = item.get("relativePath")
+            if not isinstance(artifact_type, str) or not isinstance(relative_path, str):
+                raise ValueError("L2A stage output declaration is invalid")
+            parsed.append((artifact_type, relative_path))
+        specifications = tuple(parsed)
+    artifacts: list[dict[str, Any]] = []
+    for artifact_type, relative_path in specifications:
+        relative = Path(relative_path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError("L2A stage output path is invalid")
+        path = (output_dir / relative).resolve()
+        if output_dir not in path.parents:
+            raise ValueError("L2A stage output path is invalid")
+        payload_summary = {**summary, "artifactType": artifact_type}
+        _write_json(path, payload_summary)
+        artifacts.append(_file_artifact(output_uri, output_dir, artifact_type, path))
+    return artifacts
 
 
 def _write_raster_intermediate(path: Path, raster: RasterData, valid_mask: np.ndarray | None, producer_stage: str) -> None:

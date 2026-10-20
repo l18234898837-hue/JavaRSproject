@@ -407,15 +407,9 @@ def test_registry_executes_every_l2a_plan_v3_stage(synthetic_l2a_manifest, tmp_p
         }, {"inputs": inputs, "output": {"path": str(output_dir)}})
 
     run("VALIDATE_SOURCE", raw_inputs)
-    run("DECODE_SCALE_AND_NODATA", [raw_inputs[0]])
-    run("APPLY_L2_FLAGS", [
-        {"role": "decoded", "path": str(output_dir / "decoded" / "czi.npz")},
-        raw_inputs[0],
-    ])
-    run("GEOLOCATE_AND_GRID", [
-        {"role": "quality", "path": str(output_dir / "quality" / "czi.npz")},
-        raw_inputs[0],
-    ])
+    decoded = run("DECODE_SCALE_AND_NODATA", [raw_inputs[0]])
+    quality = run("APPLY_L2_FLAGS", [raw_inputs[0]])
+    run("GEOLOCATE_AND_GRID", [raw_inputs[0]])
     run("CROP_CZI", [{"role": "grid", "path": str(output_dir / "grid" / "czi.npz")}])
     standard = run("WRITE_STANDARD_COG", [
         {"role": "cropped", "path": str(output_dir / "crop" / "czi.npz")}
@@ -434,6 +428,10 @@ def test_registry_executes_every_l2a_plan_v3_stage(synthetic_l2a_manifest, tmp_p
         "STANDARD_COG",
         "STANDARD_METADATA_JSON",
     }
+    assert {item["type"] for item in decoded["artifacts"]} == {"DECODED_CZI_SUMMARY_JSON"}
+    assert {item["type"] for item in quality["artifacts"]} == {"QUALITY_MASK_SUMMARY_JSON"}
+    assert not (output_dir / "decoded" / "czi.npz").exists()
+    assert not (output_dir / "quality" / "czi.npz").exists()
     assert {item["type"] for item in features["artifacts"]} == {
         "FEATURE_COG",
         "FEATURE_METADATA_JSON",

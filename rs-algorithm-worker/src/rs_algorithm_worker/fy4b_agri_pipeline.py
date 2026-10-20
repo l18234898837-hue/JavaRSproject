@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import shutil
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
@@ -16,16 +17,16 @@ from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.shutil import copy as rio_copy
 from rasterio.transform import array_bounds
+from rasterio.vrt import WarpedVRT
 from rasterio.warp import calculate_default_transform, reproject, transform_bounds
 from rasterio.windows import Window, from_bounds as window_from_bounds, transform as window_transform
 
-from .algorithms.features import FeatureParameters, extract_features
+from .algorithms.features import feature_tile
 from .algorithms.fusion import FusionParameters, fuse_bands
 from .algorithms.saliency import SaliencyParameters, detect_saliency
 from .fy4b_agri_navigation import apparent_reflectance, build_nominal_grid
 from .models import BandMetadata, BandSet, RasterData
-from .operators.align import align_to_reference
-from .operators.cog import write_cog
+from .operators.cog import write_cog, write_cog_blocks
 from .product_adapters.fy4b_agri import ROLE_ORDER
 
 
@@ -558,66 +559,65 @@ def _write_fy4b_features(standard: dict[str, Path], directory: Path, parameters:
     source = standard.get("FY4B_VIS_NIR_1000M_COG")
     if source is None:
         raise ValueError("FY-4B features requires standard COG")
-    raster = _load_raster(source)
-    metrics = tuple(metric for metric in parameters["features"]["metrics"] if metric in {"statistics", "gradient", "local_variance"})
-    feature_set = extract_features(raster, FeatureParameters(metrics or ("statistics",), parameters["features"].get("windowSize", 3)))
-    names, values = list(feature_set.rasters), [item.values for item in feature_set.rasters.values()]
-    red = None
-    red_band = None
-    red_feature_metrics = tuple(metric for metric in parameters["features"]["metrics"] if metric in {"gradient", "local_variance"})
-    if red_feature_metrics or "toa_nir_red_nd" in parameters["features"]["metrics"]:
-        red = _load_raster(_required_artifact(standard, "FY4B_RED_500M_COG", "FY-4B features requires 500M red source"))
-        red_band = _named_band(red, "C02_")
-        if red_band is None:
-            raise ValueError("FY-4B features requires C02")
-    if red_feature_metrics and red is not None and red_band is not None:
-        red_features = extract_features(
-            RasterData(red_band, red.crs, red.transform, red.nodata, (BandMetadata("C02_REFLECTANCE_500M"),)),
-            FeatureParameters(red_feature_metrics, parameters["features"].get("windowSize", 3)),
-        )
-        for name, red_feature in red_features.rasters.items():
-            aligned = align_to_reference(red_feature, raster, resampling=Resampling.bilinear)
-            names.append(name)
-            values.append(aligned.values)
-    if "toa_nir_red_nd" in parameters["features"]["metrics"]:
-        nir_band = _named_band(raster, "C03_")
-        if red_band is None or nir_band is None:
-            raise ValueError("FY-4B features requires C02 and C03")
-        red_aligned = align_to_reference(RasterData(red_band, red.crs, red.transform, red.nodata, (BandMetadata("C02"),)), raster,
-                                         resampling=Resampling.bilinear).values
-        denominator = nir_band + red_aligned
-        values.append(np.where(np.isfinite(denominator) & (np.abs(denominator) > 1e-6), (nir_band - red_aligned) / denominator, np.nan).astype(np.float32))
-        names.append("toa_nir_red_nd")
-    if "btd_c13_c14" in parameters["features"]["metrics"]:
-        thermal = _load_raster(_required_artifact(
-            standard, "FY4B_MULTISPECTRAL_4000M_COG", "FY-4B features requires 4000M thermal source",
-        ))
-        c13, c14 = _named_band(thermal, "C13_"), _named_band(thermal, "C14_")
-        if c13 is None or c14 is None:
-            raise ValueError("FY-4B features requires C13 and C14")
-        c13_aligned = align_to_reference(
-            RasterData(c13, thermal.crs, thermal.transform, thermal.nodata, (BandMetadata("C13"),)), raster,
-            resampling=Resampling.bilinear,
-        ).values
-        c14_aligned = align_to_reference(
-            RasterData(c14, thermal.crs, thermal.transform, thermal.nodata, (BandMetadata("C14"),)), raster,
-            resampling=Resampling.bilinear,
-        ).values
-        values.append(np.where(np.isfinite(c13_aligned) & np.isfinite(c14_aligned), c13_aligned - c14_aligned, np.nan).astype(np.float32))
-        names.append("btd_c13_c14")
-    if not values:
-        source_values = raster.values if raster.values.ndim == 3 else raster.values[np.newaxis, ...]
-        values = [source_values[index] for index in range(source_values.shape[0])]
-        names = [f"statistics:{metadata.name}" for metadata in raster.band_metadata]
+    requested_metrics = tuple(parameters["features"]["metrics"])
+    base_metrics = tuple(metric for metric in requested_metrics if metric in {"statistics", "gradient", "local_variance"})
+    window_size = parameters["features"].get("windowSize", 3)
+    if "local_variance" in base_metrics and (window_size < 3 or window_size % 2 == 0):
+        raise ValueError("local variance window size must be an odd integer of at least three")
     feature_dir = directory / "features"
     feature_dir.mkdir(parents=True, exist_ok=True)
     artifacts: list[tuple[str, Path]] = []
     path = feature_dir / "fy4b-features.tif"
-    _write(np.stack(values), path, raster.crs, raster.transform, tuple(names))
+
+    # 特征输出按窗口读取和写入；整景 FY-4B 在此处会产生多份同尺寸临时数组，不能使用 source.read()。
+    with rasterio.open(source) as reference:
+        if reference.crs is None:
+            raise ValueError("FY-4B feature source requires a CRS")
+        descriptions = tuple(name or f"band-{index}" for index, name in enumerate(reference.descriptions, 1))
+        # 只有派生跨波段指标时，沿用旧实现的行为：仍输出主影像统计摘要。
+        statistics, fills = _stream_raster_statistics(
+            reference, include_band_statistics="statistics" in base_metrics or not base_metrics,
+        )
+        local_metrics = tuple(metric for metric in ("gradient", "local_variance") if metric in base_metrics)
+        red_path = (Path(_required_artifact(standard, "FY4B_RED_500M_COG", "FY-4B features requires 500M red source"))
+                    if local_metrics or "toa_nir_red_nd" in requested_metrics else None)
+        thermal_path = (Path(_required_artifact(standard, "FY4B_MULTISPECTRAL_4000M_COG", "FY-4B features requires 4000M thermal source"))
+                        if "btd_c13_c14" in requested_metrics else None)
+        names = [f"{metric}:{name}" for name in descriptions for metric in local_metrics]
+        if red_path is not None and local_metrics:
+            names.extend(f"{metric}:C02_REFLECTANCE_500M" for metric in local_metrics)
+        if "toa_nir_red_nd" in requested_metrics:
+            names.append("toa_nir_red_nd")
+        if "btd_c13_c14" in requested_metrics:
+            names.append("btd_c13_c14")
+        if not names:
+            names = [f"statistics:{name}" for name in descriptions]
+
+        with _feature_sources(reference, red_path, thermal_path) as sources:
+            red_index = _dataset_band_index(sources["red"], "C02_") if "red" in sources else None
+            nir_index = _description_index(descriptions, "C03_") if "toa_nir_red_nd" in requested_metrics else None
+            thermal_c13 = _dataset_band_index(sources["thermal"], "C13_") if "thermal" in sources else None
+            thermal_c14 = _dataset_band_index(sources["thermal"], "C14_") if "thermal" in sources else None
+            if red_path is not None and red_index is None:
+                raise ValueError("FY-4B features requires C02")
+            if "toa_nir_red_nd" in requested_metrics and nir_index is None:
+                raise ValueError("FY-4B features requires C03")
+            if "btd_c13_c14" in requested_metrics and (thermal_c13 is None or thermal_c14 is None):
+                raise ValueError("FY-4B features requires C13 and C14")
+            red_fill = _stream_single_band_mean(sources["red"], red_index) if red_index is not None and "gradient" in local_metrics else None
+            blocks = _fy4b_feature_blocks(
+                reference, descriptions, fills, local_metrics, window_size, sources.get("red"), red_index,
+                red_fill, nir_index, sources.get("thermal"), thermal_c13, thermal_c14, requested_metrics,
+            )
+            write_cog_blocks(
+                output_path=path, width=reference.width, height=reference.height, count=len(names), dtype="float32",
+                crs=reference.crs, transform=reference.transform, nodata=np.nan,
+                band_metadata=tuple(BandMetadata(name) for name in names), blocks=blocks,
+            )
     artifacts.append(("FY4B_FEATURE_COG", path))
     summary = feature_dir / "summary.json"
     summary.write_text(json.dumps({
-        "classification": "NONE", **feature_set.statistics,
+        "classification": "NONE", **statistics,
         "explainability": {
             "version": "fy4b-feature-explainability-v1",
             "algorithm": "FY-4B AGRI 特征提取",
@@ -636,6 +636,157 @@ def _write_fy4b_features(standard: dict[str, Path], directory: Path, parameters:
     }, allow_nan=False, sort_keys=True), encoding="utf-8")
     artifacts.append(("FY4B_FEATURE_SUMMARY_JSON", summary))
     return artifacts
+
+
+@contextmanager
+def _feature_sources(reference, red_path: Path | None, thermal_path: Path | None):
+    """将可选辅助 COG 映射到主特征网格，保持每次只读取一个窗口。"""
+    with ExitStack() as stack:
+        sources: dict[str, Any] = {}
+        for name, path in (("red", red_path), ("thermal", thermal_path)):
+            if path is None:
+                continue
+            source = stack.enter_context(rasterio.open(path))
+            sources[name] = stack.enter_context(WarpedVRT(
+                source,
+                crs=reference.crs,
+                transform=reference.transform,
+                width=reference.width,
+                height=reference.height,
+                resampling=Resampling.bilinear,
+                nodata=np.nan,
+            ))
+        yield sources
+
+
+def _stream_raster_statistics(source, *, include_band_statistics: bool) -> tuple[dict[str, object], tuple[float | None, ...]]:
+    """以 COG 块为单位汇总统计量，并提供梯度无效值填充值。"""
+    count = source.count
+    counts = np.zeros(count, dtype=np.int64)
+    minima = np.full(count, np.inf, dtype=np.float64)
+    maxima = np.full(count, -np.inf, dtype=np.float64)
+    sums = np.zeros(count, dtype=np.float64)
+    squares = np.zeros(count, dtype=np.float64)
+    for _index, window in source.block_windows(1):
+        values = source.read(window=window, out_dtype="float32")
+        for band in range(count):
+            valid_values = values[band][np.isfinite(values[band])]
+            if valid_values.size == 0:
+                continue
+            counts[band] += valid_values.size
+            minima[band] = min(minima[band], float(valid_values.min()))
+            maxima[band] = max(maxima[band], float(valid_values.max()))
+            sums[band] += float(valid_values.sum(dtype=np.float64))
+            squares[band] += float(np.square(valid_values, dtype=np.float64).sum())
+    total = count * source.width * source.height
+    result: dict[str, object] = {"validPixelRatio": float(counts.sum() / total) if total else 0.0}
+    descriptions = tuple(name or f"band-{index}" for index, name in enumerate(source.descriptions, 1))
+    if include_band_statistics:
+        for index, name in enumerate(descriptions):
+            if counts[index] == 0:
+                result[name] = {"min": None, "max": None, "mean": None, "std": None}
+                continue
+            mean = sums[index] / counts[index]
+            variance = max(squares[index] / counts[index] - mean * mean, 0.0)
+            result[name] = {
+                "min": float(minima[index]), "max": float(maxima[index]),
+                "mean": float(mean), "std": float(math.sqrt(variance)),
+            }
+    fills = tuple(float(np.float32(sums[index] / counts[index])) if counts[index] else None for index in range(count))
+    return result, fills
+
+
+def _stream_single_band_mean(source, band_index: int) -> float | None:
+    """计算单波段全局均值，供分块梯度处理填补无效像元。"""
+    count = 0
+    total = 0.0
+    for _index, window in source.block_windows(band_index):
+        values = source.read(band_index, window=window, out_dtype="float32")
+        valid_values = values[np.isfinite(values)]
+        count += valid_values.size
+        total += float(valid_values.sum(dtype=np.float64))
+    return float(np.float32(total / count)) if count else None
+
+
+def _fy4b_feature_blocks(
+    reference,
+    descriptions: tuple[str, ...],
+    fills: tuple[float | None, ...],
+    local_metrics: tuple[str, ...],
+    window_size: int,
+    red_source,
+    red_index: int | None,
+    red_fill: float | None,
+    nir_index: int | None,
+    thermal_source,
+    thermal_c13: int | None,
+    thermal_c14: int | None,
+    requested_metrics: tuple[str, ...],
+):
+    """逐瓦片计算 FY-4B 特征；halo 保证局部算子在块边界处与整景计算一致。"""
+    halo = max(1 if "gradient" in local_metrics else 0,
+               window_size // 2 if "local_variance" in local_metrics else 0)
+    for window in _raster_windows(reference.width, reference.height, block_size=512):
+        expanded, core = _window_with_halo(window, reference.width, reference.height, halo)
+        primary = reference.read(window=expanded, out_dtype="float32")
+        result: list[np.ndarray] = []
+        if local_metrics:
+            for index in range(reference.count):
+                features = feature_tile(primary[index], local_metrics, window_size, core, gradient_fill=fills[index])
+                result.extend(features[metric] for metric in local_metrics)
+        red_values = None
+        if red_source is not None and red_index is not None:
+            red_values = red_source.read(red_index, window=expanded, out_dtype="float32")
+            if local_metrics:
+                red_features = feature_tile(red_values, local_metrics, window_size, core, gradient_fill=red_fill)
+                result.extend(red_features[metric] for metric in local_metrics)
+        core_values = primary[:, core[0]:core[1], core[2]:core[3]]
+        if "toa_nir_red_nd" in requested_metrics:
+            if red_values is None or nir_index is None:
+                raise ValueError("FY-4B features requires C02 and C03")
+            red_core = red_values[core[0]:core[1], core[2]:core[3]]
+            nir = core_values[nir_index - 1]
+            denominator = nir + red_core
+            result.append(np.where(
+                np.isfinite(denominator) & (np.abs(denominator) > 1e-6),
+                (nir - red_core) / denominator,
+                np.nan,
+            ).astype(np.float32))
+        if "btd_c13_c14" in requested_metrics:
+            if thermal_source is None or thermal_c13 is None or thermal_c14 is None:
+                raise ValueError("FY-4B features requires C13 and C14")
+            c13 = thermal_source.read(thermal_c13, window=window, out_dtype="float32")
+            c14 = thermal_source.read(thermal_c14, window=window, out_dtype="float32")
+            result.append(np.where(np.isfinite(c13) & np.isfinite(c14), c13 - c14, np.nan).astype(np.float32))
+        if not result:
+            result = [core_values[index] for index in range(reference.count)]
+        yield window, np.stack(result)
+
+
+def _window_with_halo(window: Window, width: int, height: int, halo: int) -> tuple[Window, tuple[int, int, int, int]]:
+    row = int(window.row_off)
+    column = int(window.col_off)
+    row_end = row + int(window.height)
+    column_end = column + int(window.width)
+    source_row = max(0, row - halo)
+    source_column = max(0, column - halo)
+    source_row_end = min(height, row_end + halo)
+    source_column_end = min(width, column_end + halo)
+    return Window(source_column, source_row, source_column_end - source_column, source_row_end - source_row), (
+        row - source_row,
+        row_end - source_row,
+        column - source_column,
+        column_end - source_column,
+    )
+
+
+def _description_index(descriptions: tuple[str, ...], prefix: str) -> int | None:
+    return next((index for index, name in enumerate(descriptions, 1) if name.startswith(prefix)), None)
+
+
+def _dataset_band_index(source, prefix: str) -> int | None:
+    descriptions = tuple(name or f"band-{index}" for index, name in enumerate(source.descriptions, 1))
+    return _description_index(descriptions, prefix)
 
 
 def _write_fy4b_fusion(standard: dict[str, Path], directory: Path, parameters: dict[str, Any]) -> list[tuple[str, Path]]:

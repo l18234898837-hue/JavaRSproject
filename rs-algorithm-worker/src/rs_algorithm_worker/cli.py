@@ -61,6 +61,21 @@ def main(argv: list[str] | None = None) -> int:
         }
         _write_atomically(response_path, response)
         return 2
+    except MemoryError:
+        # NumPy 的 ArrayMemoryError 是 MemoryError 子类；必须返回协议错误，
+        # 否则后端只能看到进程退出，无法向用户说明真实限制。
+        response = {
+            "schemaVersion": "1.0",
+            "operation": _safe_operation(locals().get("request")),
+            "requestId": _safe_request_id(locals().get("request")),
+            "error": {
+                "code": "MEMORY_LIMIT_EXCEEDED",
+                "message": "影像处理内存不足，请缩小 ROI、减少波段或使用分块处理配置",
+                "retryable": False,
+            },
+        }
+        _write_atomically(response_path, response)
+        return 2
     except ValueError as error:
         response = {
             "schemaVersion": "1.0",
