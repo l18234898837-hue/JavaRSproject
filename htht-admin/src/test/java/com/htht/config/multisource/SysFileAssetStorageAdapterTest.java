@@ -17,6 +17,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -52,6 +53,21 @@ public class SysFileAssetStorageAdapterTest {
         assertThat(adapter.resolve(grant.grantReference(), new StorageUri("rs://sys-file/42"))).isEqualTo(file.toRealPath());
         assertThat(adapter.originalFileName(grant.grantReference(), new StorageUri("rs://sys-file/42"), file.toRealPath()))
             .isEqualTo("FY4B-_AGRI--_N_DISK_1050E_L1-_GEO-_MULT_NOM_20260701000000_20260701001459_4000M_V0001.HDF");
+    }
+
+    @Test
+    void recalculatesChecksumWhenTheManagedFileChanges() throws Exception {
+        Path file = Files.writeString(Files.createDirectories(uploadRoot.resolve("tiff")).resolve("input.tiff"), "first");
+        ISysFileService files = mock(ISysFileService.class);
+        when(files.getById(42L)).thenReturn(sysFile(42L, file));
+        SysFileAssetStorageAdapter adapter = new SysFileAssetStorageAdapter(files, uploadRoot);
+
+        String first = adapter.toInputAsset("MAIN", 0, new AssetReference("SYS_FILE", "42"), true).checksum();
+        Files.writeString(file, "second");
+        Files.setLastModifiedTime(file, FileTime.fromMillis(System.currentTimeMillis() + 1_000));
+        String second = adapter.toInputAsset("MAIN", 0, new AssetReference("SYS_FILE", "42"), true).checksum();
+
+        assertThat(second).isNotEqualTo(first);
     }
 
     @Test

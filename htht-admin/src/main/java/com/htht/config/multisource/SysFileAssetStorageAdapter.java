@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -34,9 +35,13 @@ import java.util.UUID;
  * can validate existence and path safety but cannot establish per-file ownership.
  */
 public final class SysFileAssetStorageAdapter implements AssetStorage, LocalWorkerAssetResolver {
+    /** 限制进程内校验缓存，避免大量历史文件导致长期运行的服务持续占用内存。 */
+    private static final int MAX_CHECKSUM_CACHE_ENTRIES = 2_048;
+
     private final ISysFileService sysFileService;
     private final Path uploadRoot;
     private final Map<String, GrantScope> grants = new ConcurrentHashMap<>();
+    private final Map<Path, CachedChecksum> checksumCache = new ConcurrentHashMap<>();
 
     public SysFileAssetStorageAdapter(ISysFileService sysFileService, Path uploadRoot) {
         this.sysFileService = Objects.requireNonNull(sysFileService, "sysFileService");
@@ -157,16 +162,42 @@ public final class SysFileAssetStorageAdapter implements AssetStorage, LocalWork
         }
     }
 
-    private static String checksum(Path path) {
+    /**
+     * 复用未发生变化的文件校验值，避免预检和任务创建重复顺序读取数 GB 的遥感影像。
+     * 文件大小或最后修改时间改变时会立即重新计算。
+     */
+    private String checksum(Path path) {
+        FileSnapshot before = fileSnapshot(path);
+        CachedChecksum cached = checksumCache.get(path);
+        if (cached != null && cached.snapshot().equals(before)) {
+            return cached.value();
+        }
         try (InputStream stream = Files.newInputStream(path)) {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] buffer = new byte[8192];
+            byte[] buffer = new byte[1024 * 1024];
             for (int read; (read = stream.read(buffer)) >= 0;) {
                 digest.update(buffer, 0, read);
             }
-            return "sha256:" + HexFormat.of().formatHex(digest.digest());
+            String value = "sha256:" + HexFormat.of().formatHex(digest.digest());
+            FileSnapshot after = fileSnapshot(path);
+            if (before.equals(after)) {
+                if (checksumCache.size() >= MAX_CHECKSUM_CACHE_ENTRIES) {
+                    checksumCache.clear();
+                }
+                checksumCache.put(path, new CachedChecksum(after, value));
+            }
+            return value;
         } catch (IOException | NoSuchAlgorithmException exception) {
             throw new IllegalArgumentException("Sys file checksum cannot be calculated.", exception);
+        }
+    }
+
+    private static FileSnapshot fileSnapshot(Path path) {
+        try {
+            BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class);
+            return new FileSnapshot(attributes.size(), attributes.lastModifiedTime().toMillis());
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Sys file metadata cannot be read.", exception);
         }
     }
 
@@ -175,5 +206,11 @@ public final class SysFileAssetStorageAdapter implements AssetStorage, LocalWork
     }
 
     private record GrantScope(Instant expiresAt, Set<String> storageUris) {
+    }
+
+    private record FileSnapshot(long size, long lastModifiedMillis) {
+    }
+
+    private record CachedChecksum(FileSnapshot snapshot, String value) {
     }
 }

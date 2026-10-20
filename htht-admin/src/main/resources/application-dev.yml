@@ -14,6 +14,19 @@ spring.boot.admin.client:
 # 生产环境仍使用 application.yml 中的更高安全阈值；如需更大 ZIP，
 # 通过环境配置覆盖以下两个参数。
 multisource:
+  # 开发环境直接使用仓库内的算法 Worker 虚拟环境；生产环境仍通过环境变量覆盖。
+  storage:
+    # 多源数据运行目录与项目源码分离，避免开发盘被原始数据和处理产物占满。
+    root: 'E:\RSImageProcessData\multisource'
+  worker:
+    command:
+      - D:/work_space/RSImageProcess/JavaRSproject/rs-algorithm-worker/.venv/Scripts/rs-worker.exe
+    # 显式指定 Worker 的工作与产物目录，避免与源码目录或上传源文件混用。
+    work-root: 'E:\RSImageProcessData\multisource\tasks\work'
+    artifact-root: 'E:\RSImageProcessData\multisource\tasks\artifacts'
+    timeout: 10m
+    stage-timeout: 2h
+    processor-version: rs-algorithm-worker-0.1.0
   archive-upload:
     max-expanded-size-bytes: ${MULTISOURCE_ARCHIVE_MAX_EXPANDED_SIZE_BYTES:17179869184}
     safety-reserve-bytes: ${MULTISOURCE_ARCHIVE_SAFETY_RESERVE_BYTES:4294967296}
